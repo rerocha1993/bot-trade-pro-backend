@@ -1,0 +1,267 @@
+2025-05-27 00:37:55,652 INFO:Iniciando detecção para BTCUSDT no timeframe 4h
+DEBUG: Entrou em analisar
+DEBUG: res {'POC': np.float64(84500.0), 'VAL': np.float64(75000.0), 'VAH': np.float64(111700.0), 'freq':           bin  freq
+0     75000.0     1
+1     75050.0     1
+2     76200.0     1
+3     76250.0     1
+4     76650.0     1
+..        ...   ...
+292  111050.0     1
+293  111100.0     1
+294  111250.0     1
+295  111600.0     1
+296  111700.0     1
+
+[297 rows x 2 columns]}
+DEBUG: freq           bin  freq
+0     75000.0     1
+1     75050.0     1
+2     76200.0     1
+3     76250.0     1
+4     76650.0     1
+..        ...   ...
+292  111050.0     1
+293  111100.0     1
+294  111250.0     1
+295  111600.0     1
+296  111700.0     1
+
+[297 rows x 2 columns]
+DEBUG: single_prints [75000.0, 75050.0, 76200.0, 76250.0, 76650.0, 76800.0, 77200.0, 78050.0, 78350.0, 78400.0, 78450.0, 78550.0, 78700.0, 79000.0, 79100.0, 79600.0, 79850.0, 79950.0, 80000.0, 80150.0, 80350.0, 80650.0, 80800.0, 80950.0, 81050.0, 81150.0, 81200.0, 81450.0, 81600.0, 81650.0, 81750.0, 81800.0, 82050.0, 82150.0, 82200.0, 82350.0, 82700.0, 82750.0, 83200.0, 83250.0, 83550.0, 83700.0, 83750.0, 84550.0, 84800.0, 85000.0, 85050.0, 85250.0, 85400.0, 85450.0, 85500.0, 85700.0, 85750.0, 85900.0, 85950.0, 86000.0, 86050.0, 86350.0, 86400.0, 86450.0, 86700.0, 86950.0, 87000.0, 87100.0, 87250.0, 87400.0, 87550.0, 87700.0, 87750.0, 87900.0, 87950.0, 88050.0, 88150.0, 88250.0, 88450.0, 88550.0, 88900.0, 89700.0, 89750.0, 89850.0, 90550.0, 90750.0, 90850.0, 91250.0, 91300.0, 91350.0, 91550.0, 92150.0, 92550.0, 92600.0, 93150.0, 93250.0, 93500.0, 93600.0, 93800.0, 93900.0, 94250.0, 94400.0, 94600.0, 94750.0, 94850.0, 94900.0, 95050.0, 95100.0, 95200.0, 95350.0, 95400.0, 95500.0, 95650.0, 95850.0, 96350.0, 96400.0, 96750.0, 96900.0, 96950.0, 97000.0, 97050.0, 97250.0, 99100.0, 99200.0, 99350.0, 100700.0, 101200.0, 101650.0, 101700.0, 101800.0, 102300.0, 102400.0, 102450.0, 102600.0, 102650.0, 102700.0, 102850.0, 103050.0, 103250.0, 103500.0, 103750.0, 103800.0, 103850.0, 103900.0, 104100.0, 104600.0, 104700.0, 104950.0, 105150.0, 105250.0, 105500.0, 105700.0, 106450.0, 106750.0, 106800.0, 106900.0, 106950.0, 107200.0, 107250.0, 107500.0, 107600.0, 107650.0, 107700.0, 108050.0, 108250.0, 108550.0, 108650.0, 108950.0, 109000.0, 109050.0, 109100.0, 109350.0, 109550.0, 109600.0, 109700.0, 109950.0, 110050.0, 110650.0, 110900.0, 110950.0, 111050.0, 111100.0, 111250.0, 111600.0, 111700.0]
+DEBUG: shape_profile freq           bin  freq
+0     75000.0     1
+1     75050.0     1
+2     76200.0     1
+3     76250.0     1
+4     76650.0     1
+..        ...   ...
+292  111050.0     1
+293  111100.0     1
+294  111250.0     1
+295  111600.0     1
+296  111700.0     1
+
+[297 rows x 2 columns]
+DEBUG: counts [1 1 1 1 1 1 1 2 1 1 1 1 1 1 1 1 2 2 1 1 1 1 1 1 1 1 1 1 1 1 1 2 1 1 1 1 2
+ 3 1 2 1 1 3 2 1 2 2 6 2 2 2 1 1 3 2 3 3 3 4 3 2 1 1 2 2 4 5 3 1 5 2 1 1 5
+ 3 5 4 3 5 3 3 4 5 2 3 3 3 7 1 5 2 2 3 1 4 2 3 1 1 4 4 2 1 2 1 1 1 1 1 2 1
+ 1 1 1 3 1 1 1 2 2 1 2 2 2 3 1 1 1 2 1 2 2 1 2 1 2 1 1 1 1 1 2 1 1 2 2 1 1
+ 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 1 1 3 1 1 3 2 1 2 1 2 2 5 2 1 2 2 1 2 4 1 3
+ 3 1 1 1 2 2 1 1 1 2 1 1 1 1 2 1 2 2 2 1 1 2 1 3 2 1 1 1 1 1 1 1 1 1 1 1 1
+ 1 1 1 1 1 1 1 1 5 1 5 3 2 1 3 2 2 1 2 2 3 3 1 1 1 1 3 4 1 2 1 1 2 1 1 1 2
+ 1 1 2 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 3 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+ 1]
+DEBUG: peak_idx 87
+DEBUG: top [1 1 1 1 1 1 1 2 1 1 1 1 1 1 1 1 2 2 1 1 1 1 1 1 1 1 1 1 1 1 1 2 1 1 1 1 2
+ 3 1 2 1 1 3 2 1 2 2 6 2 2 2 1 1 3 2 3 3 3 4 3 2 1 1 2 2 4 5 3 1 5 2 1 1 5
+ 3 5 4 3 5 3 3 4 5 2 3 3 3] bottom [1 5 2 2 3 1 4 2 3 1 1 4 4 2 1 2 1 1 1 1 1 2 1 1 1 1 3 1 1 1 2 2 1 2 2 2 3
+ 1 1 1 2 1 2 2 1 2 1 2 1 1 1 1 1 2 1 1 2 2 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+ 2 1 1 3 1 1 3 2 1 2 1 2 2 5 2 1 2 2 1 2 4 1 3 3 1 1 1 2 2 1 1 1 2 1 1 1 1
+ 2 1 2 2 2 1 1 2 1 3 2 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 5 1 5 3 2 1
+ 3 2 2 1 2 2 3 3 1 1 1 1 3 4 1 2 1 1 2 1 1 1 2 1 1 2 1 1 1 1 1 1 1 1 1 1 1
+ 1 1 1 1 2 3 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1]
+DEBUG: mean(top) 2.0229885057471266 counts[peak_idx] 7
+DEBUG: mean(bottom) 1.5167464114832536
+DEBUG: shape D
+DEBUG: hvn_lvn {'HVN': [84500.0, 82500.0, 102900.0], 'LVN': [110050.0, 75050.0, 76200.0]}
+Traceback (most recent call last):
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\core\detector_institucional.py", line 33, in detectar_para_par_e_timeframe
+    DetectorPontoInstitucionalService.registrar_ponto(
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\services\detector_ponto_institucional_service.py", line 37, in registrar_ponto
+    db.commit()
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2032, in commit
+    trans.commit(_to_root=True)
+  File "<string>", line 2, in commit
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1313, in commit
+    self._prepare_impl()
+  File "<string>", line 2, in _prepare_impl
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1288, in _prepare_impl
+    self.session.flush()
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4345, in flush
+    self._flush(objects)
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4480, in _flush
+    with util.safe_reraise():
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4441, in _flush
+    flush_context.execute()
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 466, in execute
+    rec.execute(self)
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\persistence.py", line 1233, in _emit_insert_statements
+    result = connection.execute(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1415, in execute
+    return meth(
+           ^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\sql\elements.py", line 523, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1637, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1842, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1858, in _exec_single_context
+    generic_setinputsizes = context._prepare_set_input_sizes()
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 2083, in _prepare_set_input_sizes
+    inputsizes = compiled._get_set_input_sizes_lookup()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 1275, in oneshot
+    result = fn(self, *args, **kw)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\sql\compiler.py", line 2000, in _get_set_input_sizes_lookup
+    inputsizes[bindparam] = lookup_type(bindparam.type)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\sql\compiler.py", line 1975, in lookup_type
+    dbtype = typ._unwrapped_dialect_impl(dialect).get_dbapi_type(dbapi)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\dialects\mssql\pyodbc.py", line 536, in get_dbapi_type
+    if self.length in (None, "max") or self.length >= 2000:
+                                       ^^^^^^^^^^^^^^^^^^^
+TypeError: '>=' not supported between instances of 'builtin_function_or_method' and 'int'
+2025-05-27 00:37:59,321 ERROR:Erro TPO BTCUSDT 4h: '>=' not supported between instances of 'builtin_function_or_method' and 'int'
+Traceback (most recent call last):
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\core\detector_institucional.py", line 74, in detectar_para_par_e_timeframe
+    DetectorPontoInstitucionalService.registrar_ponto(
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\services\detector_ponto_institucional_service.py", line 18, in registrar_ponto
+    ).first()
+      ^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\query.py", line 2759, in first
+    return self.limit(1)._iter().first()  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\query.py", line 2857, in _iter
+    result: Union[ScalarResult[_T], Result[_T]] = self.session.execute(
+                                                  ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2241, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2110, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 103, in _go
+    self._raise_for_prerequisite_state(fn.__name__, current_state)
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 973, in _raise_for_prerequisite_state
+    raise sa_exc.PendingRollbackError(
+sqlalchemy.exc.PendingRollbackError: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: '>=' not supported between instances of 'builtin_function_or_method' and 'int' (Background on this error at: https://sqlalche.me/e/20/7s2a)
+2025-05-27 00:37:59,324 ERROR:Erro VWAP BTCUSDT 4h: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: '>=' not supported between instances of 'builtin_function_or_method' and 'int' (Background on this error at: https://sqlalche.me/e/20/7s2a)
+Traceback (most recent call last):
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\core\detector_institucional.py", line 106, in detectar_para_par_e_timeframe
+    DetectorPontoInstitucionalService.registrar_ponto(
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\services\detector_ponto_institucional_service.py", line 18, in registrar_ponto
+    ).first()
+      ^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\query.py", line 2759, in first
+    return self.limit(1)._iter().first()  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\query.py", line 2857, in _iter
+    result: Union[ScalarResult[_T], Result[_T]] = self.session.execute(
+                                                  ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2241, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2110, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 103, in _go
+    self._raise_for_prerequisite_state(fn.__name__, current_state)
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 973, in _raise_for_prerequisite_state
+    raise sa_exc.PendingRollbackError(
+sqlalchemy.exc.PendingRollbackError: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: '>=' not supported between instances of 'builtin_function_or_method' and 'int' (Background on this error at: https://sqlalche.me/e/20/7s2a)
+2025-05-27 00:37:59,326 ERROR:Erro VL PROFILE BTCUSDT 4h: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: '>=' not supported between instances of 'builtin_function_or_method' and 'int' (Background on this error at: https://sqlalche.me/e/20/7s2a)
+Traceback (most recent call last):
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\core\detector_institucional.py", line 135, in detectar_para_par_e_timeframe
+    trades = con.obter_trades(par)
+             ^^^^^^^^^^^^^^^^
+AttributeError: 'BybitConnector' object has no attribute 'obter_trades'
+2025-05-27 00:37:59,667 ERROR:Erro Order Flow BTCUSDT 4h: 'BybitConnector' object has no attribute 'obter_trades'
+Traceback (most recent call last):
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\core\detector_institucional.py", line 158, in detectar_para_par_e_timeframe
+    DetectorPontoInstitucionalService.registrar_ponto(
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\services\detector_ponto_institucional_service.py", line 18, in registrar_ponto
+    ).first()
+      ^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\query.py", line 2759, in first
+    return self.limit(1)._iter().first()  # type: ignore
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\query.py", line 2857, in _iter
+    result: Union[ScalarResult[_T], Result[_T]] = self.session.execute(
+                                                  ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2241, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2110, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 103, in _go
+    self._raise_for_prerequisite_state(fn.__name__, current_state)
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 973, in _raise_for_prerequisite_state
+    raise sa_exc.PendingRollbackError(
+sqlalchemy.exc.PendingRollbackError: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: '>=' not supported between instances of 'builtin_function_or_method' and 'int' (Background on this error at: https://sqlalche.me/e/20/7s2a)
+2025-05-27 00:37:59,673 ERROR:Erro Order Book BTCUSDT 4h: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: '>=' not supported between instances of 'builtin_function_or_method' and 'int' (Background on this error at: https://sqlalche.me/e/20/7s2a)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\core\detector_institucional.py", line 213, in <module>
+    run_detector()
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\core\detector_institucional.py", line 197, in run_detector
+    par = pair.par
+          ^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\attributes.py", line 566, in __get__
+    return self.impl.get(state, dict_)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\attributes.py", line 1086, in get
+    value = self._fire_loader_callables(state, key, passive)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\attributes.py", line 1116, in _fire_loader_callables
+    return state._load_expired(state, passive)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\state.py", line 803, in _load_expired
+    self.manager.expired_attribute_loader(self, toload, passive)
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\loading.py", line 1670, in load_scalar_attributes
+    result = load_on_ident(
+             ^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\loading.py", line 509, in load_on_ident
+    return load_on_pk_identity(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\loading.py", line 694, in load_on_pk_identity
+    session.execute(
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2241, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2110, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 103, in _go
+    self._raise_for_prerequisite_state(fn.__name__, current_state)
+  File "C:\Users\User\source\repos\bot_trade\trading_bot_corrigido\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 973, in _raise_for_prerequisite_state
+    raise sa_exc.PendingRollbackError(
+sqlalchemy.exc.PendingRollbackError: This Session's transaction has been rolled back due to a previous exception during flush. To begin a new transaction with this Session, first issue Session.rollback(). Original exception was: '>=' not supported between instances of 'builtin_function_or_method' and 'int' (Background on this error at: https://sqlalche.me/e/20/7s2a)
