@@ -15,7 +15,10 @@
 #                 ...  # restante do loop
 
 import requests
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+except ImportError:  # opcional
+    BeautifulSoup = None
 from datetime import datetime, timedelta
 import os
 
@@ -37,15 +40,30 @@ PAISES = {
     "eurozone": "Euro Zone"
 }
 
-def evento_importante_agora(pais="united states", relevancia="alta", usar_api=False):
+_DERIV = None
+
+
+def evento_importante_agora(pais="united states", relevancia="alta", usar_api=False, minutos=30):
+    """Fonte principal: calendário Forex Factory (gratuito). Fallbacks: TradingEconomics (chave) e scraping."""
+    global _DERIV
+    try:
+        if _DERIV is None:
+            from core.dados_derivativos import DadosDerivativos
+            _DERIV = DadosDerivativos()
+        ev = _DERIV.evento_proximo(minutos, paises=("USD",), impactos=("High",) if relevancia == "alta" else ("High", "Medium"))
+        if ev is not None or _DERIV.calendario():
+            return ev is not None
+    except Exception:
+        pass
     if usar_api:
         return evento_via_api(pais=pais, relevancia=relevancia)
-    else:
-        return evento_via_scraping(pais=pais, relevancia=relevancia)
+    return evento_via_scraping(pais=pais, relevancia=relevancia)
 
 def evento_via_scraping(pais="united states", relevancia="alta"):
+    if BeautifulSoup is None:
+        return False
     try:
-        response = requests.get(INVESTING_URL, headers=HEADERS)
+        response = requests.get(INVESTING_URL, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         linhas = soup.select("tr.js-event-item")
         agora = datetime.utcnow()
@@ -87,7 +105,7 @@ def evento_via_api(pais="united states", relevancia="alta"):
             return False
 
         url = f"https://api.tradingeconomics.com/calendar/country/{pais.replace(' ', '%20')}?c={API_KEY}"
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         data = response.json()
         agora = datetime.utcnow()
 

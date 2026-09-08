@@ -2,11 +2,29 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python: Module",
-      "type": "python",
+      "name": "API (uvicorn)",
+      "type": "debugpy",
       "request": "launch",
-      "module": "teste",
-      "justMyCode": true,
+      "module": "uvicorn",
+      "args": ["api.main:app", "--host", "0.0.0.0", "--port", "8000"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Rodar bot 1 (terminal, 3 ciclos)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "scripts/rodar_bot.py",
+      "args": ["1", "--ciclos", "3"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Backtest CSV 1h",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "scripts/backtest.py",
+      "args": ["--fonte", "csv", "--tf", "1h"],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
     }

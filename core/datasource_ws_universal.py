@@ -1,7 +1,9 @@
-import websocket
-import threading
 import json
 import queue
+import threading
+
+import pandas as pd
+import websocket
 
 class DataSourceWebsocketUniversal:
     def __init__(self, exchange, symbol_spot, websocket_url=None, trades_buffer=1000, ob_buffer=100):
@@ -9,7 +11,8 @@ class DataSourceWebsocketUniversal:
         exchange: 'bybit' ou 'coinbase'
         symbol_spot: par padrão do seu bot ('BTC/USDT', 'ETH/USDT', etc)
         """
-        self.exchange = exchange.lower()
+        self.exchange = exchange.lower().split("-")[0]
+        self.testnet = "testnet" in exchange.lower()
         self.symbol_spot = symbol_spot.upper()
         self.websocket_url = websocket_url
 
@@ -20,10 +23,10 @@ class DataSourceWebsocketUniversal:
         # Convert symbols
         if self.exchange == 'bybit':
             self.symbol_ws = self.symbol_spot.replace('/', '')    # BTC/USDT → BTCUSDT
-            self.url_trades = "wss://stream.bybit.com/v5/public/spot"
+            self.url_trades = websocket_url or ("wss://stream-testnet.bybit.com/v5/public/linear" if self.testnet else "wss://stream.bybit.com/v5/public/linear")
             self.url_ob = self.url_trades  # mesma url para OB
             self.topic_trades = f"publicTrade.{self.symbol_ws}"
-            self.topic_ob = f"orderbook.{self.symbol_ws}"
+            self.topic_ob = f"orderbook.50.{self.symbol_ws}"
         elif self.exchange == 'coinbase':
             self.symbol_ws = self.symbol_spot.replace('/', '-').upper()  # BTC/USDT → BTC-USD
             self.url_trades = "wss://ws-feed.pro.coinbase.com"
@@ -113,7 +116,6 @@ class DataSourceWebsocketUniversal:
                         self.order_book.setdefault(side, [])
                         self.order_book[side] = [x for x in self.order_book[side] if x[0] != float(price)]
                         self.order_book[side].append((float(price), float(qty)))
-        import pandas as pd
         ws = websocket.WebSocketApp(
             self.url_trades, on_open=on_open, on_message=on_message)
         ws.run_forever()

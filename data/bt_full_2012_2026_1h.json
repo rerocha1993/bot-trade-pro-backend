@@ -1,0 +1,154 @@
+{
+  "candles": 129447,
+  "timeframe": "1h",
+  "perfil": "conservador",
+  "estilo": "daytrade",
+  "trades": 2540,
+  "ganhos": 805,
+  "perdas": 1735,
+  "taxa_acerto": 0.317,
+  "pnl_total": 19948.38,
+  "retorno_pct": 199.48,
+  "fator_lucro": 1.09,
+  "r_medio": 0.14,
+  "drawdown_max_pct": 40.26,
+  "banca_final": 29948.39,
+  "decisoes": {
+    "hold": 116136,
+    "buy": 8348,
+    "sell": 4663
+  },
+  "fases": {
+    "correcao_a": 7562,
+    "inicio_onda_3": 21018,
+    "onda_1": 40268,
+    "onda_2": 30165,
+    "meio_onda_3": 14828,
+    "final_onda_3": 2118,
+    "onda_4": 4481,
+    "onda_5": 3980,
+    "correcao_c": 3458,
+    "indefinido": 1093,
+    "correcao_b": 172,
+    "consolidacao": 4
+  },
+  "tempo_s": 2715.0,
+  "ordens_limite": {
+    "executadas": 2540,
+    "expiradas": 224
+  },
+  "por_ano": [
+    {
+      "ano": 2011,
+      "trades": 1,
+      "pnl": -27.83,
+      "acerto": 0.0,
+      "r_medio": -1.04
+    },
+    {
+      "ano": 2012,
+      "trades": 165,
+      "pnl": -3656.19,
+      "acerto": 0.14,
+      "r_medio": -0.61
+    },
+    {
+      "ano": 2013,
+      "trades": 235,
+      "pnl": 4928.88,
+      "acerto": 0.36,
+      "r_medio": 0.39
+    },
+    {
+      "ano": 2014,
+      "trades": 135,
+      "pnl": 2340.03,
+      "acerto": 0.36,
+      "r_medio": 0.2
+    },
+    {
+      "ano": 2015,
+      "trades": 164,
+      "pnl": 5927.95,
+      "acerto": 0.36,
+      "r_medio": 0.43
+    },
+    {
+      "ano": 2016,
+      "trades": 155,
+      "pnl": -157.68,
+      "acerto": 0.28,
+      "r_medio": 0.18
+    },
+    {
+      "ano": 2017,
+      "trades": 215,
+      "pnl": 11557.83,
+      "acerto": 0.36,
+      "r_medio": 0.52
+    },
+    {
+      "ano": 2018,
+      "trades": 152,
+      "pnl": -3365.85,
+      "acerto": 0.27,
+      "r_medio": -0.06
+    },
+    {
+      "ano": 2019,
+      "trades": 152,
+      "pnl": 4881.89,
+      "acerto": 0.34,
+      "r_medio": 0.27
+    },
+    {
+      "ano": 2020,
+      "trades": 176,
+      "pnl": 4596.12,
+      "acerto": 0.35,
+      "r_medio": 0.21
+    },
+    {
+      "ano": 2021,
+      "trades": 167,
+      "pnl": -10104.54,
+      "acerto": 0.27,
+      "r_medio": -0.16
+    },
+    {
+      "ano": 2022,
+      "trades": 174,
+      "pnl": -844.71,
+      "acerto": 0.3,
+      "r_medio": 0.02
+    },
+    {
+      "ano": 2023,
+      "trades": 163,
+      "pnl": 1751.05,
+      "acerto": 0.36,
+      "r_medio": 0.15
+    },
+    {
+      "ano": 2024,
+      "trades": 185,
+      "pnl": 1551.17,
+      "acerto": 0.32,
+      "r_medio": 0.17
+    },
+    {
+      "ano": 2025,
+      "trades": 177,
+      "pnl": 223.33,
+      "acerto": 0.31,
+      "r_medio": 0.08
+    },
+    {
+      "ano": 2026,
+      "trades": 124,
+      "pnl": 346.93,
+      "acerto": 0.36,
+      "r_medio": 0.12
+    }
+  ]
+}

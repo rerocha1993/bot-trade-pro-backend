@@ -5,11 +5,6 @@ from services.indicador_service import IndicadorService
 
 router = APIRouter()
 
-@router.on_event("startup")
-def seed():
-    from api.database import SessionLocal
-    IndicadorService(SessionLocal()).seed_indicadores()
-
 @router.get("/")
 def listar(db: Session = Depends(get_db)):
     return IndicadorService(db).listar()

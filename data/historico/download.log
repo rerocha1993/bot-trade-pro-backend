@@ -1,0 +1,63 @@
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:59: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"[bitstamp {tf}] de {datetime.utcfromtimestamp(inicio)} ...")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:93: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  hoje = datetime.utcnow()
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:59: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"[bitstamp {tf}] de {datetime.utcfromtimestamp(inicio)} ...")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:79: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"  ... {datetime.utcfromtimestamp(inicio)} ({total} candles)")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:93: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  hoje = datetime.utcnow()
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:59: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"[bitstamp {tf}] de {datetime.utcfromtimestamp(inicio)} ...")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:79: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"  ... {datetime.utcfromtimestamp(inicio)} ({total} candles)")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:79: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"  ... {datetime.utcfromtimestamp(inicio)} ({total} candles)")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:79: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"  ... {datetime.utcfromtimestamp(inicio)} ({total} candles)")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:79: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"  ... {datetime.utcfromtimestamp(inicio)} ({total} candles)")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:79: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"  ... {datetime.utcfromtimestamp(inicio)} ({total} candles)")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:79: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  print(f"  ... {datetime.utcfromtimestamp(inicio)} ({total} candles)")
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:93: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  hoje = datetime.utcnow()
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:93: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  hoje = datetime.utcnow()
+C:\Users\Usuario\source\repos\bot_trade\bot_trade\trading_bot_corrigido\scripts\baixar_historico.py:93: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  hoje = datetime.utcnow()
+[bitstamp 1d] de 2011-12-01 00:00:00 ...
+[bitstamp 1d] concluído: 5394 candles em data\historico\BTCUSD_bitstamp_1d.csv
+[binance 1d] de 2017-08 ...
+  sem arquivo BTCUSDT-1d-2026-08.zip
+[binance 1d] concluído: 3276 candles em data\historico\BTCUSDT_binance_1d.csv
+[bitstamp 4h] de 2011-12-01 00:00:00 ...
+  ... 2021-01-15 08:00:00 (20000 candles)
+[bitstamp 4h] concluído: 32362 candles em data\historico\BTCUSD_bitstamp_4h.csv
+[binance 4h] de 2017-08 ...
+  sem arquivo BTCUSDT-4h-2026-08.zip
+[binance 4h] concluído: 19638 candles em data\historico\BTCUSDT_binance_4h.csv
+[bitstamp 1h] de 2011-12-01 00:00:00 ...
+  ... 2014-03-13 08:00:00 (20000 candles)
+  ... 2016-06-23 16:00:00 (40000 candles)
+  ... 2018-10-05 00:00:00 (60000 candles)
+  ... 2021-01-15 08:00:00 (80000 candles)
+  ... 2023-04-28 16:00:00 (100000 candles)
+  ... 2025-08-09 00:00:00 (120000 candles)
+[bitstamp 1h] concluído: 129447 candles em data\historico\BTCUSD_bitstamp_1h.csv
+[binance 1h] de 2017-08 ...
+  sem arquivo BTCUSDT-1h-2026-08.zip
+[binance 1h] concluído: 78493 candles em data\historico\BTCUSDT_binance_1h.csv
+[binance 15m] de 2017-08 ...
+  ... 2023-05 (202366 candles)
+  sem arquivo BTCUSDT-15m-2026-08.zip
+[binance 15m] concluído: 313918 candles em data\historico\BTCUSDT_binance_15m.csv
+[binance 5m] de 2017-08 ...
+  ... 2019-07 (204491 candles)
+  ... 2021-06 (405575 candles)
+  ... 2023-05 (607081 candles)
+  ... 2025-04 (808681 candles)
+  sem arquivo BTCUSDT-5m-2026-08.zip
+[binance 5m] concluído: 941737 candles em data\historico\BTCUSDT_binance_5m.csv

@@ -1,213 +1,145 @@
 # core/detector_institucional.py
+"""
+Detector de pontos institucionais por par/timeframe (roda periodicamente pelo BotManager ou via script).
+
+Fontes:
+    TPO (POC/VAL/VAH/HVN/LVN) e Volume Profile sobre as velas COMPOSTAS (cesta TradingView + Bybit)
+    VWAP e bandas (Bybit)
+    Clusters de Order Flow (trades recentes compostos)
+    Order Blocks do gráfico (deslocamento ≥ 1,5 ATR)
+Cada ponto é registrado sem duplicar (tolerância 0,15%) e classificado por tipo/timeframe.
+"""
+from __future__ import annotations
 
 import logging
+from typing import Optional
+
 from sqlalchemy.orm import sessionmaker
+
 from api.database import engine
-from services.detector_ponto_institucional_service import DetectorPontoInstitucionalService
-from core.tpo import TPOProfile
-from core.vwap import VWAPCalculator
-from core.order_flow import OrderFlowAnalyzerPro
-from core.volume_profile_pro import VolumeProfilePRO
 from core.order_block import OrderBlockDetector
-from models.pair_institucional import PairInstitucional
+from core.order_flow import OrderFlowAnalyzerPro
+from core.tpo import TPOProfile
+from core.volume_profile_pro import VolumeProfilePRO
+from core.vwap import VWAPCalculator
 from models.exchange_institucional import ExchangeInstitucional
-from core.exchange_factory import get_exchange_connector
+from models.pair_institucional import PairInstitucional
+from services.detector_ponto_institucional_service import DetectorPontoInstitucionalService
+from services.ponto_institucional_service import PontoInstitucionalService
 
-def detectar_para_par_e_timeframe(db, con, par, tf_name, exchange_name, tf_minutes):
+logger = logging.getLogger(__name__)
 
-    logging.info(f"Iniciando detecção para {par} no timeframe {tf_name}")
 
-    # 1. Busca candles OHLCV
-    ohlcv = con.obter_ohlcv(par, tf_name, 500)
-    closes = [c[4] for c in ohlcv]
+def detectar_para_par_e_timeframe(db, par: str, tf_name: str, exchange_name: str = "bybit",
+                                  market_data=None, connector=None, limite: int = 300) -> int:
+    from core.conexoes.conexao_bybit import BybitConnector
+    con = connector or BybitConnector("simulador")
+    par = par.replace("/", "")
+    ohlcv = con.obter_ohlcv(par, tf_name, limite, somente_fechados=True)
+    comp = ohlcv
+    if market_data is not None:
+        try:
+            comp = market_data.ohlcv_composto(par, tf_name, limite)
+        except Exception as e:
+            logger.warning("velas compostas indisponíveis para %s %s: %s", par, tf_name, e)
+    preco = float(ohlcv[-1][4])
+    n = 0
 
-    # ============ TPO ============
-    try:
-        tpo = TPOProfile(closes)
-        resultado = tpo.analisar()
-        for tipo, preco in [
-            (f"TPO_POC_{tf_name}", resultado['POC']),
-            (f"TPO_VAL_{tf_name}", resultado['VAL']),
-            (f"TPO_VAH_{tf_name}", resultado['VAH'])
-        ]:
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(preco),
-                tipo=tipo,
-                motivo=f"{tipo} institucional",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=2.0,
-                extra={"fonte": "TPO", "timeframe": tf_name}
-            )
-        for hvn in resultado.get('HVN', []):
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(hvn),
-                tipo=f"TPO_HVN_{tf_name}",
-                motivo="HVN institucional",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=1.5,
-                extra={"fonte": "TPO", "timeframe": tf_name}
-            )
-        for lvn in resultado.get('LVN', []):
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(lvn),
-                tipo=f"TPO_LVN_{tf_name}",
-                motivo="LVN institucional",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=1.0,
-                extra={"fonte": "TPO", "timeframe": tf_name}
-            )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()  # <-- ISSO É IMPORTANTE
-        logging.error(f"Erro TPO {par} {tf_name}: {e}")
-
-    # ============ VWAP ============
-    try:
-        vwap_calc = VWAPCalculator(ohlcv)
-        vwap = vwap_calc.vwap()
+    def reg(preco_p, tipo, motivo, relev, fonte, **extra):
+        nonlocal n
         DetectorPontoInstitucionalService.registrar_ponto(
-            db=db,
-            preco=float(vwap),
-            tipo=f"VWAP_{tf_name}",
-            motivo=f"VWAP institucional",
-            par=par,
-            exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-            relevancia=1.8,
-            extra={"fonte": "VWAP", "timeframe": tf_name}
-        )
-        bandas = vwap_calc.vwap_bandas()
-        for nome, preco in bandas["bandas"].items():
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(preco),
-                tipo=f"VWAP_BANDA_{nome}_{tf_name}",
-                motivo=f"VWAP Banda {nome} institucional",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=1.2,
-                extra={"fonte": "VWAP", "timeframe": tf_name, "banda": nome}
-            )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()  # <-- ISSO É IMPORTANTE
-        logging.error(f"Erro VWAP {par} {tf_name}: {e}")
+            db=db, preco=float(preco_p), tipo=tipo, motivo=motivo, par=par, exchange=exchange_name,
+            relevancia=relev, extra={"fonte": fonte, "timeframe": tf_name, **extra})
+        n += 1
 
-    # ============ VOLUME PROFILE ============
+    # TPO
     try:
-        vp = VolumeProfilePRO(ohlcv)
-        nodes = vp.hvn_lvn()
-        for preco in nodes['HVN']:
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(preco),
-                tipo=f"VP_HVN_{tf_name}",
-                motivo=f"Volume Profile HVN institucional",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=1.7,
-                extra={"fonte": "VOLUME_PROFILE", "timeframe": tf_name}
-            )
-        for preco in nodes['LVN']:
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(preco),
-                tipo=f"VP_LVN_{tf_name}",
-                motivo=f"Volume Profile LVN institucional",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=1.1,
-                extra={"fonte": "VOLUME_PROFILE", "timeframe": tf_name}
-            )
+        res = TPOProfile(comp, bins=30).analisar()
+        reg(res["POC"], f"TPO_POC_{tf_name}", "POC do TPO", 2.0, "TPO")
+        reg(res["VAL"], f"TPO_VAL_{tf_name}", "VAL do TPO", 1.8, "TPO")
+        reg(res["VAH"], f"TPO_VAH_{tf_name}", "VAH do TPO", 1.8, "TPO")
+        for h in res["HVN"]:
+            reg(h, f"TPO_HVN_{tf_name}", "HVN do TPO", 1.5, "TPO")
+        for l in res["LVN"]:
+            reg(l, f"TPO_LVN_{tf_name}", "LVN do TPO", 1.0, "TPO")
     except Exception as e:
-        import traceback
-        traceback.print_exc()  # <-- ISSO É IMPORTANTE
-        logging.error(f"Erro VL PROFILE {par} {tf_name}: {e}")
-
-    # ============ ORDER FLOW ============
+        logger.error("TPO %s %s: %s", par, tf_name, e)
+        db.rollback()
+    # Volume Profile
     try:
-        order_book = con.obter_order_book(par)
-        trades = con.obter_trades(par)
-        ofa = OrderFlowAnalyzerPro(order_book, trades, ohlcv)
-        clusters = ofa.clusterizar_volume()
-        for preco, volume in clusters:
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(preco),
-                tipo=f"OF_CLUSTER_{tf_name}",
-                motivo=f"Order Flow Cluster institucional ({volume})",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=1.4,
-                extra={"fonte": "ORDER_FLOW", "timeframe": tf_name, "volume": volume}
-            )
+        vp = VolumeProfilePRO(comp, num_bins=40).analisar()
+        reg(vp["POC"], f"VP_POC_{tf_name}", "POC do Volume Profile", 2.0, "VOLUME_PROFILE")
+        reg(vp["VAL"], f"VP_VAL_{tf_name}", "VAL do Volume Profile", 1.7, "VOLUME_PROFILE")
+        reg(vp["VAH"], f"VP_VAH_{tf_name}", "VAH do Volume Profile", 1.7, "VOLUME_PROFILE")
+        for h in vp["HVN"]:
+            reg(h, f"VP_HVN_{tf_name}", "HVN do Volume Profile", 1.6, "VOLUME_PROFILE")
+        for l in vp["LVN"]:
+            reg(l, f"VP_LVN_{tf_name}", "LVN do Volume Profile", 1.1, "VOLUME_PROFILE")
     except Exception as e:
-        import traceback
-        traceback.print_exc()  # <-- ISSO É IMPORTANTE
-        logging.error(f"Erro Order Flow {par} {tf_name}: {e}")
-
-    # ============ ORDER BLOCK ============
+        logger.error("VP %s %s: %s", par, tf_name, e)
+        db.rollback()
+    # VWAP
+    try:
+        vb = VWAPCalculator(ohlcv).vwap_bandas()
+        if vb:
+            reg(vb["vwap"], f"VWAP_{tf_name}", "VWAP", 1.8, "VWAP")
+            for nome in ("+2σ", "-2σ"):
+                reg(vb["bandas"][nome], f"VWAP_BANDA_{nome}_{tf_name}", f"VWAP banda {nome}", 1.2, "VWAP", banda=nome)
+    except Exception as e:
+        logger.error("VWAP %s %s: %s", par, tf_name, e)
+        db.rollback()
+    # Order Flow (clusters de volume negociado)
+    try:
+        trades = market_data.trades_compostos(par, 500) if market_data is not None else con.obter_trades(par, 500)
+        book = con.obter_order_book(par, 50)
+        for preco_c, vol in OrderFlowAnalyzerPro(book, trades, ohlcv, timeframe=tf_name).clusterizar_volume(top=5):
+            reg(preco_c, f"OF_CLUSTER_{tf_name}", f"Cluster de order flow ({vol:.2f})", 1.4, "ORDER_FLOW", volume=vol)
+    except Exception as e:
+        logger.error("OrderFlow %s %s: %s", par, tf_name, e)
+        db.rollback()
+    # Order Blocks
     try:
         obd = OrderBlockDetector(ohlcv)
-        for block in obd.identificar_blocks(tipo='bullish'):
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(block['zona'][0]),
-                tipo=f"OB_BULLISH_{tf_name}",
-                motivo="Order Block institucional (bullish)",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=2.2,
-                extra={"fonte": "ORDER_BLOCK", "timeframe": tf_name, "tipo": "bullish"}
-            )
-        for block in obd.identificar_blocks(tipo='bearish'):
-            DetectorPontoInstitucionalService.registrar_ponto(
-                db=db,
-                preco=float(block['zona'][0]),
-                tipo=f"OB_BEARISH_{tf_name}",
-                motivo="Order Block institucional (bearish)",
-                par=par,
-                exchange=con.exchange_name if hasattr(con, "exchange_name") else "",
-                relevancia=2.2,
-                extra={"fonte": "ORDER_BLOCK", "timeframe": tf_name, "tipo": "bearish"}
-            )
+        for b in obd.identificar_blocks("bullish")[-6:]:
+            reg(b["preco"], f"OB_BULLISH_{tf_name}", f"Order block bullish (força {b['forca']} ATR)", 2.2, "ORDER_BLOCK", zona=b["zona"])
+        for b in obd.identificar_blocks("bearish")[-6:]:
+            reg(b["preco"], f"OB_BEARISH_{tf_name}", f"Order block bearish (força {b['forca']} ATR)", 2.2, "ORDER_BLOCK", zona=b["zona"])
     except Exception as e:
-        import traceback
-        traceback.print_exc()  # <-- ISSO É IMPORTANTE
-        logging.error(f"Erro Order Book {par} {tf_name}: {e}")
+        logger.error("OrderBlock %s %s: %s", par, tf_name, e)
+        db.rollback()
+    # atualiza testados/rompidos com o preço atual e poda excesso
+    try:
+        PontoInstitucionalService.atualizar_pontos_testados_ou_rompidos(db, preco, par, exchange_name, preco_fechamento=preco)
+        PontoInstitucionalService.limpar_antigos(db, par, exchange_name)
+    except Exception as e:
+        logger.error("manutenção %s: %s", par, e)
+        db.rollback()
+    logger.info("detector %s %s: %d pontos registrados/atualizados", par, tf_name, n)
+    return n
 
-def run_detector():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
-    Session = sessionmaker(bind=engine)
-    db = Session()
 
-    query = db.query(PairInstitucional, ExchangeInstitucional).join(
-        ExchangeInstitucional, PairInstitucional.exchange_id == ExchangeInstitucional.id
-    ).filter(
-        PairInstitucional.ativo == True,
-        ExchangeInstitucional.ativa == True
-    ).all()
+def run_detector(market_data=None, session=None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(message)s")
+    db = session or sessionmaker(bind=engine)()
+    total = 0
+    try:
+        pares = db.query(PairInstitucional, ExchangeInstitucional).join(
+            ExchangeInstitucional, PairInstitucional.exchange_id == ExchangeInstitucional.id).filter(
+            PairInstitucional.ativo == True, ExchangeInstitucional.ativa == True).all()  # noqa: E712
+        for pair, exchange in pares:
+            if exchange.nome.lower() != "bybit":
+                continue  # a execução é na Bybit; as outras exchanges entram pela cesta composta
+            try:
+                total += detectar_para_par_e_timeframe(db, pair.par, pair.timeframe, "bybit", market_data=market_data)
+            except Exception as e:
+                logger.error("Erro geral em %s %s: %s", pair.par, pair.timeframe, e)
+                db.rollback()
+    finally:
+        if session is None:
+            db.close()
+    return total
 
-    for pair, exchange in query:
-        par = pair.par
-        tf_name = pair.timeframe
-        exchange_name = exchange.nome
-        connector = get_exchange_connector(exchange_name)
-        # Se o seu conector tem .exchange_name, garanta que está populado corretamente!
-        if not hasattr(connector, "exchange_name"):
-            connector.exchange_name = exchange_name
-        try:
-            detectar_para_par_e_timeframe(db, connector, par, tf_name, exchange_name, None)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()  # <-- ISSO É IMPORTANTE
-            logging.error(f"Erro Geral em {par} {tf_name}: {e}")
-    db.close()
 
 if __name__ == "__main__":
-    run_detector()
+    from core.market_data import MarketDataAggregator
+    print("pontos:", run_detector(market_data=MarketDataAggregator("tradingview")))

@@ -1,209 +1,149 @@
 # services/orderblock_institutional_service.py
+"""
+Order blocks institucionais a partir do LIVRO DE OFERTAS de várias exchanges (cesta TradingView
++ Bybit): concentrações de liquidez passiva (bids = demanda, asks = oferta).
 
-import ccxt
-import numpy as np
-    
+Fluxo:
+    atualizar_blocos(session, par)  -> lê livros, detecta clusters ≥ limiar do volume, consolida
+                                       níveis próximos entre exchanges e persiste (status 'ativo')
+    consultar_blocos_ativos(...)     -> usado pelo motor para alvos/proteções
+    atualizar_blocos_rompidos(...)   -> marca 'rompido' quando o preço atravessa o nível
+"""
+from __future__ import annotations
+
+import logging
 from datetime import datetime
-from models.orderblocks_institucionais import OrderBlockInstitucional
+from typing import Dict, List, Optional
 
+import numpy as np
 from sqlalchemy.orm import Session
 
+from models.orderblocks_institucionais import OrderBlockInstitucional
+
+logger = logging.getLogger(__name__)
+
+
 class OrderBlockInstitutionalService:
-    def __init__(self):
-        # Instancia conexões CCXT para cada exchange
-        self.bybit = ccxt.bybit()
-        self.coinbase = ccxt.coinbase()
+    def __init__(self, market_data=None):
+        self.market_data = market_data  # MarketDataAggregator (lazy)
 
-    def get_order_book(self, exchange, symbol, depth=100):
-        """
-        Busca o order book (profundidade limitada) da exchange para o par.
-        """
-        try:
-            order_book = exchange.fetch_order_book(symbol, limit=depth)
-            return order_book
-        except Exception as e:
-            print(f"Erro ao buscar order book em {exchange.name}: {e}")
-            return None
+    def _agg(self):
+        if self.market_data is None:
+            from core.market_data import MarketDataAggregator
+            self.market_data = MarketDataAggregator("tradingview")
+        return self.market_data
 
-    def detectar_blocos(self, order_book, lado='bids', limiar_volume=0.03):
+    # ------------------------------------------------------------- detecção
+    @staticmethod
+    def detectar_blocos(niveis: List[tuple], limiar_volume: float = 0.03, agrupamento_pct: float = 0.0005) -> List[Dict]:
         """
-        Detecta zonas institucionais de maior concentração para o lado desejado (bids/asks).
-        Retorna lista de dicts com preço e volume agregado.
+        niveis: [(preco, qty, exchange)] de UM lado do livro.
+        Agrupa em faixas de 0,05% e devolve as faixas com volume >= limiar_volume do total.
         """
-        if not order_book or lado not in order_book:
+        if not niveis:
             return []
-
-        # Extrai níveis (preço, volume) e converte para numpy array
-        niveis = np.array(order_book[lado])
-        if niveis.size == 0:
+        grupos: Dict[float, Dict] = {}
+        total = 0.0
+        for preco, qty, *resto in niveis:
+            passo = max(preco * agrupamento_pct, 1e-9)
+            chave = round(round(preco / passo) * passo, 2)
+            g = grupos.setdefault(chave, {"preco": chave, "volume": 0.0, "exchanges": set()})
+            g["volume"] += qty
+            if resto:
+                g["exchanges"].add(resto[0])
+            total += qty
+        if total <= 0:
             return []
+        saida = [{"preco": g["preco"], "volume": round(g["volume"], 6), "exchanges": sorted(g["exchanges"]),
+                  "fracao": g["volume"] / total} for g in grupos.values() if g["volume"] >= limiar_volume * total]
+        return sorted(saida, key=lambda b: -b["volume"])
 
-        # Cálculo institucional: identifica clusters de preço com maior volume (top X%)
-        volume_total = niveis[:, 1].sum()
-        limiar = limiar_volume * volume_total
-        blocos = []
-        for preco, volume in niveis:
-            if volume >= limiar:
-                blocos.append({'preco': float(preco), 'volume': float(volume)})
-        return blocos
+    def get_orderblocks(self, par: str, profundidade: int = 100, limiar_volume: float = 0.03) -> Dict[str, List[Dict]]:
+        book = self._agg().order_book_composto(par, profundidade)
+        det = book.get("detalhado", {})
+        return {
+            "bids": self.detectar_blocos(det.get("bids", []), limiar_volume),
+            "asks": self.detectar_blocos(det.get("asks", []), limiar_volume),
+            "fontes": book.get("fontes", []),
+        }
 
-    def consolidar_blocos(self, blocos_bybit, blocos_coinbase, tolerancia=0.05):
-        """
-        Consolida blocos próximos entre as exchanges em um bloco único (média de preço/volume somado).
-        Tolerância: fração do preço (ex: 0.05 = 5%)
-        """
-        consolidados = []
-        usados_coinbase = set()
-        for b in blocos_bybit:
-            for idx, c in enumerate(blocos_coinbase):
-                if idx in usados_coinbase:
-                    continue
-                if abs(b['preco'] - c['preco']) / b['preco'] <= tolerancia:
-                    # Consolida
-                    preco_medio = (b['preco'] + c['preco']) / 2
-                    volume_total = b['volume'] + c['volume']
-                    consolidados.append({
-                        'preco': preco_medio,
-                        'volume': volume_total,
-                        'exchanges': ['bybit', 'coinbase']
-                    })
-                    usados_coinbase.add(idx)
-                    break
-            else:
-                # Só na Bybit
-                consolidados.append({**b, 'exchanges': ['bybit']})
-        # Inclui blocos só da Coinbase que não foram usados
-        for idx, c in enumerate(blocos_coinbase):
-            if idx not in usados_coinbase:
-                consolidados.append({**c, 'exchanges': ['coinbase']})
-        return consolidados
-
-    def get_orderblocks(self, symbol, depth=100, limiar_volume=0.03, tolerancia=0.05):
-        """
-        Consulta os blocos institucionais consolidados Bybit+Coinbase para o par.
-        Retorna lista de dicts com preço, volume e exchanges de origem.
-        """
-        book_bybit = self.get_order_book(self.bybit, symbol, depth)
-        book_coinbase = self.get_order_book(self.coinbase, symbol, depth)
-        # Detecta blocos (bids = compra institucional, asks = venda institucional)
-        blocos_bids_bybit = self.detectar_blocos(book_bybit, lado='bids', limiar_volume=limiar_volume)
-        blocos_bids_coinbase = self.detectar_blocos(book_coinbase, lado='bids', limiar_volume=limiar_volume)
-        blocos_asks_bybit = self.detectar_blocos(book_bybit, lado='asks', limiar_volume=limiar_volume)
-        blocos_asks_coinbase = self.detectar_blocos(book_coinbase, lado='asks', limiar_volume=limiar_volume)
-        # Consolida blocos (bids e asks)
-        blocos_bids = self.consolidar_blocos(blocos_bids_bybit, blocos_bids_coinbase, tolerancia)
-        blocos_asks = self.consolidar_blocos(blocos_asks_bybit, blocos_asks_coinbase, tolerancia)
-        return {'bids': blocos_bids, 'asks': blocos_asks}
-
-    def salvar_ou_atualizar_orderblock(session, bloco):
-        """
-        Persiste ou atualiza um OrderBlockInstitucional no banco.
-        :param session: sessão SQLAlchemy aberta
-        :param bloco: dict (par, exchange_origem, direcao, preco, volume, status, info_extra)
-        """
-        # Verifica se já existe bloco igual (par, preco, exchange, direcao, ativo)
+    # ---------------------------------------------------------- persistência
+    @staticmethod
+    def salvar_ou_atualizar_orderblock(session: Session, bloco: Dict):
         existente = session.query(OrderBlockInstitucional).filter_by(
-            par=bloco['par'],
-            preco=bloco['preco'],
-            exchange_origem=bloco['exchange_origem'],
-            direcao=bloco['direcao'],
-            status='ativo'
-        ).first()
+            par=bloco["par"], preco=bloco["preco"], direcao=bloco["direcao"], status="ativo").first()
         if existente:
-            # Atualiza volume e data
-            existente.volume = bloco['volume']
+            existente.volume = bloco["volume"]
+            existente.exchange_origem = bloco["exchange_origem"]
             existente.atualizado_em = datetime.utcnow()
-            existente.info_extra = bloco.get('info_extra', existente.info_extra)
+            existente.info_extra = bloco.get("info_extra", existente.info_extra)
         else:
-            novo = OrderBlockInstitucional(
-                par=bloco['par'],
-                exchange_origem=bloco['exchange_origem'],
-                direcao=bloco['direcao'],
-                preco=bloco['preco'],
-                volume=bloco['volume'],
-                status='ativo',
-                criado_em=datetime.utcnow(),
-                info_extra=bloco.get('info_extra')
-            )
-            session.add(novo)
+            session.add(OrderBlockInstitucional(
+                par=bloco["par"], exchange_origem=bloco["exchange_origem"], direcao=bloco["direcao"],
+                preco=bloco["preco"], volume=bloco["volume"], status="ativo", criado_em=datetime.utcnow(),
+                info_extra=bloco.get("info_extra")))
+
+    def atualizar_blocos(self, session: Session, par: str, profundidade: int = 100, limiar_volume: float = 0.03,
+                         max_por_lado: int = 8) -> Dict[str, int]:
+        """Detecta, persiste e expira blocos que sumiram do livro."""
+        blocos = self.get_orderblocks(par, profundidade, limiar_volume)
+        novos = {"buy": 0, "sell": 0}
+        vivos = set()
+        for direcao, lado in (("buy", "bids"), ("sell", "asks")):
+            for b in blocos[lado][:max_por_lado]:
+                self.salvar_ou_atualizar_orderblock(session, {
+                    "par": par, "exchange_origem": ",".join(b["exchanges"])[:20] or "composto", "direcao": direcao,
+                    "preco": b["preco"], "volume": b["volume"],
+                    "info_extra": f"fracao={b['fracao']:.3f} fontes={blocos['fontes']}"})
+                vivos.add((direcao, b["preco"]))
+                novos[direcao] += 1
+        # blocos ativos que não aparecem mais no livro há > 30 min viram 'expirado'
+        from datetime import timedelta
+        corte = datetime.utcnow() - timedelta(minutes=30)
+        for ob in session.query(OrderBlockInstitucional).filter_by(par=par, status="ativo").all():
+            if (ob.direcao, ob.preco) not in vivos and (ob.atualizado_em or ob.criado_em) < corte:
+                ob.status = "expirado"
+                ob.atualizado_em = datetime.utcnow()
         session.commit()
+        return novos
 
-    def consultar_blocos_ativos(session, par, direcao, exchange=None, status='ativo'):
-        """
-        Retorna lista de blocos institucionais ativos por par, direção e opcionalmente exchange.
-        """
-        query = session.query(OrderBlockInstitucional).filter_by(
-            par=par,
-            direcao=direcao,
-            status=status
-        )
+    @staticmethod
+    def consultar_blocos_ativos(session: Session, par: str, direcao: str, exchange: Optional[str] = None,
+                                status: str = "ativo") -> List[OrderBlockInstitucional]:
+        query = session.query(OrderBlockInstitucional).filter_by(par=par, direcao=direcao, status=status)
         if exchange:
-            query = query.filter_by(exchange_origem=exchange)
-        return query.order_by(OrderBlockInstitucional.preco).all()
+            query = query.filter(OrderBlockInstitucional.exchange_origem.like(f"%{exchange}%"))
+        return query.order_by(OrderBlockInstitucional.volume.desc()).all()
 
-    def marcar_bloco_rompido(session, bloco_id):
-        """
-        Atualiza o status do bloco para 'rompido' e grava a data.
-        """
+    @staticmethod
+    def marcar_bloco_rompido(session: Session, bloco_id: int):
         bloco = session.query(OrderBlockInstitucional).filter_by(id=bloco_id).first()
-        if bloco and bloco.status == 'ativo':
-            bloco.status = 'rompido'
+        if bloco and bloco.status == "ativo":
+            bloco.status = "rompido"
             bloco.rompido_em = datetime.utcnow()
             bloco.atualizado_em = datetime.utcnow()
             session.commit()
 
-    def persistir_blocos_detectados(self, session: Session, par: str, blocos: list, direcao: str):
-        """
-        Persiste ou atualiza todos os blocos institucionais detectados (por par, direção, exchanges).
-        """
-        for bloco in blocos:
-            self.salvar_ou_atualizar_orderblock(
-                session=session,
-                bloco={
-                    'par': par,
-                    'exchange_origem': ",".join(bloco['exchanges']),
-                    'direcao': direcao,
-                    'preco': bloco['preco'],
-                    'volume': bloco['volume'],
-                    'status': 'ativo',
-                    'info_extra': str({
-                        'volume_total': bloco['volume'],
-                        'exchanges': bloco['exchanges']
-                    })
-                }
-            )
+    @staticmethod
+    def atualizar_blocos_rompidos(session: Session, par: str, preco_atual: float, margem_pct: float = 0.001) -> int:
+        """Bid (demanda) rompe quando o preço fecha abaixo; ask (oferta) rompe quando fecha acima."""
+        n = 0
+        for bloco in session.query(OrderBlockInstitucional).filter_by(par=par, status="ativo").all():
+            if bloco.direcao == "buy" and preco_atual < bloco.preco * (1 - margem_pct):
+                bloco.status, bloco.rompido_em, bloco.atualizado_em = "rompido", datetime.utcnow(), datetime.utcnow()
+                n += 1
+            elif bloco.direcao == "sell" and preco_atual > bloco.preco * (1 + margem_pct):
+                bloco.status, bloco.rompido_em, bloco.atualizado_em = "rompido", datetime.utcnow(), datetime.utcnow()
+                n += 1
+        if n:
+            session.commit()
+        return n
 
-    def atualizar_blocos_rompidos(session, par, preco_atual, margem=0.0001):
-        """
-        Atualiza todos os blocos institucionais ativos do par cujo preço foi rompido.
-        Rompimento ocorre quando o preço de mercado atinge ou ultrapassa o preço do bloco, com margem.
-        """
-        blocos_ativos = session.query(OrderBlockInstitucional).filter_by(
-            par=par, status='ativo'
-        ).all()
-        for bloco in blocos_ativos:
-            if bloco.direcao == 'buy' and preco_atual <= bloco.preco + margem:
-                bloco.status = 'rompido'
-                bloco.rompido_em = datetime.utcnow()
-                bloco.atualizado_em = datetime.utcnow()
-            elif bloco.direcao == 'sell' and preco_atual >= bloco.preco - margem:
-                bloco.status = 'rompido'
-                bloco.rompido_em = datetime.utcnow()
-                bloco.atualizado_em = datetime.utcnow()
-        session.commit()
-
-    def registrar_uso_bloco(session, bloco_id, tipo_uso, bot_id, decisao_id=None):
-        """
-        Marca no banco o uso de um bloco institucional, com log de contexto.
-        """
+    @staticmethod
+    def registrar_uso_bloco(session: Session, bloco_id: int, tipo_uso: str, bot_id: int, decisao_id=None):
         bloco = session.query(OrderBlockInstitucional).filter_by(id=bloco_id).first()
         if bloco:
             bloco.usado_como = tipo_uso
             bloco.atualizado_em = datetime.utcnow()
-            logs = bloco.info_extra or ""
-            novo_log = f"{datetime.utcnow()} | bot: {bot_id} | uso: {tipo_uso} | decisao: {decisao_id}\n"
-            bloco.info_extra = (logs or "") + novo_log
+            bloco.info_extra = (bloco.info_extra or "") + f"\n{datetime.utcnow()} | bot {bot_id} | uso {tipo_uso} | decisao {decisao_id}"
             session.commit()
-
-
-

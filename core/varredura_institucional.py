@@ -1,5 +1,8 @@
+"""
+Varredura histórica de Elliott (persistência de contagens candidatas e promoção a validadas).
+Usa o ElliottEngine O(N) via ElliottService.
+"""
 from core.spot_candles_fetcher import SpotCandlesFetcher
-from services.elliott_persistence_service import ElliottPersistenceService
 from services.elliott_service import ElliottService
 from models.elliott_contagem_candidata import ElliottContagemCandidata
 
@@ -22,21 +25,9 @@ def iniciar_varredura_elliott_institucional(par, timeframes, data_inicio, data_f
         candles_dict = {tf: candles}
         elliott_service.analisar_multi_timeframe(par, [tf], candles_dict)
         total_ciclos += 1
-
-        # Promove todas candidatas válidas institucionalmente
-        candidatas = (
-            db_session.query(ElliottContagemCandidata)
-            .filter_by(par=par, timeframe=tf, status="candidata")
-            .all()
-        )
-        for cand in candidatas:
-            try:
-                elliott_service.promover_e_validar(cand.id)
-                if logger:
-                    logger.info(f"Promovida contagem validada em {par} {tf} id={cand.id}")
-            except Exception as e:
-                if logger:
-                    logger.warning(f"Falha na promoção da contagem candidata {cand.id}: {str(e)}")
+        promovidas = elliott_service.promover_candidatas(par, tf)
+        if logger:
+            logger.info(f"{par} {tf}: {promovidas} contagens promovidas")
 
     if logger:
         logger.info(f"Varredura institucional concluída: {total_ciclos} ciclos processados para {par}")

@@ -18,13 +18,11 @@ def listar_pontos(
     exchange: str = None,
     status: str = None,
     tipo: str = None,
-    preco_atual: float = None,   # <- novo parâmetro
+    preco_atual: float = None,
+    faixa_pct: float = 0.05,
     db: Session = Depends(get_db)
 ):
-    pontos = PontoInstitucionalService.listar_pontos(db, par, exchange, status, tipo)
-    if preco_atual:
-        pontos = [p for p in pontos if (preco_atual - 20000) <= float(p.preco) <= (preco_atual + 20000)]
-    return pontos
+    return PontoInstitucionalService.listar_pontos(db, par, exchange, status, tipo, preco_ref=preco_atual, faixa_pct=faixa_pct)
 
 
 @router.patch("/pontos-institucionais/{ponto_id}/testar")

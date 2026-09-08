@@ -1,91 +1,150 @@
+# core/volume_profile_pro.py
+"""
+Volume Profile.
+
+O volume de cada candle é distribuído uniformemente entre os bins que o candle atravessa
+(low..high). Isso aproxima o "volume por preço" muito melhor do que usar só o fechamento.
+
+    POC = bin com maior volume
+    Value Area (70%) ao redor do POC -> VAH / VAL
+    HVN / LVN = bins com maior / menor volume (LVN só entre bins com volume > 0)
+"""
+from __future__ import annotations
+
+from typing import Dict, List, Sequence
+
 import numpy as np
 import pandas as pd
 
+
 class VolumeProfilePRO:
-    def __init__(self, ohlcv, num_bins=30):
-        """
-        ohlcv: lista OHLCV
-        num_bins: quantidade de bins para granularidade do histograma
-        """
-        self.ohlcv = ohlcv
-        closes = [c[4] for c in ohlcv]
-        vols = [c[5] for c in ohlcv]
-        highs = [c[2] for c in ohlcv]
-        lows = [c[3] for c in ohlcv]
-        self.min_price = min(closes)
-        self.max_price = max(closes)
-        self.candle_max_high = max(highs)
-        self.candle_min_low = min(lows)
-        self.num_bins = num_bins
-
-        # Calcula bins de preço
-        self.bin_edges = np.linspace(self.min_price, self.max_price, num_bins + 1)
+    def __init__(self, ohlcv: Sequence, num_bins: int = 40, tolerancia: float = 0.002):
+        if not ohlcv:
+            raise ValueError("ohlcv vazio")
+        self.ohlcv = list(ohlcv)
+        self.tolerancia = tolerancia
+        self.highs = np.array([float(c[2]) for c in self.ohlcv])
+        self.lows = np.array([float(c[3]) for c in self.ohlcv])
+        self.closes = np.array([float(c[4]) for c in self.ohlcv])
+        self.vols = np.array([float(c[5] or 0) for c in self.ohlcv])
+        self.candle_min_low = float(self.lows.min())
+        self.candle_max_high = float(self.highs.max())
+        self.min_price, self.max_price = self.candle_min_low, self.candle_max_high
+        if self.max_price <= self.min_price:
+            self.max_price = self.min_price + max(abs(self.min_price) * 0.001, 1e-6)
+        self.num_bins = max(int(num_bins), 5)
+        self.bin_edges = np.linspace(self.min_price, self.max_price, self.num_bins + 1)
         self.bin_labels = 0.5 * (self.bin_edges[:-1] + self.bin_edges[1:])
+        self.bin_width = float(self.bin_edges[1] - self.bin_edges[0])
+        self.hist = self._distribuir()
 
-        # Volume histogram
-        self.hist, _ = np.histogram(closes, bins=self.bin_edges, weights=vols)
+    def _idx(self, preco: float) -> int:
+        i = int((preco - self.min_price) // self.bin_width)
+        return max(0, min(i, self.num_bins - 1))
 
-    def hvn_lvn(self, n=3, tolerancia=0.02):
-        # HVN = bins com maior volume; LVN = bins com menor volume (> 0)
-        idx_sort = np.argsort(self.hist)
-        lvn_idx = idx_sort[:n]
-        hvn_idx = idx_sort[-n:]
+    def _distribuir(self) -> np.ndarray:
+        hist = np.zeros(self.num_bins, dtype=float)
+        for h, l, v in zip(self.highs, self.lows, self.vols):
+            if v <= 0:
+                continue
+            a, b = self._idx(min(h, l)), self._idx(max(h, l))
+            n = b - a + 1
+            hist[a:b + 1] += v / n
+        return hist
 
-        # Adiciona filtro: só retorna zonas dentro do range do candle analisado
-        max_limit = self.candle_max_high * (1 + tolerancia)
-        min_limit = self.candle_min_low * (1 - tolerancia)
-
-        lvns = [float(self.bin_labels[i]) for i in lvn_idx
-                if min_limit <= self.bin_labels[i] <= max_limit]
-        hvns = [float(self.bin_labels[i]) for i in hvn_idx
-                if min_limit <= self.bin_labels[i] <= max_limit]
-
+    # ---------------------------------------------------------------- níveis
+    def poc_va(self, pct: float = 0.70) -> Dict[str, float]:
+        total = float(self.hist.sum())
+        if total <= 0:
+            return {"POC": float(self.closes[-1]), "VAL": self.min_price, "VAH": self.max_price}
+        poc_i = int(np.argmax(self.hist))
+        alvo = pct * total
+        lo_i = hi_i = poc_i
+        acum = float(self.hist[poc_i])
+        while acum < alvo and (lo_i > 0 or hi_i < self.num_bins - 1):
+            acima = self.hist[hi_i + 1] if hi_i < self.num_bins - 1 else -1
+            abaixo = self.hist[lo_i - 1] if lo_i > 0 else -1
+            if acima >= abaixo:
+                hi_i += 1
+                acum += max(acima, 0)
+            else:
+                lo_i -= 1
+                acum += max(abaixo, 0)
         return {
-            "HVN": hvns,
-            "LVN": lvns
+            "POC": float(self.bin_labels[poc_i]),
+            "VAL": float(self.bin_edges[lo_i]),
+            "VAH": float(self.bin_edges[hi_i + 1]),
         }
 
-    def rejection_zones(self, min_vol=0.0, max_vol=0.05, tolerancia=0.02):
-        # Price rejection = bins onde volume é muito baixo em relação ao total
-        total_vol = np.sum(self.hist)
-        percent_vol = self.hist / total_vol
-        max_limit = self.candle_max_high * (1 + tolerancia)
-        min_limit = self.candle_min_low * (1 - tolerancia)
-        return [float(self.bin_labels[i]) for i, pct in enumerate(percent_vol)
-                if min_vol < pct < max_vol and min_limit <= self.bin_labels[i] <= max_limit]
+    def hvn_lvn(self, n: int = 3, tolerancia: float = None) -> Dict[str, List[float]]:
+        com_volume = [i for i in range(self.num_bins) if self.hist[i] > 0]
+        if not com_volume:
+            return {"HVN": [], "LVN": []}
+        ordem = sorted(com_volume, key=lambda i: self.hist[i])
+        return {
+            "HVN": [float(self.bin_labels[i]) for i in ordem[::-1][:n]],
+            "LVN": [float(self.bin_labels[i]) for i in ordem[:n]],
+        }
 
-    def top_volume_zones(self, pct=0.7, tolerancia=0.02):
-        # Retorna zonas que acumulam X% do volume (zona de valor institucional)
-        total = np.sum(self.hist)
-        idx_sort = np.argsort(self.hist)[::-1]  # maior para menor
-        cumul = 0
-        area = []
-        max_limit = self.candle_max_high * (1 + tolerancia)
-        min_limit = self.candle_min_low * (1 - tolerancia)
-        for i in idx_sort:
-            price = float(self.bin_labels[i])
-            if min_limit <= price <= max_limit:
-                cumul += self.hist[i]
-                area.append(price)
-                if cumul / total >= pct:
-                    break
+    def rejection_zones(self, max_pct: float = 0.02, tolerancia: float = None) -> List[float]:
+        total = float(self.hist.sum())
+        if total <= 0:
+            return []
+        return [float(self.bin_labels[i]) for i in range(self.num_bins)
+                if 0 < self.hist[i] / total < max_pct]
+
+    def top_volume_zones(self, pct: float = 0.7, tolerancia: float = None) -> List[float]:
+        total = float(self.hist.sum())
+        if total <= 0:
+            return []
+        ordem = np.argsort(self.hist)[::-1]
+        acum, area = 0.0, []
+        for i in ordem:
+            acum += self.hist[i]
+            area.append(float(self.bin_labels[i]))
+            if acum / total >= pct:
+                break
         return sorted(area)
 
-    def price_signal(self, preco_atual, tolerancia=0.02):
-        nodes = self.hvn_lvn(tolerancia=tolerancia)
-        if preco_atual in nodes["HVN"]:
-            return {"acao": "defesa", "motivo": f"Institucional defendendo em HVN {preco_atual}"}
-        if preco_atual in nodes["LVN"]:
-            return {"acao": "rejeicao", "motivo": f"Price rejection em LVN {preco_atual}"}
-        rej = self.rejection_zones(tolerancia=tolerancia)
-        if preco_atual in rej:
-            return {"acao": "rejeicao", "motivo": f"Zona de rejeição (baixa liquidez) em {preco_atual}"}
-        return {"acao": "hold", "motivo": "Sem trigger profile"}
+    def perto(self, preco: float, nivel: float) -> bool:
+        return abs(preco - nivel) <= max(self.bin_width / 2.0, abs(nivel) * self.tolerancia)
 
-    def to_dataframe(self):
-        # Facilita export para painel/plot avançado
+    def analisar(self) -> Dict:
+        va = self.poc_va()
+        nodes = self.hvn_lvn()
+        return {**va, **nodes, "bin_width": self.bin_width, "range": (self.min_price, self.max_price)}
+
+    # ----------------------------------------------------------------- sinal
+    def price_signal(self, preco_atual: float, tolerancia: float = None) -> Dict:
+        """
+        buy  -> preço acima da VAH (aceitação acima do valor)
+        sell -> preço abaixo da VAL
+        hold -> dentro da value area; contexto informa HVN (defesa institucional) / LVN (rejeição)
+        """
+        res = self.analisar()
+        preco = float(preco_atual)
+        ctx = []
+        if any(self.perto(preco, h) for h in res["HVN"]):
+            ctx.append("HVN")
+        if any(self.perto(preco, l) for l in res["LVN"]):
+            ctx.append("LVN")
+        if self.perto(preco, res["POC"]):
+            ctx.append("POC")
+        largura = max(res["VAH"] - res["VAL"], 1e-9)
+        base = {k: res[k] for k in ("POC", "VAL", "VAH", "HVN", "LVN")}
+        if preco > res["VAH"]:
+            forca = min((preco - res["VAH"]) / largura, 1.0)
+            return {"acao": "buy", "motivo": f"Acima da VAH {res['VAH']:.2f} do Volume Profile",
+                    "forca": round(max(forca, 0.3), 3), "contexto": ctx, **base}
+        if preco < res["VAL"]:
+            forca = min((res["VAL"] - preco) / largura, 1.0)
+            return {"acao": "sell", "motivo": f"Abaixo da VAL {res['VAL']:.2f} do Volume Profile",
+                    "forca": round(max(forca, 0.3), 3), "contexto": ctx, **base}
+        return {"acao": "hold", "motivo": f"Dentro da value area do VP {ctx or ''}", "forca": 0.0,
+                "contexto": ctx, **base}
+
+    def to_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame({"bin": self.bin_labels, "volume": self.hist})
 
     def export_heatmap(self):
-        # Retorna matriz pronta para heatmap (para visual pro ou debug)
         return self.bin_labels.tolist(), self.hist.tolist()

@@ -1,0 +1,43 @@
+
+# painel React
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# graphify (estado local: nao versionar)
+.graphify/cache/
+.graphify/branch.json
+.graphify/worktree.json
+.graphify/needs_update
+.graphify/fragments/
+
+
+# segredos: NUNCA versionar
+.env
+.env.local
+*.key
+*.pem
+
+# ambientes virtuais (regeneraveis com requirements.txt)
+.venv/
+env/
+__pycache__/
+*.py[cod]
+
+# dados gerados (regeneraveis: scripts/baixar_historico.py, scripts/calibrar_elliott.py)
+data/*.pkl
+data/plano_*.json
+data/evolucao_contagens.json
+cache_candles/
+logs/*.log
+
+# historico e datasets grandes (regeneraveis: scripts/baixar_historico.py, scripts/calibrar_elliott.py)
+data/historico/*.csv
+data/calibracao_dataset.csv
+data/*.log
+binance_csv/
+simulador/*.csv
+
+# grafo de conhecimento (regeneravel com /graphify); o relatorio fica
+.graphify/*
+!.graphify/GRAPH_REPORT.md

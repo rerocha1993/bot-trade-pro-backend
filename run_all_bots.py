@@ -1,42 +1,19 @@
-from multiprocessing import Process
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from models.bot import Bot
-from core.bot_executor import BotExecutor
-import urllib
+"""Roda todos os bots ativos sem a API (um thread por bot). Ctrl+C para parar."""
+import logging
+import time
 
-# Conexão com o banco SQL Server
-params = urllib.parse.quote_plus(
-    "DRIVER={ODBC Driver 17 for SQL Server};"
-    "SERVER=(localdb)\\MSSQLLocalDB;"
-    "DATABASE=dbo_trading_bot;"
-    "Trusted_Connection=yes"
-)
-engine = create_engine(f"mssql+pyodbc:///?odbc_connect={params}")
-SessionLocal = sessionmaker(bind=engine)
-
-def executar_bot(bot_id):
-    session = SessionLocal()
-    bot = session.query(Bot).filter(Bot.id == bot_id).first()
-    if not bot:
-        print(f"[BOT {bot_id}] não encontrado.")
-        return
-
-    executor = BotExecutor(bot=bot, db=session)
-    executor.executar()
-
-def main():
-    session = SessionLocal()
-    bots = session.query(Bot).filter(Bot.ativo_bot == True).all()
-
-    processos = []
-    for bot in bots:
-        p = Process(target=executar_bot, args=(bot.id,))
-        p.start()
-        processos.append(p)
-
-    for p in processos:
-        p.join()
+from services.bot_manager import get_manager
 
 if __name__ == "__main__":
-    main()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    m = get_manager()
+    print("bots iniciados:", m.start_all())
+    m.iniciar_manutencao(30)
+    try:
+        while True:
+            time.sleep(30)
+            for bid, st in m.status().items():
+                print(bid, st.get("nome"), "preco", st.get("preco"), "decisao",
+                      (st.get("ultima_decisao") or {}).get("acao"), "pnl_dia", st.get("pnl_dia"))
+    except KeyboardInterrupt:
+        m.stop_all()

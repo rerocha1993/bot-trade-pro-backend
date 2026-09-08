@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "C:/Users/Usuario/source/repos/bot_trade/bot_trade/trading_bot_corrigido/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "painel",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1"],
+      "port": 5173
+    }
+  ]
+}
