@@ -195,12 +195,24 @@ BYBIT_SUB_<NOME>_API_KEY_REAL        BYBIT_SUB_<NOME>_SECRET_KEY_REAL
 Se o robô tem subconta configurada e a chave não existe, o conector **falha**. Ele não usa a conta principal no
 lugar: operar na conta errada é pior que não operar.
 
+### Como criar (a ordem importa)
+
+Criar várias chaves na conta principal **não** cria subcontas. Todas apontam para a mesma conta e para a mesma
+posição, que é exatamente o problema que a subconta resolve. A subconta vem primeiro, a chave depois.
+
+1. Em `bybit.com`, vá em Subcontas e crie uma subconta padrão por robô (`scalp`, `daytrade`, `swing`, `hedge`).
+2. Na mesma tela, na linha da subconta, abra API Management e crie a chave ali. Não é preciso entrar na subconta.
+3. Para o modo `demo`, entre na subconta, ligue o Demo Trading dela e crie a chave lá dentro: cada subconta tem a
+   própria conta de demonstração, com UID próprio.
+4. Transfira saldo para a subconta. Subconta sem saldo conecta mas não opera.
+
 ```bash
-curl "http://localhost:8000/status/subcontas?modo=testnet"
+curl "http://localhost:8000/status/subcontas?modo=demo&verificar_uid=true"
 ```
 
-A rota mostra qual robô usa qual subconta, se a chave já está no ambiente, e aponta conflitos (mais de um robô no
-mesmo par e na mesma conta).
+A rota mostra qual robô usa qual subconta e se a chave está no ambiente. Com `verificar_uid=true` ela pergunta à
+Bybit de quem é cada chave e usa o UID real para apontar conflitos. Dois robôs no mesmo par com o mesmo UID
+fecham a posição um do outro: é o teste que prova que a separação está de pé.
 
 ## Endpoints principais
 

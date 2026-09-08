@@ -150,6 +150,32 @@ class BybitConnector:
     def pode_enviar_ordens(self) -> bool:
         return self.modo_execucao in MODOS_COM_ORDEM and self.tem_credenciais
 
+    def info_chave(self) -> Dict[str, Any]:
+        """
+        Quem é o dono desta chave, segundo a própria Bybit: UID, tipo (principal ou subconta), permissões e validade.
+
+        É o que prova que a separação por subconta está de pé: dois robôs com UID diferente não disputam a mesma
+        posição. Se dois robôs mostrarem o MESMO uid, as chaves apontam para a mesma conta, e um vai fechar a
+        posição do outro.
+        """
+        self._exigir_credenciais("info_chave")
+        r = self.exchange.privateGetV5UserQueryApi({}) or {}
+        d = (r.get("result") or {}) if isinstance(r, dict) else {}
+        permissoes = {k: v for k, v in (d.get("permissions") or {}).items() if v}
+        # a Bybit devolve parentUid "0" para a conta principal: isso não é um pai, é a ausência de pai
+        pai = str(d.get("parentUid") or "").strip()
+        pai = pai if pai not in ("", "0") else None
+        return {
+            "uid": str(d.get("userID") or d.get("uid") or ""),
+            "tipo": "subconta" if pai else "principal",
+            "uid_pai": pai,
+            "nota": d.get("note"),
+            "permissoes": permissoes,
+            "somente_leitura": d.get("readOnly") in (1, True),
+            "expira_em": d.get("expiredAt") or None,
+            "ips": d.get("ips") or [],
+        }
+
     def pedir_fundos_demo(self, moeda: str = "USDT", quantidade: float = 100_000) -> Dict[str, Any]:
         """Só no modo demo: pede saldo fictício para a conta de Demo Trading."""
         if not self.demo:
@@ -461,6 +487,10 @@ class BybitConnector:
             try:
                 out["saldo_usdt"] = self.obter_saldo("USDT")
                 out["privado"] = "ok"
+                try:
+                    out["chave"] = self.info_chave()
+                except Exception as e:
+                    out["chave"] = {"erro": str(e)[:120]}
             except Exception as e:
                 out["privado"] = f"erro: {e}"
         else:

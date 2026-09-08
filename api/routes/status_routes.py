@@ -162,8 +162,11 @@ def historico(par: str = "BTCUSDT", timeframe: str = "1w", limite: int = Query(6
 
 
 @router.get("/subcontas")
-def subcontas(modo: str = "testnet", db: Session = Depends(get_db)):
-    """Quais subcontas os robôs usam e quais já têm chave no ambiente. Nunca devolve o valor da chave."""
+def subcontas(modo: str = "demo", verificar_uid: bool = False, db: Session = Depends(get_db)):
+    """
+    Quais subcontas os robôs usam e quais já têm chave no ambiente. Nunca devolve o valor da chave.
+    Com `verificar_uid=true`, pergunta à Bybit de quem é cada chave e usa o UID real para apontar conflitos.
+    """
     from core.conexoes.conexao_bybit import nomes_variaveis, subcontas_configuradas
     configuradas = {c["subconta"]: c for c in subcontas_configuradas(modo)}
     linhas = []
@@ -173,12 +176,28 @@ def subcontas(modo: str = "testnet", db: Session = Depends(get_db)):
         linhas.append({"bot_id": bot.id, "bot": bot.nome, "par": bot.ativo, "modo_execucao": bot.modo_execucao,
                        "subconta": sub, "configurada": bool(configuradas.get(sub, {}).get("configurada")),
                        "variaveis": [k, sec]})
+    # prova de verdade: pergunta à Bybit de quem é cada chave. Dois robôs com o mesmo UID disputam a mesma posição.
+    if verificar_uid:
+        from core.conexoes.conexao_bybit import BybitConnector
+        cache: Dict[str, Dict] = {}
+        for l in linhas:
+            sub = l["subconta"]
+            if sub not in cache:
+                try:
+                    cache[sub] = BybitConnector(modo, "linear", subconta=sub).info_chave()
+                except Exception as e:
+                    cache[sub] = {"erro": str(e)[:140]}
+            l["chave"] = cache[sub]
+            l["uid"] = cache[sub].get("uid")
+
     conflitos = {}
     for l in linhas:
-        chave = (l["par"], l["subconta"])
+        chave = (l["par"], l.get("uid") or l["subconta"])
         conflitos.setdefault(chave, []).append(l["bot"])
     return {"modo": modo, "subcontas_no_ambiente": subcontas_configuradas(modo), "bots": linhas,
-            "conflitos": [{"par": p, "subconta": s, "bots": b} for (p, s), b in conflitos.items() if len(b) > 1]}
+            "conflitos": [{"par": p, "conta": s, "bots": b} for (p, s), b in conflitos.items() if len(b) > 1],
+            "nota": ("conflito = mais de um robô no mesmo par e na MESMA conta. Na Bybit cada símbolo tem uma posição "
+                     "por conta, então eles fechariam a posição um do outro.")}
 
 
 @router.get("/bybit")

@@ -153,3 +153,37 @@ def test_pedir_fundos_demo_recusa_fora_do_modo_demo(monkeypatch):
     con = BybitConnector("testnet", "linear")
     with pytest.raises(ValueError, match="só funciona no modo demo"):
         con.pedir_fundos_demo()
+
+
+def test_info_chave_normaliza_a_resposta_da_bybit(monkeypatch):
+    """
+    info_chave() é o que prova a separação por subconta: dois robôs com o mesmo UID disputam a mesma posição.
+    Aqui checamos a normalização, sem rede.
+    """
+    from core.conexoes.conexao_bybit import BybitConnector
+    monkeypatch.setenv("BYBIT_API_KEY_DEMO", "k")
+    monkeypatch.setenv("BYBIT_SECRET_KEY_DEMO", "s")
+    con = BybitConnector("demo", "linear")
+    con.exchange.privateGetV5UserQueryApi = lambda *a, **k: {"result": {
+        "userID": 987654, "parentUid": "123456", "note": "scalp", "readOnly": 0,
+        "permissions": {"ContractTrade": ["Order", "Position"], "Spot": [], "Wallet": []},
+        "ips": ["*"], "expiredAt": "2027-01-01T00:00:00Z",
+    }}
+    info = con.info_chave()
+    assert info["uid"] == "987654"
+    assert info["tipo"] == "subconta"
+    assert info["uid_pai"] == "123456"
+    assert "ContractTrade" in info["permissoes"]
+    assert "Spot" not in info["permissoes"], "permissões vazias não deveriam aparecer"
+    assert info["somente_leitura"] is False
+
+
+def test_info_chave_reconhece_conta_principal(monkeypatch):
+    from core.conexoes.conexao_bybit import BybitConnector
+    monkeypatch.setenv("BYBIT_API_KEY_DEMO", "k")
+    monkeypatch.setenv("BYBIT_SECRET_KEY_DEMO", "s")
+    con = BybitConnector("demo", "linear")
+    con.exchange.privateGetV5UserQueryApi = lambda *a, **k: {"result": {"userID": 111, "parentUid": "0"}}
+    info = con.info_chave()
+    assert info["tipo"] == "principal"
+    assert info["uid_pai"] is None
