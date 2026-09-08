@@ -168,9 +168,10 @@ class BacktestService:
 
     @staticmethod
     def pode_ativar(db, bot, validade_dias: int = VALIDADE_DIAS):
-        """(ok, motivo). Bots em modo simulador não precisam de backtest; testnet e real precisam."""
-        if (getattr(bot, "modo_execucao", "simulador") or "simulador") == "simulador":
-            return True, "modo simulador: backtest não obrigatório"
+        """(ok, motivo). Simulador e demo não arriscam dinheiro e não precisam de backtest; testnet e real precisam."""
+        modo = (getattr(bot, "modo_execucao", "simulador") or "simulador").lower()
+        if modo in ("simulador", "demo"):
+            return True, f"modo {modo}: sem dinheiro real, backtest não obrigatório"
         bt = BacktestService.ultimo_aprovado(db, bot, validade_dias)
         if bt:
             return True, f"backtest #{bt.id} aprovado em {bt.criado_em:%Y-%m-%d} ({bt.motivo})"

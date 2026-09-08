@@ -113,3 +113,43 @@ def test_simulador_ignora_subconta(monkeypatch):
     con = BybitConnector("simulador", "linear", subconta="scalp")
     assert con.subconta == "principal"
     assert con.tem_credenciais is False
+
+
+# ------------------------------------------------------------------ modo demo (conta oficial)
+def test_modo_demo_usa_a_conta_oficial_e_nao_o_testnet(monkeypatch):
+    """
+    Demo Trading vive em bybit.com (api-demo), não em testnet.bybit.com. É o caminho para quem o testnet
+    bloqueia por jurisdição: o testnet é um cadastro separado, sem o KYC da conta oficial.
+    """
+    from core.conexoes.conexao_bybit import BybitConnector
+    monkeypatch.setenv("BYBIT_API_KEY_DEMO", "chave_demo")
+    monkeypatch.setenv("BYBIT_SECRET_KEY_DEMO", "segredo_demo")
+    con = BybitConnector("demo", "linear")
+    assert con.demo is True
+    assert con.sandbox is False, "demo NÃO é sandbox: sandbox aponta para o testnet"
+    assert con.pode_enviar_ordens is True
+    url = con.exchange.urls["api"]
+    assert "api-demo" in str(url), f"demo deveria usar api-demo, veio {url}"
+
+
+def test_demo_tem_as_proprias_variaveis():
+    assert nomes_variaveis("principal", "demo") == ("BYBIT_API_KEY_DEMO", "BYBIT_SECRET_KEY_DEMO")
+    assert nomes_variaveis("scalp", "demo") == ("BYBIT_SUB_SCALP_API_KEY_DEMO", "BYBIT_SUB_SCALP_SECRET_KEY_DEMO")
+
+
+def test_demo_nao_exige_backtest_porque_nao_arrisca_dinheiro():
+    from types import SimpleNamespace
+    from services.backtest_service import BacktestService
+    for modo in ("simulador", "demo"):
+        ok, motivo = BacktestService.pode_ativar(None, SimpleNamespace(modo_execucao=modo, id=1))
+        assert ok is True, f"{modo} não deveria exigir backtest"
+        assert modo in motivo
+
+
+def test_pedir_fundos_demo_recusa_fora_do_modo_demo(monkeypatch):
+    from core.conexoes.conexao_bybit import BybitConnector
+    monkeypatch.setenv("BYBIT_API_KEY_TESTNET", "k")
+    monkeypatch.setenv("BYBIT_SECRET_KEY_TESTNET", "s")
+    con = BybitConnector("testnet", "linear")
+    with pytest.raises(ValueError, match="só funciona no modo demo"):
+        con.pedir_fundos_demo()

@@ -29,13 +29,28 @@ Variáveis do `.env`: `BYBIT_API_KEY_REAL/BYBIT_SECRET_KEY_REAL`, `BYBIT_API_KEY
 
 ## Modos de execução do bot (`Bots.modo_execucao`)
 
-| modo | ordens | dados | chaves |
-|---|---|---|---|
-| `simulador` | nenhuma (paper trading, posição local, SL/TP simulados por high/low) | públicos da mainnet | não precisa |
-| `testnet` | testnet.bybit.com, SL/TP anexados à posição | testnet | `*_TESTNET` |
-| `real` | mainnet | mainnet | `*_REAL` |
+| Modo | Onde roda | Dinheiro | Chaves | Backtest obrigatório |
+|---|---|---|---|---|
+| `simulador` | dados públicos da mainnet | nenhum | nenhuma | não |
+| `demo` | Demo Trading da conta OFICIAL (`api-demo.bybit.com`) | fictício | `*_DEMO` | não |
+| `testnet` | `testnet.bybit.com` | fictício | `*_TESTNET` | sim |
+| `real` | mainnet | real | `*_REAL` | sim |
 
-`estilo_trade` define o grau de Elliott operado: `scalping` (operacional 1m/5m, contexto 15m, macro 1h), `daytrade` (15m/30m, 4h, 1d), `swing` (4h/1d, 1d, 1w). `confluencia_tipo`: `conservador` (todos os validadores alinhados, contexto e macro a favor, sentimento extremo bloqueia) ou `turbo` (basta 1 validador; contra-tendência com metade do tamanho).
+**Use `demo`, não `testnet`.** O testnet é um cadastro separado do site oficial: ele não tem o seu KYC nem o
+status da sua conta, e por isso responde `10024 regulatory restrictions` a partir de países restritos. O Demo
+Trading vive dentro de `bybit.com`, herda a sua conta e a sua verificação, e usa dinheiro fictício com a
+infraestrutura real de ordens.
+
+Como criar a chave de demo:
+
+1. Entre em `bybit.com` com a sua conta oficial.
+2. Passe o mouse no ícone de perfil e escolha Demo Trading. Isso abre uma conta de demonstração com id próprio.
+3. Ainda no modo Demo Trading, no mesmo menu de perfil, clique em API e crie a chave.
+4. Marque leitura e escrita, com permissão de Unified Trading.
+5. Coloque em `BYBIT_API_KEY_DEMO` e `BYBIT_SECRET_KEY_DEMO`. Para subcontas, use `BYBIT_SUB_<NOME>_API_KEY_DEMO`.
+
+A chave de demo só funciona no domínio de demo. Se você usá-la contra a mainnet, a Bybit recusa, e vice-versa.
+Ordens de demo expiram em 7 dias e nem todos os endpoints existem lá.
 
 ## Fluxo de decisão (a cada candle fechado)
 

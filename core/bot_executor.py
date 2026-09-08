@@ -33,7 +33,7 @@ from services.telegram_alert_service import TelegramAlertService
 
 logger = logging.getLogger(__name__)
 
-MODOS = {"simulador": "simulador", "paper": "simulador", "testnet": "testnet", "real": "real"}
+MODOS = {"simulador": "simulador", "paper": "simulador", "demo": "demo", "testnet": "testnet", "real": "real"}
 
 
 def _modo(bot) -> str:
@@ -65,7 +65,7 @@ class BotExecutor:
                                         if cat == "linear" else None) or BybitConnector(self.modo, cat)
         else:
             self.con = BybitConnector(self.modo, cat, subconta=self.subconta)
-        if self.modo != "simulador" and self.categoria != "inverse":
+        if self.modo not in ("simulador",) and self.categoria != "inverse":
             # dados públicos continuam no conector compartilhado (rate limiter único); só ordens usam as chaves
             self._con_publico = self.servicos.get("connectors", {}).get("simulador") or self.con
         else:

@@ -4,6 +4,10 @@ Conector Bybit (API v5 via ccxt) para contratos perpétuos USDT (categoria "line
 
 Modos de execução:
     simulador -> usa SOMENTE dados públicos da mainnet; nunca envia ordens (paper trading).
+    demo      -> DEMO TRADING da conta oficial: dinheiro fictício, mas infraestrutura real (api-demo.bybit.com).
+                 Chaves BYBIT_API_KEY_DEMO / BYBIT_SECRET_KEY_DEMO, criadas dentro de bybit.com com o modo
+                 Demo Trading ligado. É o caminho para quem o testnet bloqueia por jurisdição: o testnet é um
+                 cadastro separado, sem o KYC nem o status da conta oficial, e por isso responde 10024 por IP.
     testnet   -> chaves BYBIT_API_KEY_TESTNET / BYBIT_SECRET_KEY_TESTNET, ordens vão para testnet.bybit.com.
     real      -> chaves BYBIT_API_KEY_REAL / BYBIT_SECRET_KEY_REAL, ordens vão para a mainnet.
 
@@ -41,7 +45,8 @@ from core.utils_indicadores import (
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-MODOS_VALIDOS = ("simulador", "testnet", "real")
+MODOS_VALIDOS = ("simulador", "demo", "testnet", "real")
+MODOS_COM_ORDEM = ("demo", "testnet", "real")
 SUBCONTA_PRINCIPAL = ("principal", "main", "", None)
 
 
@@ -50,9 +55,12 @@ def _slug(subconta: str) -> str:
     return "".join(c if c.isalnum() else "_" for c in str(subconta).strip().upper()).strip("_")
 
 
+SUFIXO_POR_MODO = {"real": "REAL", "demo": "DEMO", "testnet": "TESTNET"}
+
+
 def nomes_variaveis(subconta: Optional[str], modo: str) -> tuple:
     """Nomes das variáveis de ambiente esperadas para essa subconta e modo."""
-    sufixo = "REAL" if modo == "real" else "TESTNET"
+    sufixo = SUFIXO_POR_MODO.get(modo, "TESTNET")
     if subconta is None or str(subconta).strip().lower() in SUBCONTA_PRINCIPAL:
         return (f"BYBIT_API_KEY_{sufixo}", f"BYBIT_SECRET_KEY_{sufixo}")
     s = _slug(subconta)
@@ -67,7 +75,7 @@ def credenciais(subconta: Optional[str], modo: str) -> tuple:
 
 def subcontas_configuradas(modo: str = "testnet") -> List[Dict[str, Any]]:
     """Quais subcontas têm chave no ambiente (para diagnóstico no painel; nunca devolve o valor da chave)."""
-    sufixo = "REAL" if modo == "real" else "TESTNET"
+    sufixo = SUFIXO_POR_MODO.get(modo, "TESTNET")
     prefixo, fim = "BYBIT_SUB_", f"_API_KEY_{sufixo}"
     out: List[Dict[str, Any]] = []
     principal_k, principal_s = credenciais("principal", modo)
@@ -95,7 +103,7 @@ class BybitConnector:
         self._markets_loaded = False
 
         self.subconta = (subconta or "principal") if str(subconta or "principal").strip() else "principal"
-        if modo_execucao in ("real", "testnet"):
+        if modo_execucao in MODOS_COM_ORDEM:
             sandbox = modo_execucao == "testnet"
             if api_key and api_secret:
                 self.api_key, self.api_secret = api_key, api_secret
@@ -127,6 +135,10 @@ class BybitConnector:
 
         self.exchange = ccxt.bybit(config)
         self.exchange.set_sandbox_mode(sandbox)
+        # Demo Trading vive na conta oficial (api-demo.bybit.com), não no testnet: outra base de URL, mesma conta.
+        self.demo = modo_execucao == "demo"
+        if self.demo:
+            self.exchange.enable_demo_trading(True)
         self.sandbox = sandbox
 
     # ------------------------------------------------------------------ utils
@@ -136,7 +148,15 @@ class BybitConnector:
 
     @property
     def pode_enviar_ordens(self) -> bool:
-        return self.modo_execucao in ("testnet", "real") and self.tem_credenciais
+        return self.modo_execucao in MODOS_COM_ORDEM and self.tem_credenciais
+
+    def pedir_fundos_demo(self, moeda: str = "USDT", quantidade: float = 100_000) -> Dict[str, Any]:
+        """Só no modo demo: pede saldo fictício para a conta de Demo Trading."""
+        if not self.demo:
+            raise ValueError("pedir_fundos_demo só funciona no modo demo")
+        self._exigir_credenciais("pedir_fundos_demo")
+        return self.exchange.privatePostV5AccountDemoApplyMoney(
+            {"adjustType": 0, "utaDemoApplyMoney": [{"coin": moeda, "amountStr": str(quantidade)}]})
 
     def _load_markets(self):
         if not self._markets_loaded:
@@ -430,14 +450,14 @@ class BybitConnector:
     def testar_conexao(self) -> Dict[str, Any]:
         """Diagnóstico rápido: horário, ticker e (se houver chaves) saldo."""
         out: Dict[str, Any] = {"modo": self.modo_execucao, "sandbox": self.sandbox, "categoria": self.categoria,
-                               "subconta": self.subconta}
+                               "subconta": self.subconta, "demo": getattr(self, "demo", False)}
         try:
             out["server_time"] = self.exchange.fetch_time()
             out["ticker_btc"] = self.obter_preco_atual("BTCUSDT")
             out["publico"] = "ok"
         except Exception as e:
             out["publico"] = f"erro: {e}"
-        if self.tem_credenciais and self.modo_execucao != "simulador":
+        if self.tem_credenciais and self.modo_execucao in MODOS_COM_ORDEM:
             try:
                 out["saldo_usdt"] = self.obter_saldo("USDT")
                 out["privado"] = "ok"

@@ -33,7 +33,7 @@ export function Tag({ children, color }: { children: ReactNode; color?: string }
 }
 
 export function ModoTag({ modo }: { modo: string | null | undefined }) {
-  const c = modo === 'real' ? 'var(--red)' : modo === 'testnet' ? 'var(--amber)' : undefined
+  const c = modo === 'real' ? 'var(--red)' : modo === 'testnet' ? 'var(--amber)' : modo === 'demo' ? 'var(--acc)' : undefined
   return <Tag color={c}>{modo || 'simulador'}</Tag>
 }
 

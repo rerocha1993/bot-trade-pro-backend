@@ -101,7 +101,17 @@ export default function BotForm() {
 
           <Card title="Execução" pad={false}>
             <div className="form-grid">
-              <div className="span2"><span className="label">Modo</span><Seg value={String(f.modo_execucao)} options={['simulador', 'testnet', 'real']} onChange={(v) => set('modo_execucao', v)} /></div>
+              <div className="span2">
+                <span className="label">Modo</span>
+                <Seg value={String(f.modo_execucao)} options={['simulador', 'demo', 'testnet', 'real']}
+                  onChange={(v) => set('modo_execucao', v)} labels={{ demo: 'demo (conta oficial)' }} />
+                {f.modo_execucao === 'demo' && (
+                  <div className="mono muted" style={{ fontSize: 10.5, marginTop: 6, lineHeight: 1.5 }}>
+                    Demo Trading roda dentro da sua conta oficial da Bybit, com dinheiro fictício e a infraestrutura real.
+                    A chave é criada em bybit.com com o modo Demo Trading ligado, e vai nas variáveis terminadas em _DEMO.
+                  </div>
+                )}
+              </div>
               <div><span className="label">Tipo de entrada</span><Seg value={String(f.tipo_entrada)} options={['limite', 'mercado']} onChange={(v) => set('tipo_entrada', v)} labels={{ limite: 'limitada (post-only)', mercado: 'a mercado' }} /></div>
               {num('limite_candles_espera', 'Candles até cancelar a limitada', '1')}
               <Field label="Alavancagem">
