@@ -32,7 +32,8 @@ export function usePreco(par = 'BTCUSDT') {
 export function Sidebar() {
   const status = useStatusGeral()
   const bybit = useQuery({ queryKey: ['bybit', 'simulador'], queryFn: () => api.get<DiagBybit>('/status/bybit', { modo: 'simulador' }), refetchInterval: 60_000, retry: 0 })
-  const conta = useQuery({ queryKey: ['bybit', 'testnet'], queryFn: () => api.get<DiagBybit>('/status/bybit', { modo: 'testnet' }), refetchInterval: 120_000, retry: 0 })
+  // as chaves são do Demo Trading da conta oficial, não do testnet (registro separado, sem o KYC dele)
+  const conta = useQuery({ queryKey: ['bybit', 'demo'], queryFn: () => api.get<DiagBybit>('/status/bybit', { modo: 'demo' }), refetchInterval: 120_000, retry: 0 })
   const md = status.data?.servicos?.market_data as { cesta?: string; membros?: string[]; falhas?: Record<string, unknown> } | undefined
   const totExch = md?.membros?.length
   const okExch = totExch !== undefined ? totExch - Object.keys(md?.falhas ?? {}).length : undefined
@@ -55,7 +56,7 @@ export function Sidebar() {
       </nav>
       <div className="saude">
         <span className="eyebrow" style={{ fontSize: 10, letterSpacing: '0.16em' }}>Saúde</span>
-        {[['Bybit dados', dados], ['Bybit conta', contaTxt], ['Cesta exchanges', okExch !== undefined && totExch ? `${okExch}/${totExch}` : '—'],
+        {[['Bybit dados', dados], ['Bybit conta (demo)', contaTxt], ['Cesta exchanges', okExch !== undefined && totExch ? `${okExch}/${totExch}` : '—'],
           ['Telegram', status.data ? (status.data.servicos.telegram ? 'ok' : 'off') : '…']].map(([l, v]) => (
           <div className="saude-row" key={l}>
             <span className="dot" style={{ background: cor(v) }} />

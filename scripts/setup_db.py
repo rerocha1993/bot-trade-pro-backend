@@ -21,7 +21,16 @@ from models.bot import Bot  # noqa: E402
 from models.exchange_institucional import ExchangeInstitucional  # noqa: E402
 from models.pair_institucional import PairInstitucional  # noqa: E402
 
+COLUNAS_NOVAS_POSICOES = {
+    "quantidade_inicial": "FLOAT NULL",
+    "saidas_feitas": "NVARCHAR(120) NULL",
+    "pnl_parcial": "FLOAT NULL DEFAULT 0",
+}
+
 COLUNAS_NOVAS_BOTS = {
+    "usar_saida_escalonada": "BIT NOT NULL DEFAULT 0",
+    "saida_escalonada": "NVARCHAR(120) NULL DEFAULT '50/30, 75/30, 90/25'",
+    "mover_stop_para_entrada": "BIT NOT NULL DEFAULT 1",
     "usar_sentimento": "BIT NOT NULL DEFAULT 1",
     "usar_tendencia_macro": "BIT NOT NULL DEFAULT 1",
     "max_trades_dia": "INT NOT NULL DEFAULT 10",
@@ -53,7 +62,39 @@ COLUNAS_NOVAS_BOTS = {
 }
 
 
+# Colunas de texto que nasceram estreitas demais para os valores que o código escreve. Um INSERT que não cabe
+# não é só um log perdido: ele derruba a transação inteira, e junto vai o estado do robô que estava sendo gravado.
+# Foi assim que uma realização parcial saiu três vezes na corretora: 'saida_parcial' não cabia em varchar(10).
+LARGURAS_MINIMAS = [
+    ("LogExecucaoBot", "acao", 30),
+    ("LogExecucaoBot", "tipo_operacao", 30),
+    ("LogExecucaoBot", "direcao", 10),
+    ("DecisoesBot", "acao", 20),
+    ("PosicoesBot", "direcao", 10),
+    ("PosicoesBot", "status", 20),
+]
+
+
+def alargar_colunas(cn) -> int:
+    q = text("""SELECT CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = :t AND COLUMN_NAME = :c""")
+    mudou = 0
+    for tabela, coluna, minimo in LARGURAS_MINIMAS:
+        r = cn.execute(q, {"t": tabela, "c": coluna}).first()
+        if not r or r[0] is None or r[0] < 0 or r[0] >= minimo:
+            continue          # inexistente, já é MAX (-1), ou já cabe
+        nulo = "NULL" if (r[1] or "YES").upper() == "YES" else "NOT NULL"
+        print(f"   ~ {tabela}.{coluna} {r[2]}({r[0]}) -> {r[2]}({minimo})")
+        cn.execute(text(f"ALTER TABLE {tabela} ALTER COLUMN {coluna} {r[2]}({minimo}) {nulo}"))
+        mudou += 1
+    return mudou
+
+
 def main():
+    from api.database import aguardar_banco
+    if not aguardar_banco():
+        print("banco indisponível: o LocalDB não respondeu. Rode 'sqllocaldb start MSSQLLocalDB' e tente de novo.")
+        raise SystemExit(1)
     print("1) create_all ...")
     Base.metadata.create_all(bind=engine)
     insp = inspect(engine)
@@ -63,12 +104,20 @@ def main():
             if col not in existentes:
                 print(f"   + coluna Bots.{col}")
                 cn.execute(text(f"ALTER TABLE Bots ADD {col} {ddl}"))
+    existentes_pos = {c["name"] for c in inspect(engine).get_columns("PosicoesBot")}
+    with engine.begin() as cn:
+        for col, ddl in COLUNAS_NOVAS_POSICOES.items():
+            if col not in existentes_pos:
+                print(f"   + coluna PosicoesBot.{col}")
+                cn.execute(text(f"ALTER TABLE PosicoesBot ADD {col} {ddl}"))
     # tipos de coluna que precisam ser BIGINT (timestamps em ms)
     with engine.begin() as cn:
         cols = {c["name"]: c for c in inspect(engine).get_columns("DecisoesBot")}
         if cols.get("candle_ts") and "BIG" not in str(cols["candle_ts"]["type"]).upper():
             print("   ~ DecisoesBot.candle_ts -> BIGINT")
             cn.execute(text("ALTER TABLE DecisoesBot ALTER COLUMN candle_ts BIGINT NULL"))
+    with engine.begin() as cn:
+        alargar_colunas(cn)
     print("2) normalizando bots ...")
     db = SessionLocal()
     try:

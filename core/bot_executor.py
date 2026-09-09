@@ -24,8 +24,13 @@ from typing import Dict, Optional
 from core.conexoes.conexao_bybit import BybitConnector
 from core.executor_real import OrderExecutor, TAXA_MAKER, TAXA_TAKER
 from core.alavancagem import normalizar as normalizar_alavancagem, validar_stop
+from core.perfil_saida import perfil as perfil_saida
+from core.saida_escalonada import (
+    avanco as avanco_ate_alvo, escrever_feitas, ler_feitas, ler_plano, montar_fatias, pendentes,
+)
 from core.strategy_engine import StrategyEngine
 from core.utils_indicadores import normalizar_timeframe
+from api.database import SessionLocal
 from models.decisao_bot import DecisaoBot
 from models.log_execucao import LogExecucaoBot
 from models.posicao_bot import PosicaoBot
@@ -98,12 +103,29 @@ class BotExecutor:
         return default if v is None else v
 
     def _log(self, **kw):
+        """
+        Grava o log em UMA SESSÃO PRÓPRIA, separada da sessão do robô.
+
+        Antes o log entrava na mesma transação, e o rollback de um log que não coubesse levava junto o que o robô
+        acabara de fazer. Foi assim que uma realização parcial saiu três vezes na corretora: a ordem foi enviada,
+        o log de 'saida_parcial' não coube na coluna, o rollback apagou o registro da fatia realizada, e o ciclo
+        seguinte achou que ela ainda estava pendente. O que o robô mudou é gravado ANTES; o log vem depois e, se
+        falhar, falha sozinho.
+        """
         try:
-            self.db.add(LogExecucaoBot(bot_id=self._attr("id"), data_execucao=datetime.utcnow(), **kw))
             self.db.commit()
         except Exception as e:
-            logger.error("falha ao gravar log: %s", e)
+            logger.error("falha ao gravar o estado do robô: %s", e)
             self.db.rollback()
+        sessao = SessionLocal()
+        try:
+            sessao.add(LogExecucaoBot(bot_id=self._attr("id"), data_execucao=datetime.utcnow(), **kw))
+            sessao.commit()
+        except Exception as e:
+            logger.error("falha ao gravar log: %s", e)
+            sessao.rollback()
+        finally:
+            sessao.close()
 
     def _novo_dia(self):
         hoje = date.today().isoformat()
@@ -239,6 +261,7 @@ class BotExecutor:
         self.posicao = PosicaoBot(
             bot_id=self._attr("id"), par=self.par, modo_execucao=self.modo, direcao=direcao, quantidade=exec_["quantidade"],
             preco_entrada=preco_exec, sl=sl, tp=tp, sl_inicial=sl, trailing_ativo=bool(self._attr("trailing_manual", False)),
+            quantidade_inicial=exec_["quantidade"], saidas_feitas=None, pnl_parcial=0.0,
             status="aberta", motivo_entrada=decisao.get("motivo"), fase_onda=decisao.get("fase_onda"),
             cenario=(decisao.get("cenario") or "")[:60], ordem_id=str(exec_.get("ordem_id") or "")[:64], taxas=exec_.get("taxa", 0.0))
         self.db.add(self.posicao)
@@ -329,8 +352,10 @@ class BotExecutor:
         pos = self.posicao
         if not pos or not (self._attr("usar_trailing_stop", False) or pos.trailing_ativo or self._attr("trailing_manual", False)):
             return
-        ativador = float(self._attr("ativador_trailing", 0.005) or 0.005)
-        dist = float(self._attr("distancia_trailing", 0.003) or 0.003)
+        # sem valor próprio, vale o perfil do estilo: 0,30% de distância mataria um swing no primeiro pavio
+        padrao = perfil_saida(self._attr("estilo_trade", ""))
+        ativador = float(self._attr("ativador_trailing", 0) or padrao.ativador_trailing)
+        dist = float(self._attr("distancia_trailing", 0) or padrao.distancia_trailing)
         if not pos.trailing_ativo:
             if pos.direcao == "buy" and preco >= pos.preco_entrada * (1 + ativador):
                 pos.trailing_ativo = True
@@ -354,10 +379,81 @@ class BotExecutor:
                 self.db.commit()
                 self._log(acao="ajuste_sl", tipo_operacao="info", preco=preco, sl=novo, motivo="Trailing stop")
 
+    def aplicar_saida_escalonada(self, preco: float):
+        """
+        Realiza pedaços da posição conforme o preço avança rumo ao alvo (core/saida_escalonada.py).
+        A régua é o AVANÇO até o alvo, não o preço, então o mesmo plano serve para qualquer par e timeframe.
+        """
+        pos = self.posicao
+        if not pos or not self._attr("usar_saida_escalonada", False) or not pos.tp:
+            return
+        q0 = float(pos.quantidade_inicial or pos.quantidade or 0)
+        if q0 <= 0:
+            return
+        try:
+            info = self.con.info_mercado(self.par)
+            min_qty, step = float(info.get("min_qty") or 0), float(info.get("qty_step") or 0)
+        except Exception:
+            min_qty, step = 0.0, 0.0
+        plano_txt = self._attr("saida_escalonada") or perfil_saida(self._attr("estilo_trade", "")).saida_escalonada
+        fatias = montar_fatias(q0, ler_plano(plano_txt), min_qty, step)
+        if not fatias:
+            return
+        feitas = ler_feitas(pos.saidas_feitas)
+        av = avanco_ate_alvo(float(pos.preco_entrada), float(pos.tp), preco, pos.direcao)
+        disparadas = pendentes(fatias, feitas, av)
+        if not disparadas:
+            return
+        for f in disparadas:
+            restante = float(pos.quantidade or 0)
+            qty = min(f["quantidade"], restante)
+            if min_qty and (qty < min_qty or restante - qty < min_qty):
+                continue          # não deixa um resto impossível de fechar na corretora
+            try:
+                ex = self.ordens.reduzir(self.par, pos.direcao, qty, self._attr("position_mode", "one-way"), preco_ref=preco)
+            except Exception as e:
+                logger.warning("[%s] realização parcial falhou: %s", self._attr("nome"), e)
+                return
+            executada = float(ex.get("quantidade") or 0)
+            if executada <= 0:
+                continue
+            pexec = float(ex.get("preco_exec") or preco)
+            sinal = 1 if pos.direcao == "buy" else -1
+            lucro = (pexec - float(pos.preco_entrada)) * executada * sinal - float(ex.get("taxa") or 0)
+            pos.quantidade = round(restante - executada, 8)
+            pos.pnl_parcial = round(float(pos.pnl_parcial or 0) + lucro, 8)
+            feitas.append(f["avanco"])
+            pos.saidas_feitas = escrever_feitas(feitas)
+            self.estado["pnl_dia"] += lucro
+            # a fatia já saiu na corretora: o registro vai para o banco AGORA, antes de qualquer coisa que possa
+            # falhar. Sem isso, o ciclo seguinte acha que a fatia ainda está pendente e manda a ordem de novo.
+            self.db.commit()
+            self._log(acao="parcial", tipo_operacao="saida_parcial", direcao=pos.direcao, preco=pexec,
+                      quantidade=executada, resultado=lucro,
+                      motivo=f"Realização de {f['fracao']:.0%} da mão aos {f['avanco']:.0%} do caminho até o alvo")
+            logger.info("[%s] PARCIAL %s%% @ %s (avanço %.0f%%) lucro %.2f, resta %s",
+                        self._attr("nome"), round(f["fracao"] * 100), pexec, f["avanco"] * 100, lucro, pos.quantidade)
+            # depois da primeira realização, o zero a zero fica travado: a operação não pode mais virar prejuízo
+            if self._attr("mover_stop_para_entrada", True) and len(feitas) == 1:
+                entrada = float(pos.preco_entrada)
+                melhor = (pos.sl is None or (entrada > pos.sl if pos.direcao == "buy" else entrada < pos.sl))
+                if melhor:
+                    alvo_sl = self.con.arredondar_preco(self.par, entrada)
+                    if self.ordens.atualizar_stop(self.par, alvo_sl, pos.tp, self._attr("position_mode", "one-way"), pos.direcao):
+                        pos.sl = alvo_sl
+                        self._log(acao="ajuste_sl", tipo_operacao="info", preco=preco, sl=alvo_sl,
+                                  motivo="Stop movido para o preço de entrada após a primeira realização")
+        self.db.commit()
+        if float(pos.quantidade or 0) <= 0:
+            self._registrar_saida(preco, "Posição totalmente realizada nas parciais")
+
     def gerir_posicao(self, preco: float, ultimo_candle: list, candle_novo: bool):
         pos = self.posicao
         if not pos:
             return
+        self.aplicar_saida_escalonada(preco)
+        if not self.posicao:
+            return                      # as parciais fecharam a posição inteira
         self.aplicar_trailing_stop(preco)
         # 1) exchange já fechou por SL/TP?
         if self.modo in ("testnet", "real") and self.con.pode_enviar_ordens:

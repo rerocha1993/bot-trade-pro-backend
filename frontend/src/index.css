@@ -168,3 +168,6 @@ button { cursor: pointer; }
 .sw-row .t { flex: 1 1 auto; font-size: 12.5px; }
 .sw-row .n { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
 .state-pill { display: inline-block; padding: 3px 9px; border-radius: 2px; font-family: var(--mono); font-size: 11px; border: 1px solid; }
+
+/* aviso curto dentro de um bloco de texto (sem a caixa do .warn) */
+.warn-txt { color: var(--amber); }

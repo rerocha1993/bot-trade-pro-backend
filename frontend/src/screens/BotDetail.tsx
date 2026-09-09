@@ -32,6 +32,8 @@ export default function BotDetail() {
   const estado = st.data.estado
   const ligado = st.data.rodando || bot.ativo_bot
   const precoAtual = precoQ.data?.preco
+  // avanços já realizados pela saída escalonada, na ordem em que saíram
+  const parciais = (pos?.saidas_feitas ?? '').split(',').map((a) => Number(a)).filter((a) => Number.isFinite(a) && a > 0)
   const aberto = pos && precoAtual ? (pos.direcao === 'buy' ? precoAtual - pos.preco_entrada : pos.preco_entrada - precoAtual) * pos.quantidade : null
   const refEntrada = pos?.preco_entrada ?? dec?.preco
   const tp = pos?.tp ?? dec?.tp ?? null, sl = pos?.sl ?? dec?.sl ?? null
@@ -122,11 +124,13 @@ export default function BotDetail() {
               <KV k="SL" v={preco(sl)} color="var(--red)" src={pos?.trailing_ativo ? 'trailing' : pos ? 'posição' : 'decisão'} />
               <KV k="R:R" v={rr === null ? '—' : fmt(rr, 1)} color="var(--acc)" src={bot.rr_minimo ? `mínimo ${fmt(bot.rr_minimo, 1)}` : 'padrão do perfil'} />
               {pos && <KV k="Aberto" v={aberto === null ? '—' : fmtSigned(aberto)} color={corPnl(aberto)} src={`${rotuloAcao(pos.direcao)} ${preco(pos.preco_entrada)}`} />}
+              {pos && parciais.length > 0 && <KV k="Realizado" v={fmtSigned(pos.pnl_parcial ?? 0)} color={corPnl(pos.pnl_parcial ?? 0)} src={`${parciais.length} parcial${parciais.length > 1 ? 'is' : ''} · ${parciais.map((a) => pct(a, 0)).join(', ')} do caminho`} />}
             </Card>
             <Card>
               <div className="eyebrow" style={{ marginBottom: 9 }}>Tamanho e limites</div>
               <KV k="Risco" v={`${fmt(banca * bot.risco_pct, 2)} USDT · ${pct(bot.risco_pct, 1)}`} />
-              <KV k="Quantidade" v={pos ? fmt(pos.quantidade, 4) : `${bot.min_quantidade ?? '—'} – ${bot.max_quantidade ?? '—'}`} />
+              <KV k="Quantidade" v={pos ? fmt(pos.quantidade, 4) : `${bot.min_quantidade ?? '—'} – ${bot.max_quantidade ?? '—'}`}
+                  src={pos && parciais.length > 0 ? `de ${fmt(pos.quantidade_inicial ?? pos.quantidade, 4)} na entrada` : undefined} />
               <KV k="Trades do dia" v={`${estado?.trades_dia ?? 0} / ${bot.max_trades_dia}`} />
               <KV k="P&L do dia" v={fmtSigned(estado?.pnl_dia ?? 0)} color={corPnl(estado?.pnl_dia ?? 0)} src={`limite −${pct(bot.max_perda_dia_pct, 1)}`} />
             </Card>

@@ -118,6 +118,33 @@ class OrderExecutor:
         return {"ordem_id": ordem.get("id"), "preco_exec": preco_exec, "quantidade": qty, "simulado": False,
                 "taxa": preco_exec * qty * TAXA_TAKER, "raw": ordem}
 
+    def reduzir(self, par: str, direcao_posicao: str, quantidade: float, position_mode: str = "one-way",
+                preco_ref: Optional[float] = None) -> Dict:
+        """
+        Realiza PARTE da posição (reduce_only), mantendo o resto aberto. Usado pela saída escalonada.
+        Diferente de fechar(): aqui a quantidade é a fatia, não a posição inteira.
+        """
+        lado = "sell" if direcao_posicao == "buy" else "buy"
+        qty = float(quantidade or 0)
+        if qty <= 0:
+            return {"ordem_id": None, "preco_exec": None, "quantidade": 0, "simulado": self.simulado, "nada_a_fazer": True}
+        if self.simulado:
+            preco = float(preco_ref or self.con.obter_preco_atual(par))
+            return {"ordem_id": f"SIM-{uuid.uuid4().hex[:12]}", "preco_exec": preco, "quantidade": qty,
+                    "simulado": True, "taxa": preco * qty * TAXA_TAKER}
+        pos = self.con.obter_posicao(par)
+        if not pos:
+            return {"ordem_id": None, "preco_exec": None, "quantidade": 0, "simulado": False, "ja_fechada": True}
+        qty = min(qty, float(pos["quantidade"]))          # nunca reduzir mais do que existe
+        qty = self.con.arredondar_quantidade(par, qty)
+        if qty <= 0:
+            return {"ordem_id": None, "preco_exec": None, "quantidade": 0, "simulado": False, "abaixo_do_minimo": True}
+        ordem = self.con.criar_ordem(par, lado, qty, tipo="market", reduce_only=True,
+                                     position_idx=pos.get("position_idx", position_idx(position_mode, direcao_posicao)))
+        preco_exec = self._preco_execucao(par, ordem, preco_ref)
+        return {"ordem_id": ordem.get("id"), "preco_exec": preco_exec, "quantidade": qty, "simulado": False,
+                "taxa": preco_exec * qty * TAXA_TAKER, "raw": ordem}
+
     def atualizar_stop(self, par: str, stop_loss: Optional[float] = None, take_profit: Optional[float] = None,
                        position_mode: str = "one-way", direcao: str = "buy") -> bool:
         if self.simulado:

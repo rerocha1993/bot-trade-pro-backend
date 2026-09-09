@@ -34,6 +34,9 @@ export interface Bot {
   ativador_trailing: number
   distancia_trailing: number
   trailing_manual: boolean
+  usar_saida_escalonada: boolean
+  saida_escalonada: string
+  mover_stop_para_entrada: boolean
   usar_sentimento: boolean
   usar_tendencia_macro: boolean
   max_trades_dia: number
@@ -114,6 +117,9 @@ export interface Posicao {
   tp: number | null
   sl_inicial: number | null
   trailing_ativo: boolean
+  quantidade_inicial: number | null
+  saidas_feitas: string | null
+  pnl_parcial: number | null
   status: 'aberta' | 'fechada'
   preco_saida: number | null
   pnl: number | null

@@ -7,6 +7,7 @@ import type { Bot } from '../api/types'
 import { Header, Page } from '../components/Layout'
 import { Btn, Card, Err, Field, Loading, Seg, Switch } from '../components/ui'
 import { hora, pct } from '../lib/format'
+import { analisarPlano, perfilSaida } from '../lib/perfil-saida'
 
 const PADRAO: Partial<Bot> = {
   nome: '', ativo: 'BTCUSDT', timeframe: '15m', estilo_trade: 'daytrade', confluencia_tipo: 'conservador', modo_execucao: 'simulador',
@@ -16,7 +17,8 @@ const PADRAO: Partial<Bot> = {
   prob_sucesso_minima: 0.45, rr_minimo: 0, taxa_historica_minima: 0,
   usar_elliott: true, usar_fibonacci: true, usar_tpo: true, usar_volume_profile: false, usar_vwap: true, usar_orderflow: false, usar_orderblock: true,
   usar_sentimento: true, usar_tendencia_macro: true, usar_api_macro: false, usar_filtro_regime: true, usar_websocket: false,
-  usar_trailing_stop: true, ativador_trailing: 0.008, distancia_trailing: 0.0035, sl_tipo: 'percentual', sl_variacao_pct: 1.0, saida_estrutural: false,
+  usar_trailing_stop: true, ativador_trailing: 0.010, distancia_trailing: 0.007, sl_tipo: 'percentual', sl_variacao_pct: 1.0, saida_estrutural: false,
+  usar_saida_escalonada: true, saida_escalonada: '50/30, 75/30, 90/25', mover_stop_para_entrada: true,
   ativo_bot: false,
 }
 
@@ -62,6 +64,12 @@ export default function BotForm() {
   const txt = (k: keyof Bot, label: string, mono = true) => (
     <Field label={label}><input value={String(f[k] ?? '')} onChange={(e) => set(k, e.target.value)} style={mono ? undefined : { fontFamily: 'var(--sans)' }} /></Field>
   )
+
+  const perfil = perfilSaida(f.estilo_trade)
+  const plano = analisarPlano(f.saida_escalonada)
+  const ativador = Number(f.ativador_trailing ?? 0)
+  const distancia = Number(f.distancia_trailing ?? 0)
+  const trailingTravaPrejuizo = ativador > 0 && distancia > 0 && ativador <= distancia
 
   if (id !== null && existente.isPending) return <><Header titulo="Editar robô" /><Page><Loading /></Page></>
   if (id !== null && existente.isError) return <><Header titulo="Editar robô" /><Page><Err e={existente.error} /></Page></>
@@ -168,15 +176,47 @@ export default function BotForm() {
             </div>
           </Card>
 
-          <Card title="Stop e trailing" pad={false}>
+          <Card title="Stop e trailing" pad={false} right={
+            <Btn small kind="ghost" onClick={() => { set('ativador_trailing', perfil.ativador_trailing); set('distancia_trailing', perfil.distancia_trailing) }}>usar perfil {f.estilo_trade}</Btn>
+          }>
             <div className="form-grid" style={{ alignItems: 'end' }}>
               <Field label="Tipo de stop"><select value={String(f.sl_tipo)} onChange={(e) => set('sl_tipo', e.target.value)}><option value="percentual">percentual</option><option value="atr">ATR</option><option value="elliott">invalidação de Elliott</option></select></Field>
               {num('sl_variacao_pct', 'Stop (% ou múltiplo de ATR)', '0.1')}
               {num('ativador_trailing', 'Trailing ativa após (fração)', '0.001')}
               {num('distancia_trailing', 'Distância do trailing (fração)', '0.0005')}
               <div className="span2 sw-row" style={{ borderBottom: 0 }}>
-                <span className="t">Trailing automático</span>
+                <span className="t">Trailing automático<br /><span className="muted" style={{ fontSize: 11 }}>o stop sobe junto com o preço e nunca desce</span></span>
                 <Switch on={!!f.usar_trailing_stop} onChange={(v) => set('usar_trailing_stop', v)} />
+              </div>
+              <div className="span2 muted" style={{ fontSize: 11 }}>
+                {trailingTravaPrejuizo
+                  ? <span className="warn-txt">Ativa com {pct(ativador, 2)} de avanço mas cola a {pct(distancia, 2)} do preço: o stop nasceria abaixo da entrada. O ativador tem que ser maior que a distância.</span>
+                  : <>Liga depois de {pct(ativador, 2)} a favor e segue a {pct(distancia, 2)} do preço, travando pelo menos {pct(ativador - distancia, 2)} de lucro. Sugerido para {f.estilo_trade}: {pct(perfil.ativador_trailing, 2)} / {pct(perfil.distancia_trailing, 2)}.</>}
+              </div>
+            </div>
+          </Card>
+
+          <Card title="Saída escalonada" pad={false} right={
+            <Btn small kind="ghost" onClick={() => set('saida_escalonada', perfil.saida_escalonada)}>usar perfil {f.estilo_trade}</Btn>
+          }>
+            <div className="form-grid" style={{ alignItems: 'end' }}>
+              <div className="span2 sw-row">
+                <span className="t">Realizar em pedaços<br /><span className="muted" style={{ fontSize: 11 }}>garante lucro no caminho em vez de tudo ou nada no alvo</span></span>
+                <Switch on={!!f.usar_saida_escalonada} onChange={(v) => set('usar_saida_escalonada', v)} />
+              </div>
+              <div className="span2 sw-row">
+                <span className="t">Stop para a entrada na primeira parcial<br /><span className="muted" style={{ fontSize: 11 }}>depois da primeira realização o trade não vira prejuízo</span></span>
+                <Switch on={!!f.mover_stop_para_entrada} onChange={(v) => set('mover_stop_para_entrada', v)} />
+              </div>
+              {txt('saida_escalonada', 'Plano (avanço/fração, em %)')}
+              <div className="span2 muted" style={{ fontSize: 11 }}>
+                {plano
+                  ? <>
+                      {plano.map(([av, fr]) => <div key={av}>realiza {pct(fr)} da mão quando o preço andar {pct(av)} do caminho até o alvo</div>)}
+                      <div>deixa {pct(1 - plano.reduce((s, [, fr]) => s + fr, 0))} correndo até o alvo (ou até o trailing tirar) — {plano.length + 1} saídas</div>
+                    </>
+                  : <span className="warn-txt">Plano inválido. Use avanço/fração em %, ex.: 50/30, 75/30, 90/25. As frações precisam somar menos de 100%, para sobrar posição até o alvo.</span>}
+                <div style={{ marginTop: 4 }}>Numa mão pequena demais para o mínimo da corretora o plano encolhe sozinho, ou sai tudo no alvo.</div>
               </div>
             </div>
           </Card>

@@ -21,6 +21,9 @@ class PosicaoBot(Base):
     sl = Column(Float, nullable=True)
     tp = Column(Float, nullable=True)
     sl_inicial = Column(Float, nullable=True)
+    quantidade_inicial = Column(Float, nullable=True)      # mão original, antes das realizações parciais
+    saidas_feitas = Column(String(120), nullable=True)     # avanços já realizados, ex.: "0.5,0.75"
+    pnl_parcial = Column(Float, nullable=True, default=0.0)  # resultado já realizado nas parciais
     trailing_ativo = Column(Boolean, default=False)
     status = Column(String(12), nullable=False, default="aberta")  # aberta | fechada
     preco_saida = Column(Float, nullable=True)

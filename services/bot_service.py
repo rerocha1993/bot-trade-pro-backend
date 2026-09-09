@@ -2,6 +2,8 @@
 from sqlalchemy.orm import Session
 
 from core.alavancagem import normalizar as normalizar_alavancagem
+from core.perfil_saida import perfil as perfil_saida
+from core.saida_escalonada import analisar_plano, escrever_plano
 from models.bot import Bot
 from models.bot_indicador import BotIndicador
 
@@ -30,6 +32,25 @@ class BotService:
             d["modo_execucao"] = str(d["modo_execucao"]).lower()
         if "alavancagem" in d:
             d["alavancagem"] = normalizar_alavancagem(d["alavancagem"])
+
+        # o plano de saída escalonada é recusado quando não dá para entender, em vez de virar o padrão calado
+        if d.get("saida_escalonada"):
+            plano = analisar_plano(d["saida_escalonada"])
+            if plano is None:
+                raise ValueError(
+                    f"Plano de saída escalonada inválido: {d['saida_escalonada']!r}. "
+                    "Use 'avanço/fração' em porcentagem, ex.: '50/30, 75/30, 90/25'. "
+                    "As frações precisam somar menos de 100%, para sobrar posição até o alvo.")
+            d["saida_escalonada"] = escrever_plano(plano)
+        elif "saida_escalonada" in d:
+            d["saida_escalonada"] = perfil_saida(d.get("estilo_trade", "")).saida_escalonada
+
+        # trailing que liga depois de andar MENOS do que a sua própria distância trava prejuízo em vez de lucro
+        ativ, dist = d.get("ativador_trailing"), d.get("distancia_trailing")
+        if ativ is not None and dist is not None and float(ativ) <= float(dist):
+            raise ValueError(
+                f"Trailing inválido: ativa com {float(ativ):.2%} de avanço mas cola a {float(dist):.2%} do preço, "
+                "então o stop nasceria abaixo da entrada. O ativador tem que ser maior que a distância.")
         return d
 
     def create_bot(self, data: dict) -> Bot:

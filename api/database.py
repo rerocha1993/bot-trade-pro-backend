@@ -66,17 +66,66 @@ def _instancia_localdb() -> str:
     return srv.split("\\")[-1] if "\\" in srv else "MSSQLLocalDB"
 
 
+# só encerra processos do LocalDB (pasta LocalDB\Binn). Um SQL Server de verdade jamais é tocado.
+_PS_MATAR_ORFAO = (
+    "Get-CimInstance Win32_Process -Filter \"Name='sqlservr.exe'\" | "
+    r"Where-Object { $_.ExecutablePath -like '*\LocalDB\Binn\*' } | "
+    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+)
+
+
+def _matar_localdb_orfao() -> bool:
+    """
+    Quando um sqlservr.exe do LocalDB fica órfão, a instância aparece como parada mas o 'start' falha com
+    "SQL Server process failed to start". Encerrar o processo pendurado é a saída documentada.
+    """
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", _PS_MATAR_ORFAO],
+                       capture_output=True, text=True, timeout=60)
+        logger.warning("processo órfão do LocalDB encerrado")
+        return True
+    except Exception as e:
+        logger.debug("não foi possível encerrar o processo órfão: %s", e)
+        return False
+
+
+def _start_localdb(inst: str):
+    return subprocess.run(["sqllocaldb", "start", inst], capture_output=True, text=True, timeout=90)
+
+
+def _rodando(inst: str) -> bool:
+    """
+    O 'sqllocaldb start' devolve sucesso mesmo quando a instância NÃO subiu (acontece com um sqlservr órfão
+    pendurado). Por isso o estado é conferido de verdade, em vez de confiar no código de retorno.
+    """
+    try:
+        r = subprocess.run(["sqllocaldb", "info", inst], capture_output=True, text=True, timeout=30)
+        for linha in (r.stdout or "").splitlines():
+            if linha.strip().lower().startswith("state"):
+                return "running" in linha.split(":", 1)[-1].strip().lower()
+    except Exception:
+        pass
+    return False
+
+
 def acordar_localdb() -> bool:
-    """LocalDB dorme por ociosidade. Mandar iniciar é rápido e não faz mal se já estiver de pé."""
+    """LocalDB dorme por ociosidade. Manda iniciar e CONFERE se subiu; se não subiu, limpa o processo órfão."""
     inst = _instancia_localdb()
     if not inst:
         return False
     try:
-        r = subprocess.run(["sqllocaldb", "start", inst], capture_output=True, text=True, timeout=60)
-        if r.returncode == 0:
+        _start_localdb(inst)
+        if _rodando(inst):
             logger.info("LocalDB %s pronto", inst)
             return True
-        logger.warning("sqllocaldb start %s: %s", inst, (r.stderr or r.stdout or "").strip()[:160])
+        logger.warning("LocalDB %s continua parado depois do start: limpando processo órfão", inst)
+        _matar_localdb_orfao()
+        time.sleep(2)
+        _start_localdb(inst)
+        if _rodando(inst):
+            logger.info("LocalDB %s pronto (depois de limpar o processo órfão)", inst)
+            return True
+        logger.error("LocalDB %s não subiu nem depois da limpeza", inst)
     except FileNotFoundError:
         logger.debug("sqllocaldb não encontrado no PATH")
     except Exception as e:

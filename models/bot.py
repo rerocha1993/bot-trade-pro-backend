@@ -78,6 +78,10 @@ class Bot(Base):
     folga_stop = Column(Float, default=0.01)
     escada_json = Column(String(500), nullable=True)
     grade_json = Column(Text, nullable=True)              # estado da grade inversa (fatias abertas, BTC realizado)
+    # saída escalonada: realiza em pedaços conforme o preço avança rumo ao alvo (core/saida_escalonada.py)
+    usar_saida_escalonada = Column(Boolean, default=False)
+    saida_escalonada = Column(String(120), default="50/30, 75/30, 90/25")   # avanço/fração da mão
+    mover_stop_para_entrada = Column(Boolean, default=True)                 # após a 1ª realização, trava o zero a zero
     saida_estrutural = Column(Boolean, default=False)     # grade: fechar quando Elliott virar impulso de alta acima do topo
 
     def as_dict(self):
