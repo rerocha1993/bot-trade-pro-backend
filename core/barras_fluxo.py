@@ -86,7 +86,7 @@ class AgregadorBarras:
 
     def __init__(self, tipo: str = "volume", tamanho: float = 0.0, max_barras: int = 400,
                  segundos_alvo: float = 30.0, agrupamento_pct: float = 0.0005,
-                 recalibrar_a_cada: int = 60):
+                 recalibrar_a_cada_s: float = 300.0):
         tipo = (tipo or "volume").strip().lower()
         if tipo not in TIPOS:
             raise ValueError(f"tipo de barra inválido: {tipo!r} (use {', '.join(TIPOS)})")
@@ -98,7 +98,10 @@ class AgregadorBarras:
         self.tamanho = float(tamanho)          # 0 = calibra sozinho pelo fluxo
         self.segundos_alvo = float(segundos_alvo)
         self.agrupamento_pct = float(agrupamento_pct)
-        self.recalibrar_a_cada = int(recalibrar_a_cada)
+        # a recalibração é por RELÓGIO DE MERCADO, não por contagem de barras. Contando barras, o ajuste
+        # chegava justamente quando não podia: com a régua grande demais as barras ficam lentas, então 60
+        # delas levavam duas horas — num teste de 5 dias a régua terminou 4x maior do que o dia pedia.
+        self.recalibrar_a_cada_s = float(recalibrar_a_cada_s)
         self.fechadas: Deque[Barra] = deque(maxlen=int(max_barras))
         self.parcial: Optional[Barra] = None
         self._acumulado = 0.0                  # quanto da barra em formação já foi preenchido
@@ -106,7 +109,7 @@ class AgregadorBarras:
         # ritmo de agora, e não a média do dia inteiro
         self._janela_calibragem_ms = int(max(segundos_alvo * 8, 240) * 1000)
         self._calibragem: Deque[tuple] = deque(maxlen=60000)
-        self._barras_desde_calibragem = 0
+        self._calibrado_em_ms = 0
         self._tamanho_anterior = 0.0
         self.negocios_vistos = 0
         self.lacunas = 0                       # negócios perdidos, contados por quem alimenta
@@ -168,7 +171,7 @@ class AgregadorBarras:
         fluxo_s = sum(amostra) / len(amostra)
         if fluxo_s > 0:
             self.tamanho = fluxo_s * self.segundos_alvo
-            self._barras_desde_calibragem = 0
+            self._calibrado_em_ms = fim
 
     # ------------------------------------------------------------------ ingestão
     def ingerir(self, trades: Sequence[Dict]) -> List[Barra]:
@@ -191,7 +194,8 @@ class AgregadorBarras:
             self._calibrar()
             if not self.calibrado:
                 return []
-        elif self.recalibrar_a_cada and self._barras_desde_calibragem >= self.recalibrar_a_cada:
+        elif (self.recalibrar_a_cada_s
+              and int(trades[-1]["timestamp"]) - self._calibrado_em_ms >= self.recalibrar_a_cada_s * 1000):
             # o ritmo muda ao longo do dia; a régua acompanha, mas nunca no meio de uma barra, e se a
             # amostra recente não der para calibrar, segue valendo a régua que já estava de pé
             self._calibrar()
@@ -238,7 +242,6 @@ class AgregadorBarras:
                 self.fechadas.append(b)
                 fechadas.append(b)
                 self._tamanho_anterior = self.tamanho
-                self._barras_desde_calibragem += 1
                 self.parcial = None
                 self._acumulado = 0.0
         return fechadas

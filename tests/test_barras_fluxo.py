@@ -82,21 +82,18 @@ def test_baleia_isolada_engorda_a_regua_e_a_regua_volta_sozinha():
     grande demais deixa o robô QUIETO, que é o erro barato. O caro seria o contrário — régua pequena demais
     manda o robô decidir em cima de ruído. O que não se aceita é o exagero ficar de pé para sempre.
     """
-    normal = [{"price": 100.0, "qty": 0.1, "side": "buy", "timestamp": i * 100} for i in range(3000)]
-    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0)
-    ag.ingerir(normal)
+    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0, recalibrar_a_cada_s=1)
+    ag.ingerir(fluxo_constante(1.0, 300))
     regua = ag.tamanho
     assert 25.0 <= regua <= 35.0
 
-    ag.ingerir([{"price": 100.0, "qty": 5000.0, "side": "buy", "timestamp": 300_000}])
-    ag._barras_desde_calibragem = 999
-    ag.ingerir([{"price": 100.0, "qty": 0.1, "side": "buy", "timestamp": 300_100}])
+    # a baleia entra na janela recente e a próxima recalibragem a enxerga
+    ag.ingerir([{"price": 100.0, "qty": 5000.0, "side": "buy", "timestamp": 320_000},
+                {"price": 100.0, "qty": 0.1, "side": "buy", "timestamp": 320_100}])
     assert ag.tamanho > regua                      # inflou, e para o lado quieto
 
     # passado o tempo, a baleia sai da janela recente e a régua volta ao ritmo do mercado
-    depois = [{"price": 100.0, "qty": 0.1, "side": "buy", "timestamp": 600_000 + i * 100} for i in range(3000)]
-    ag._barras_desde_calibragem = 999
-    ag.ingerir(depois)
+    ag.ingerir(fluxo_constante(1.0, 300, t0=700_000))
     assert 25.0 <= ag.tamanho <= 35.0
 
 
@@ -143,18 +140,17 @@ def test_recalibragem_nao_derruba_a_regua_com_amostra_velha():
     um deserto de segundos vazios, a mediana dava zero e a régua caía para 0,1 BTC — um dia inteiro rendeu
     275 mil barras de nada, e cada uma delas era uma chance de o robô mandar ordem em cima de ruído.
     """
-    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0, recalibrar_a_cada=2)
+    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0, recalibrar_a_cada_s=1)
     ag.ingerir(fluxo_constante(6.0, 300))
     regua = ag.tamanho
     assert 150.0 <= regua <= 210.0                      # 6 BTC/s x 30s
     # muito tempo depois, um negócio solto: não há amostra recente, então a régua tem que ficar de pé
-    ag._barras_desde_calibragem = 99
     ag.ingerir([{"price": 100.0, "qty": 0.1, "side": "buy", "timestamp": 6 * 3600 * 1000}])
     assert ag.tamanho == regua
 
 
 def test_regua_acompanha_o_mercado_acelerando():
-    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0, recalibrar_a_cada=1)
+    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0, recalibrar_a_cada_s=1)
     ag.ingerir(fluxo_constante(1.0, 300))
     devagar = ag.tamanho
     ag.ingerir(fluxo_constante(10.0, 300, t0=300_000))
@@ -178,7 +174,7 @@ def test_regua_entrega_o_ritmo_pedido_mesmo_com_fluxo_torto():
         for i in range(10):
             trades.append({"price": 100.0, "qty": volume / 10, "side": "buy", "timestamp": ts + i * 100})
         ts += 1000
-    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0, recalibrar_a_cada=0)
+    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0, recalibrar_a_cada_s=0)
     ag.ingerir(trades)
     ritmo = ag.status()["ritmo_s"]
     assert 15.0 <= ritmo <= 60.0, f"ritmo de {ritmo}s por barra, longe dos 30s pedidos"

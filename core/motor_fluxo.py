@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 RR_MINIMO = {"conservador": 1.2, "turbo": 1.0}
 # o contexto vem dos graus 15m/1h: recalcular a cada 3 minutos já é mais frequente do que eles mudam
 INTERVALO_CONTEXTO_S = 180.0
+# piso do stop: fora do ruído da barra e bem acima do custo. Ver `_risco_minimo`.
+RISCO_MINIMO_RANGES = 3.0
+RISCO_MINIMO_PCT = 0.0012
+# teto do alvo, em múltiplos do risco. O "próximo nível" às vezes está a 1,7% — isso é alvo de daytrade, e
+# uma posição de scalp segurada por 2 horas esperando por ele deixa de ser scalp.
+ALVO_MAXIMO_R = 3.0
 
 
 def _hold(motivo: str, **extra) -> Dict:
@@ -113,6 +119,20 @@ class MotorFluxo:
         rng = self.gatilho._range_medio(barras)
         return max(rng * 0.5, preco * 0.0005)
 
+    def _risco_minimo(self, barras: Sequence[Barra], preco: float) -> float:
+        """
+        Piso do stop: fora do ruído da própria barra, e bem acima do custo de ida e volta.
+
+        É o mesmo princípio que já rege o trailing por estilo (core/perfil_saida.py) — a distância tem que
+        ficar FORA do ruído do timeframe, senão o stop é acionado por nada. O backtest mostrou o preço de
+        esquecer isso: stops de 0,05% do preço (uns 40 dólares no BTC) com alvos de 0,7% a 1,7%. No papel é
+        risco:retorno de 15 para 1; na prática o stop morria em 6 segundos, e 16 dos 19 trades saíram no
+        stop. Risco:retorno alto com stop dentro do ruído não é vantagem, é ilusão de conta.
+        """
+        rng = self.gatilho._range_medio(barras)
+        custo = preco * (self.taxa_entrada + self.taxa_saida)
+        return max(rng * RISCO_MINIMO_RANGES, preco * RISCO_MINIMO_PCT, custo * 1.5)
+
     def _sl_tp(self, direcao: str, preco: float, nivel: Nivel, barras: Sequence[Barra],
                contexto: Contexto) -> Dict:
         """
@@ -133,25 +153,43 @@ class MotorFluxo:
         else:
             base = max(max(b.maxima for b in janela), nivel.preco)
             sl = base + folga
+        # o stop nunca fica dentro do ruído da barra, nem que para isso ele se afaste do nível
+        risco_min = self._risco_minimo(barras, preco)
+        piso_aplicado = False
+        if abs(preco - sl) < risco_min:
+            sl = preco - risco_min if direcao == "buy" else preco + risco_min
+            piso_aplicado = True
         risco = abs(preco - sl)
         if risco <= 0:
             return {"sl": None, "tp": None, "rr": 0.0, "rr_liquido": 0.0, "rr_minimo": 0.0,
                     "fonte_tp": None, "fonte_sl": None}
+        s = 1 if direcao == "buy" else -1
+        teto = preco + s * risco * ALVO_MAXIMO_R
         alvo = contexto.alvo_na_direcao(preco, direcao)
         if alvo is not None:
             # para no nível contrário, com uma folga para dentro: quem espera o preço exato costuma não ser servido
             tp = alvo.preco - folga * 0.5 if direcao == "buy" else alvo.preco + folga * 0.5
             fonte_tp = alvo.fonte
+            # nível longe demais vira alvo de daytrade: o scalp encurta e realiza no que cabe no seu tempo
+            if (tp > teto) if direcao == "buy" else (tp < teto):
+                tp, fonte_tp = teto, f"{ALVO_MAXIMO_R:g}R (nível {alvo.fonte} longe demais para scalp)"
         else:
-            tp = preco + risco * 2.0 if direcao == "buy" else preco - risco * 2.0
+            tp = preco + s * risco * 2.0
             fonte_tp = "2R (sem nível adiante)"
-        custo = preco * (self.taxa_entrada + self.taxa_saida)
+        # as duas pernas custam diferente: o alvo é servido por ordem limitada (maker dos dois lados), o
+        # stop sai a mercado (maker na entrada, taker na saída). Cobrar taker na perna que dá certo
+        # encarece justamente o cenário bom e reprova trade que na corretora pagaria menos.
+        custo_ganho = preco * (self.taxa_entrada + TAXA_MAKER)
+        custo_perda = preco * (self.taxa_entrada + TAXA_TAKER)
         rr = abs(tp - preco) / risco
-        rr_liquido = max(abs(tp - preco) - custo, 0.0) / (risco + custo)
+        rr_liquido = max(abs(tp - preco) - custo_ganho, 0.0) / (risco + custo_perda)
+        custo = custo_perda
         rr_min = float(getattr(self.bot, "rr_minimo", 0) or 0) or RR_MINIMO.get(self.perfil, 1.2)
         return {"sl": round(sl, 2), "tp": round(tp, 2), "rr": round(rr, 2),
                 "rr_liquido": round(rr_liquido, 2), "rr_minimo": rr_min,
-                "fonte_tp": fonte_tp, "fonte_sl": f"{nivel.fonte} - folga {folga:,.2f}",
+                "fonte_tp": fonte_tp,
+                "fonte_sl": (f"piso de ruído ({risco_min:,.2f})" if piso_aplicado
+                             else f"{nivel.fonte} - folga {folga:,.2f}"),
                 "risco": round(risco, 2), "custo": round(custo, 2),
                 "custo_em_r": round(custo / risco, 2)}
 
@@ -191,7 +229,10 @@ class MotorFluxo:
             return _hold(leitura["motivo"], **detalhes_base)
 
         direcao, nivel = leitura["acao"], leitura["nivel_obj"]
-        niveis = self._sl_tp(direcao, preco, nivel, barras, contexto)
+        # com ordem limitada quem entra no nível é a ordem, não o preço de agora: o risco:retorno tem que ser
+        # medido a partir de onde a posição realmente vai nascer, senão a conta sai torta em favor do trade
+        entrada = nivel.preco if self.limitada else preco
+        niveis = self._sl_tp(direcao, entrada, nivel, barras, contexto)
         detalhes_base["niveis"] = niveis
         if niveis["sl"] is None:
             return _hold("Não foi possível montar um stop a partir do nível", **detalhes_base)

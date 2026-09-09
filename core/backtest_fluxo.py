@@ -166,7 +166,7 @@ class BacktestFluxo:
                 continue
             s = 1 if pos["direcao"] == "buy" else -1
             saida = preco * (1 - s * self.slip)
-            taxa = saida * qty * self.taxa_saida
+            taxa = saida * qty * TAXA_MAKER      # realização parcial no avanço combinado: ordem limitada
             lucro = (saida - pos["preco_entrada"]) * qty * s - taxa
             pos["qty"] = round(pos["qty"] - qty, 8)
             pos["pnl_parcial"] += lucro
@@ -182,7 +182,8 @@ class BacktestFluxo:
         s = 1 if pos["direcao"] == "buy" else -1
         if motivo != "TP":
             preco_saida = preco_saida * (1 - s * self.slip)   # saída a mercado sofre slippage contra
-        taxa = preco_saida * pos["qty"] * self.taxa_saida
+        # o alvo é servido por ordem limitada (maker); stop e saídas por leitura saem a mercado (taker)
+        taxa = preco_saida * pos["qty"] * (TAXA_MAKER if motivo == "TP" else TAXA_TAKER)
         pnl_resto = (preco_saida - pos["preco_entrada"]) * pos["qty"] * s - taxa
         pnl = pnl_resto + pos["pnl_parcial"]
         risco = abs(pos["preco_entrada"] - pos["sl_inicial"]) or 1e-9

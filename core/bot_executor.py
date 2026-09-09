@@ -671,6 +671,16 @@ class BotExecutor:
     def _agir_no_fluxo(self, decisao: Dict, preco: float):
         if decisao["acao"] not in ("buy", "sell"):
             return
+        if self.ordem_pendente:
+            # já há uma ordem limitada esperando no nível. Se o fluxo virou de lado, aquela leitura morreu;
+            # se é do mesmo lado, mandar outra só empilharia duas ordens para a mesma ideia.
+            if self.ordem_pendente["direcao"] != decisao["acao"]:
+                self.ordens.cancelar_ordem(self.par, self.ordem_pendente["ordem_id"])
+                self.ordem_pendente = None
+                self._log(acao="hold", tipo_operacao="info", preco=preco,
+                          motivo="Ordem limitada cancelada: o fluxo virou de lado")
+            else:
+                return
         if self.posicao:
             if self.posicao.direcao != decisao["acao"] and (self._attr("position_mode", "one-way") or "one-way") == "one-way":
                 self.fechar_posicao(f"Fluxo contrário: {decisao['motivo'][:120]}", preco)

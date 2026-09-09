@@ -51,7 +51,7 @@ def motor_com_contexto(ctx, barras=None, **kw):
 def contexto(direcao="buy", niveis=None, fator=1.0):
     return Contexto(direcao=direcao, motivo="teste", fator_tamanho=fator,
                     niveis=niveis if niveis is not None else
-                    [Nivel(100.0, "VP.POC", "suporte", 1.5), Nivel(100.60, "VP.VAH", "resistencia", 1.0)])
+                    [Nivel(100.0, "VP.POC", "suporte", 1.5), Nivel(101.50, "VP.VAH", "resistencia", 1.0)])
 
 
 # ------------------------------------------------------------------ SL e TP
@@ -60,7 +60,7 @@ def test_stop_fica_alem_do_nivel_que_o_preco_defendeu():
     m = motor_com_contexto(contexto(), absorcao_no_suporte())
     niveis = m._sl_tp("buy", 100.05, Nivel(100.0, "VP.POC", "suporte"), list(m.agregador.fechadas), contexto())
     assert niveis["sl"] < 99.96          # abaixo da mínima da janela
-    assert niveis["tp"] < 100.60         # para um pouco antes da resistência, para ser servido
+    assert niveis["tp"] < 101.50         # para antes da resistência, para ser servido
     assert niveis["rr"] > 1.0
 
 
@@ -195,7 +195,44 @@ def test_niveis_colados_viram_um_so_com_forca_somada():
 
 def test_contexto_acha_o_alvo_na_direcao():
     ctx = contexto()
-    assert ctx.alvo_na_direcao(100.05, "buy").preco == 100.60
+    assert ctx.alvo_na_direcao(100.05, "buy").preco == 101.50
     assert ctx.alvo_na_direcao(100.05, "sell").preco == 100.0
     assert ctx.permite("buy") and not ctx.permite("sell")
     assert contexto(direcao="ambos").permite("sell")
+
+
+# ------------------------------------------------------------------ piso do stop e teto do alvo
+def test_stop_nunca_fica_dentro_do_ruido_da_barra():
+    """
+    Regressão do backtest: sem piso, o motor montava stops de 0,05% do preço (uns 40 dólares no BTC) com
+    alvos de 0,7% a 1,7%. No papel é risco:retorno de 15 para 1; na prática o stop morria em 6 segundos e
+    16 dos 19 trades saíram no stop. Risco:retorno alto com stop dentro do ruído é ilusão de conta.
+    """
+    m = motor_com_contexto(contexto(), absorcao_no_suporte())
+    barras = list(m.agregador.fechadas)
+    # nível colado no preço: sem piso, o stop nasceria a poucos centavos da entrada
+    niveis = m._sl_tp("buy", 100.05, Nivel(100.04, "VWAP", "suporte"), barras, contexto())
+    risco = 100.05 - niveis["sl"]
+    assert risco >= m._risco_minimo(barras, 100.05) - 1e-9
+    assert "piso de ruído" in niveis["fonte_sl"]
+
+
+def test_alvo_longe_demais_vira_multiplo_do_risco():
+    """Nível a 1,7% é alvo de daytrade. Segurar uma posição de scalp duas horas esperando por ele já é outro robô."""
+    ctx = contexto(niveis=[Nivel(100.0, "VP.POC", "suporte", 1.5),
+                           Nivel(140.0, "VP.VAH", "resistencia", 1.0)])
+    m = motor_com_contexto(ctx, absorcao_no_suporte())
+    niveis = m._sl_tp("buy", 100.05, ctx.niveis[0], list(m.agregador.fechadas), ctx)
+    assert "R (nível" in niveis["fonte_tp"]
+    assert niveis["rr"] == 3.0
+
+
+def test_risco_retorno_e_medido_liquido_de_taxa():
+    """
+    Regressão: com R:R bruto o motor aprovava trade cujo custo sozinho valia quase 1R. Num dia o resultado
+    bruto foi de −15 dólares e as taxas, 147 — houve até trade que bateu no alvo e mesmo assim deu prejuízo.
+    """
+    m = motor_com_contexto(contexto(), absorcao_no_suporte())
+    niveis = m._sl_tp("buy", 100.05, contexto().niveis[0], list(m.agregador.fechadas), contexto())
+    assert niveis["rr_liquido"] < niveis["rr"]
+    assert niveis["custo_em_r"] > 0
