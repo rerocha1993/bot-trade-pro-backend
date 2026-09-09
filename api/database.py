@@ -74,11 +74,29 @@ _PS_MATAR_ORFAO = (
 )
 
 
+def _conecta() -> bool:
+    """A única prova que vale: o banco atende ou não atende."""
+    try:
+        with engine.connect() as c:
+            c.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+
+
 def _matar_localdb_orfao() -> bool:
     """
     Quando um sqlservr.exe do LocalDB fica órfão, a instância aparece como parada mas o 'start' falha com
     "SQL Server process failed to start". Encerrar o processo pendurado é a saída documentada.
+
+    ANTES DE MATAR, TENTA CONECTAR. Um sqlservr do LocalDB é compartilhado por todos os processos deste usuário:
+    se o banco atende, ele não está órfão, está EM USO — e derrubá-lo arranca o banco de baixo de quem já estava
+    rodando. Foi o que aconteceu ao abrir uma segunda janela do servidor: a primeira perdeu a conexão no meio da
+    operação ("o pipe está sendo fechado").
     """
+    if _conecta():
+        logger.info("o LocalDB atende: não há processo órfão para encerrar")
+        return False
     try:
         subprocess.run(["powershell", "-NoProfile", "-Command", _PS_MATAR_ORFAO],
                        capture_output=True, text=True, timeout=60)
@@ -115,14 +133,18 @@ def acordar_localdb() -> bool:
         return False
     try:
         _start_localdb(inst)
-        if _rodando(inst):
-            logger.info("LocalDB %s pronto", inst)
-            return True
+        # o estado leva alguns segundos para assentar; concluir cedo demais leva a matar um banco que ia subir
+        for _ in range(6):
+            if _rodando(inst) or _conecta():
+                logger.info("LocalDB %s pronto", inst)
+                return True
+            time.sleep(1)
         logger.warning("LocalDB %s continua parado depois do start: limpando processo órfão", inst)
-        _matar_localdb_orfao()
+        if not _matar_localdb_orfao():
+            return _conecta()        # não era órfão: ou o banco atende, ou o problema é outro
         time.sleep(2)
         _start_localdb(inst)
-        if _rodando(inst):
+        if _rodando(inst) or _conecta():
             logger.info("LocalDB %s pronto (depois de limpar o processo órfão)", inst)
             return True
         logger.error("LocalDB %s não subiu nem depois da limpeza", inst)
@@ -147,6 +169,8 @@ def aguardar_banco(tentativas: int = None, espera_inicial: float = 1.0) -> bool:
     Não levanta: quem chama decide o que fazer, e derrubar a subida por causa disso é pior que avisar.
     """
     tentativas = int(tentativas or os.getenv("DB_TENTATIVAS", "6"))
+    if _conecta():
+        return True              # banco de pé: não encosta na instância (e nunca chega perto do matar órfão)
     acordar_localdb()
     espera = espera_inicial
     ultimo = None

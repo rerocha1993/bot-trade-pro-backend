@@ -55,6 +55,10 @@ class BotExecutor:
             bot = SimpleNamespace(**bot)
         self.bot = bot
         self.db = db
+        # identidade em texto puro: o painel pergunta o status pela thread da API, e ler o objeto ORM de lá
+        # dispara um SELECT na sessão que a thread do robô está usando ("concurrent operations are not permitted")
+        self.bot_id = getattr(bot, "id", None)
+        self.nome = getattr(bot, "nome", "") or ""
         self.servicos = servicos or {}
         self.modo = _modo(bot)
         self.par = getattr(bot, "ativo", "BTCUSDT").replace("/", "")
@@ -649,9 +653,10 @@ class BotExecutor:
                 pass
 
     def status(self) -> Dict:
+        """Chamado pela thread da API: NÃO pode tocar no ORM, que pertence à sessão da thread do robô."""
         s = dict(self.estado)
         s["rodando"] = self._rodando.is_set()
-        s["bot_id"] = self._attr("id")
-        s["nome"] = self._attr("nome")
+        s["bot_id"] = self.bot_id
+        s["nome"] = self.nome
         s["ordem_pendente"] = {k: v for k, v in (self.ordem_pendente or {}).items() if k != "decisao"} or None
         return s

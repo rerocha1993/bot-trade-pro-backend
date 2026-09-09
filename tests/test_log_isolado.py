@@ -76,3 +76,21 @@ def test_colunas_do_incidente_estao_na_lista(tabela, coluna):
     from scripts.setup_db import LARGURAS_MINIMAS
 
     assert any(t == tabela and c == coluna for t, c, _ in LARGURAS_MINIMAS)
+
+
+def test_status_nao_toca_no_orm():
+    """O painel pergunta o status pela thread da API; ler o ORM de lá quebra a sessão da thread do robô."""
+    import threading
+
+    ex = BotExecutor.__new__(BotExecutor)
+    ex.bot_id, ex.nome = 7, "Scalp Fluxo"
+    ex.estado, ex.ordem_pendente = {"ciclos": 3}, None
+    ex._rodando = threading.Event()
+
+    class Proibido:
+        def __getattr__(self, nome):
+            raise AssertionError(f"status() leu {nome!r} do ORM: isso roda na thread errada")
+
+    ex.bot = Proibido()
+    s = ex.status()
+    assert s["bot_id"] == 7 and s["nome"] == "Scalp Fluxo" and s["ciclos"] == 3
