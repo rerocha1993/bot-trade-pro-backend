@@ -36,24 +36,38 @@ logger = logging.getLogger("api")
 async def lifespan(app: FastAPI):
     from services.bot_manager import get_manager
     from services.indicador_service import IndicadorService
-    from api.database import SessionLocal
+    from api.database import SessionLocal, aguardar_banco
 
-    db = SessionLocal()
-    try:
-        IndicadorService(db).seed_indicadores()
-    except Exception as e:
-        logger.warning("seed de indicadores falhou: %s", e)
-    finally:
-        db.close()
+    # o LocalDB dorme por ociosidade: acorda e espera antes de qualquer coisa tocar o banco
+    banco_ok = aguardar_banco()
+    if not banco_ok:
+        logger.error("SUBINDO SEM BANCO: os robôs não vão iniciar. A API e o painel continuam de pé para você "
+                     "ver o problema. Verifique o SQL Server e reinicie.")
+
+    if banco_ok:
+        db = SessionLocal()
+        try:
+            IndicadorService(db).seed_indicadores()
+        except Exception as e:
+            logger.warning("seed de indicadores falhou: %s", e)
+        finally:
+            db.close()
 
     manager = get_manager()
-    if os.getenv("INICIAR_BOTS", "1") != "0":
-        n = manager.start_all()
-        logger.info("BotManager iniciou %d bot(s)", n)
-        if os.getenv("MANUTENCAO_INSTITUCIONAL", "1") != "0":
-            manager.iniciar_manutencao(int(os.getenv("MANUTENCAO_MIN", "30")))
+    if banco_ok and os.getenv("INICIAR_BOTS", "1") != "0":
+        try:
+            n = manager.start_all()
+            logger.info("BotManager iniciou %d bot(s)", n)
+            if os.getenv("MANUTENCAO_INSTITUCIONAL", "1") != "0":
+                manager.iniciar_manutencao(int(os.getenv("MANUTENCAO_MIN", "30")))
+        except Exception as e:
+            # um robô com problema não pode derrubar a API inteira: sem painel você fica cego
+            logger.exception("falha ao iniciar os robôs: %s", e)
     yield
-    manager.stop_all()
+    try:
+        manager.stop_all()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Bot Trade Pro API", version="2.0", lifespan=lifespan)
