@@ -21,6 +21,7 @@ parado falha com "o tempo limite do logon expirou", e antes isso derrubava a sub
 import logging
 import os
 import subprocess
+import threading
 import time
 import urllib.parse as urlparse
 
@@ -117,6 +118,41 @@ def aguardar_banco(tentativas: int = None, espera_inicial: float = 1.0) -> bool:
                 acordar_localdb()
     logger.error("banco indisponível depois de %d tentativas: %s", tentativas, ultimo)
     return False
+
+
+_keepalive_thread = None
+_keepalive_parar = threading.Event()
+
+
+def manter_banco_acordado(intervalo_s: int = None):
+    """
+    O LocalDB desliga por ociosidade (nesta máquina, em poucos minutos). Com os robôs rodando a noite toda,
+    um período sem escrita bastaria para ele dormir e a próxima consulta falhar. Um ping leve mantém de pé.
+    """
+    global _keepalive_thread
+    if _keepalive_thread and _keepalive_thread.is_alive():
+        return
+    intervalo = int(intervalo_s or os.getenv("DB_KEEPALIVE_S", "120"))
+    if intervalo <= 0:
+        return
+
+    def loop():
+        while not _keepalive_parar.wait(intervalo):
+            try:
+                with engine.connect() as c:
+                    c.execute(text("SELECT 1"))
+            except Exception as e:
+                logger.warning("keepalive do banco falhou, tentando acordar: %s", str(e).splitlines()[0][:140])
+                aguardar_banco(tentativas=3)
+
+    _keepalive_parar.clear()
+    _keepalive_thread = threading.Thread(target=loop, name="db-keepalive", daemon=True)
+    _keepalive_thread.start()
+    logger.info("keepalive do banco a cada %ds", intervalo)
+
+
+def parar_keepalive():
+    _keepalive_parar.set()
 
 
 def get_db():

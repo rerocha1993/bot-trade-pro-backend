@@ -36,7 +36,7 @@ logger = logging.getLogger("api")
 async def lifespan(app: FastAPI):
     from services.bot_manager import get_manager
     from services.indicador_service import IndicadorService
-    from api.database import SessionLocal, aguardar_banco
+    from api.database import SessionLocal, aguardar_banco, manter_banco_acordado, parar_keepalive
 
     # o LocalDB dorme por ociosidade: acorda e espera antes de qualquer coisa tocar o banco
     banco_ok = aguardar_banco()
@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
                      "ver o problema. Verifique o SQL Server e reinicie.")
 
     if banco_ok:
+        manter_banco_acordado()
         db = SessionLocal()
         try:
             IndicadorService(db).seed_indicadores()
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI):
             # um robô com problema não pode derrubar a API inteira: sem painel você fica cego
             logger.exception("falha ao iniciar os robôs: %s", e)
     yield
+    parar_keepalive()
     try:
         manager.stop_all()
     except Exception:
