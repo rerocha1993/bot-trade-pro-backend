@@ -15,6 +15,11 @@ echo.
 echo  Deixe esta janela aberta. Ctrl+C para parar tudo.
 echo.
 
+REM O LocalDB desliga sozinho por ociosidade e demora a subir na primeira conexao.
+REM Acordar antes evita o erro "o tempo limite do logon expirou".
+echo  Acordando o banco...
+sqllocaldb start MSSQLLocalDB >nul 2>&1
+
 .venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 
 echo.

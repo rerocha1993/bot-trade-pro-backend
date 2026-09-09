@@ -12,6 +12,10 @@ A string vem do ambiente, com os valores atuais como padrão para não quebrar q
     DB_TRUSTED     = yes            (autenticação do Windows; com 'no' usa DB_USER/DB_PASSWORD)
     DB_USER        / DB_PASSWORD
     DB_ENCRYPT     = no             (essencial para LocalDB)
+    DB_TIMEOUT     = 30             segundos de espera no logon
+
+O LocalDB desliga sozinho por ociosidade e leva alguns segundos para subir de novo. Com o tempo limite padrão,
+a primeira conexão depois de um tempo parado falha com "o tempo limite do logon expirou". Daí o DB_TIMEOUT alto.
 
 Antes isto era fixo no código, o que obrigava a editar o arquivo para trocar de servidor.
 """
@@ -43,10 +47,12 @@ def _url() -> str:
         partes.append(f"UID={os.getenv('DB_USER', '')}")
         partes.append(f"PWD={os.getenv('DB_PASSWORD', '')}")
     partes.append(f"Encrypt={os.getenv('DB_ENCRYPT', 'no')}")
+    # o LocalDB pode estar dormindo: dar tempo de ele subir em vez de falhar na primeira tentativa
+    partes.append(f"Connection Timeout={os.getenv('DB_TIMEOUT', '30')}")
     return f"mssql+pyodbc:///?odbc_connect={urlparse.quote_plus(';'.join(partes) + ';')}"
 
 
-engine = create_engine(_url(), pool_pre_ping=True, future=True)
+engine = create_engine(_url(), pool_pre_ping=True, pool_recycle=1800, future=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
