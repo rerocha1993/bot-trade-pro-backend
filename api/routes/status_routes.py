@@ -190,14 +190,18 @@ def subcontas(modo: str = "demo", verificar_uid: bool = False, db: Session = Dep
             l["chave"] = cache[sub]
             l["uid"] = cache[sub].get("uid")
 
+    # só conta como conflito quem realmente manda ordem: bots em simulador nunca tocam a exchange
     conflitos = {}
     for l in linhas:
+        if l["modo_execucao"] == "simulador":
+            continue
         chave = (l["par"], l.get("uid") or l["subconta"])
         conflitos.setdefault(chave, []).append(l["bot"])
     return {"modo": modo, "subcontas_no_ambiente": subcontas_configuradas(modo), "bots": linhas,
             "conflitos": [{"par": p, "conta": s, "bots": b} for (p, s), b in conflitos.items() if len(b) > 1],
-            "nota": ("conflito = mais de um robô no mesmo par e na MESMA conta. Na Bybit cada símbolo tem uma posição "
-                     "por conta, então eles fechariam a posição um do outro.")}
+            "nota": ("conflito = mais de um robô que ENVIA ORDEM no mesmo par e na mesma conta. Na Bybit cada símbolo "
+                     "tem uma posição por conta, então eles fechariam a posição um do outro. Bots em simulador "
+                     "não contam: nunca tocam a exchange.")}
 
 
 @router.get("/bybit")
