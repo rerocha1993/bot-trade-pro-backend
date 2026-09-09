@@ -75,3 +75,21 @@ def test_regua_da_barra_e_validada_antes_de_virar_gatilho_de_ordem():
     with pytest.raises(ValueError, match="ritmo alvo"):
         BotService._normalizar({"barra_segundos_alvo": 0})
     assert BotService._normalizar({"barra_tipo": " Volume "})["barra_tipo"] == "volume"
+
+
+# ------------------------------------------------------------------ o que vai para o banco
+def test_o_que_o_motor_grava_cabe_nas_colunas():
+    """
+    Um texto que não cabe na coluna não é só um registro perdido: o INSERT derruba a transação inteira, e
+    com ela o estado do robô que estava sendo gravado. Foi assim que uma realização parcial saiu três vezes
+    na corretora. O motor de fluxo escreve textos novos ('contexto buy', 'fluxo:absorcao'), então eles
+    precisam caber ANTES de irem para o banco pela primeira vez.
+    """
+    from models.decisao_bot import DecisaoBot
+
+    largura = {c.name: getattr(c.type, "length", None) for c in DecisaoBot.__table__.columns}
+    escritos = {"acao": "hold", "cenario": "contexto neutro", "tendencia_macro": "neutro",
+                "votos": "fluxo:continuacao", "timeframe": "1m"}
+    for campo, valor in escritos.items():
+        assert largura[campo] is None or len(valor) <= largura[campo], \
+            f"{campo}={valor!r} não cabe em {largura[campo]} caracteres"
