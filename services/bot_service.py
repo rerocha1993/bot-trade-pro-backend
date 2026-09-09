@@ -2,6 +2,7 @@
 from sqlalchemy.orm import Session
 
 from core.alavancagem import normalizar as normalizar_alavancagem
+from core.barras_fluxo import TIPOS as TIPOS_BARRA
 from core.perfil_saida import perfil as perfil_saida
 from core.saida_escalonada import analisar_plano, escrever_plano
 from models.bot import Bot
@@ -51,6 +52,25 @@ class BotService:
             raise ValueError(
                 f"Trailing inválido: ativa com {float(ativ):.2%} de avanço mas cola a {float(dist):.2%} do preço, "
                 "então o stop nasceria abaixo da entrada. O ativador tem que ser maior que a distância.")
+        # motor de fluxo (scalp): a regua da barra precisa fazer sentido antes de virar gatilho de ordem
+        if d.get("barra_tipo"):
+            d["barra_tipo"] = str(d["barra_tipo"]).strip().lower()
+            if d["barra_tipo"] not in TIPOS_BARRA:
+                raise ValueError(f"Tipo de barra invalido: {d['barra_tipo']!r}. Use: {', '.join(TIPOS_BARRA)}.")
+        if d.get("barra_tamanho") is not None and float(d["barra_tamanho"]) < 0:
+            raise ValueError("Tamanho da barra nao pode ser negativo (use 0 para calibrar pelo fluxo).")
+        if d.get("barra_segundos_alvo") is not None and float(d["barra_segundos_alvo"]) <= 0:
+            raise ValueError("O ritmo alvo da barra tem que ser maior que zero.")
+        if d.get("usar_motor_fluxo"):
+            estilo = d.get("estilo_trade")
+            if estilo is not None and "scalp" not in str(estilo).lower():
+                raise ValueError(
+                    "O motor de fluxo e do scalp. Nos graus maiores o candle de tempo e uma regua honesta, "
+                    "e trocar por barra de volume so tiraria contexto da leitura.")
+            if d.get("estrategia") == "inverse_range":
+                raise ValueError("A grade inversa tem motor proprio: o motor de fluxo nao se aplica a ela.")
+            # sem stream de negocios nao existe barra de fluxo; ligar um sem o outro so daria robo parado
+            d["usar_websocket"] = True
         return d
 
     def create_bot(self, data: dict) -> Bot:

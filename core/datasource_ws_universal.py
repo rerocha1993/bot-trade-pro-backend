@@ -18,6 +18,10 @@ class DataSourceWebsocketUniversal:
         self.websocket_url = websocket_url
 
         self.trades = queue.deque(maxlen=trades_buffer)
+        # cada negocio recebe um numero de serie crescente: e assim que o motor de fluxo consome so o que e
+        # novo. Sem isso, reler o buffer a cada ciclo contaria o mesmo volume varias vezes na mesma barra.
+        self._seq = 0
+        self._lock_trades = threading.Lock()
         self.order_book = {}  # {'bids': [(price, qty)], 'asks': [(price, qty)]}
         self.ws = None
         self.ob_buffer = int(ob_buffer)
@@ -67,7 +71,7 @@ class DataSourceWebsocketUniversal:
                 itens = data.get("data")
                 itens = itens if isinstance(itens, list) else [itens] if isinstance(itens, dict) else []
                 for t in itens:
-                    self.trades.append({
+                    self._registrar_trade({
                         'price': float(t['p']),
                         'qty': float(t['v']),
                         'side': 'buy' if t['S'] == 'Buy' else 'sell',
@@ -147,7 +151,7 @@ class DataSourceWebsocketUniversal:
                     'side': 'buy' if data['side'] == 'buy' else 'sell',
                     'timestamp': int(pd.to_datetime(data['time']).timestamp() * 1000) if 'time' in data else 0
                 }
-                self.trades.append(trade)
+                self._registrar_trade(trade)
             elif data.get("type") == "l2update":
                 # Atualiza o order book (apenas exemplo, expanda se quiser full book)
                 changes = data.get("changes", [])
@@ -165,8 +169,32 @@ class DataSourceWebsocketUniversal:
             self.url_trades, on_open=on_open, on_message=on_message)
         ws.run_forever()
 
+    def _registrar_trade(self, trade: dict):
+        with self._lock_trades:
+            self._seq += 1
+            trade['seq'] = self._seq
+            self.trades.append(trade)
+
     def get_trades(self):
         return list(self.trades)
+
+    def trades_desde(self, seq: int):
+        """
+        Negocios com numero de serie maior que `seq`, para quem consome o fluxo em pedacos.
+
+        Devolve (negocios, ultimo_seq, perdidos). `perdidos` > 0 quer dizer que o buffer girou antes de
+        alguem consumir: o agregador precisa saber que houve buraco, senao monta uma barra com metade do
+        volume e o delta sai errado.
+        """
+        with self._lock_trades:
+            atuais = list(self.trades)
+        novos = [t for t in atuais if int(t.get('seq', 0)) > seq]
+        perdidos = 0
+        if novos:
+            primeiro = int(novos[0].get('seq', 0))
+            if seq and primeiro > seq + 1:
+                perdidos = primeiro - seq - 1
+        return novos, (int(novos[-1]['seq']) if novos else seq), perdidos
 
     def get_order_book(self):
         return self.order_book if self.order_book else {'bids': [], 'asks': []}

@@ -30,6 +30,7 @@ export default function BotDetail() {
   const pos = st.data.posicao
   const dec = st.data.ultima_decisao
   const estado = st.data.estado
+  const fluxo = estado?.fluxo ?? null
   const ligado = st.data.rodando || bot.ativo_bot
   const precoAtual = precoQ.data?.preco
   // avanços já realizados pela saída escalonada, na ordem em que saíram
@@ -134,6 +135,21 @@ export default function BotDetail() {
               <KV k="Trades do dia" v={`${estado?.trades_dia ?? 0} / ${bot.max_trades_dia}`} />
               <KV k="P&L do dia" v={fmtSigned(estado?.pnl_dia ?? 0)} color={corPnl(estado?.pnl_dia ?? 0)} src={`limite −${pct(bot.max_perda_dia_pct, 1)}`} />
             </Card>
+            {fluxo && (
+              <Card>
+                <div className="eyebrow" style={{ marginBottom: 9 }}>Motor de fluxo</div>
+                <KV k="Régua da barra" v={`${fmt(fluxo.barras.tamanho, 3)} ${fluxo.barras.tipo === 'dolar' ? 'USD' : fluxo.barras.tipo === 'tick' ? 'negócios' : 'BTC'}`}
+                    src={fluxo.barras.calibrado ? `alvo de ${fluxo.barras.segundos_alvo}s por barra` : 'ainda calibrando pelo fluxo'} />
+                <KV k="Ritmo" v={fluxo.barras.ritmo_s === null ? '—' : `${fmt(fluxo.barras.ritmo_s, 1)}s por barra`}
+                    src={`${fluxo.barras.barras} barras · ${fluxo.barras.negocios_vistos} negócios`} />
+                <KV k="Contexto" v={fluxo.contexto ? `${fluxo.contexto.direcao} · ${fluxo.contexto.vies_contexto}/${fluxo.contexto.vies_macro}` : '—'}
+                    color={fluxo.contexto?.direcao === 'hold' ? 'var(--amber)' : 'var(--acc)'}
+                    src={fluxo.contexto ? `${fluxo.contexto.niveis.length} níveis · lido há ${fmt(fluxo.contexto.idade_s, 0)}s` : undefined} />
+                {fluxo.barras.lacunas > 0 && <KV k="Negócios perdidos" v={String(fluxo.barras.lacunas)} color="var(--amber)" src="buffer do websocket girou antes de consumir" />}
+                <div style={{ padding: '4px 0' }}><span className="label" style={{ marginBottom: 2 }}>Última leitura</span>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{fluxo.ultimo_motivo}</span></div>
+              </Card>
+            )}
             <Card>
               <div className="eyebrow" style={{ marginBottom: 9 }}>Filtros</div>
               <div style={{ padding: '4px 0' }}><span className="label" style={{ marginBottom: 2 }}>Sentimento</span>

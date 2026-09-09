@@ -37,6 +37,11 @@ export interface Bot {
   usar_saida_escalonada: boolean
   saida_escalonada: string
   mover_stop_para_entrada: boolean
+  // motor de fluxo (scalp): decide por barra de volume, nao por candle de 1m
+  usar_motor_fluxo?: boolean
+  barra_tipo?: string
+  barra_tamanho?: number
+  barra_segundos_alvo?: number
   usar_sentimento: boolean
   usar_tendencia_macro: boolean
   max_trades_dia: number
@@ -103,6 +108,17 @@ export interface EstadoExecutor {
   rodando: boolean
   thread_viva: boolean
   ordem_pendente: Record<string, unknown> | null
+  fluxo?: EstadoFluxo | null
+}
+
+/** Motor de fluxo do scalp: a regua da barra, o ritmo que ela esta rendendo e o que segurou a ultima leitura. */
+export interface EstadoFluxo {
+  motor: string
+  barras: { tipo: string; tamanho: number; calibrado: boolean; barras: number; negocios_vistos: number; lacunas: number; segundos_alvo: number; ritmo_s: number | null }
+  barras_avaliadas: number
+  ultima_barra: Record<string, number> | null
+  ultimo_motivo: string
+  contexto: { direcao: string; motivo: string; vies_contexto: string; vies_macro: string; idade_s: number; niveis: { preco: number; fonte: string; tipo: string }[] } | null
 }
 
 export interface Posicao {

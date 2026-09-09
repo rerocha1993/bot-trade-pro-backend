@@ -19,6 +19,7 @@ const PADRAO: Partial<Bot> = {
   usar_sentimento: true, usar_tendencia_macro: true, usar_api_macro: false, usar_filtro_regime: true, usar_websocket: false,
   usar_trailing_stop: true, ativador_trailing: 0.010, distancia_trailing: 0.007, sl_tipo: 'percentual', sl_variacao_pct: 1.0, saida_estrutural: false,
   usar_saida_escalonada: true, saida_escalonada: '50/30, 75/30, 90/25', mover_stop_para_entrada: true,
+  usar_motor_fluxo: false, barra_tipo: 'volume', barra_tamanho: 0, barra_segundos_alvo: 30,
   ativo_bot: false,
 }
 
@@ -220,6 +221,39 @@ export default function BotForm() {
               </div>
             </div>
           </Card>
+
+          {f.estilo_trade === 'scalping' && f.estrategia !== 'inverse_range' && (
+            <Card title="Motor de fluxo (scalp)" pad={false}>
+              <div className="form-grid" style={{ alignItems: 'end' }}>
+                <div className="span2 sw-row">
+                  <span className="t">Decidir por fluxo, não por candle de 1m<br /><span className="muted" style={{ fontSize: 11 }}>a barra fecha a cada tanto negociado; Elliott passa a dar o lado e os níveis em 15m/1h</span></span>
+                  <Switch on={!!f.usar_motor_fluxo} onChange={(v) => set('usar_motor_fluxo', v)} />
+                </div>
+                {f.usar_motor_fluxo && (
+                  <>
+                    <Field label="Régua da barra">
+                      <select value={String(f.barra_tipo ?? 'volume')} onChange={(e) => set('barra_tipo', e.target.value)}>
+                        <option value="volume">volume (BTC negociado)</option>
+                        <option value="dolar">valor (dólares negociados)</option>
+                        <option value="tick">ticks (número de negócios)</option>
+                      </select>
+                    </Field>
+                    {num('barra_tamanho', 'Tamanho da barra (0 = automático)', 'any')}
+                    {num('barra_segundos_alvo', 'Ritmo alvo da barra (segundos)', '1')}
+                    <div className="span2 muted" style={{ fontSize: 11 }}>
+                      {Number(f.barra_tamanho ?? 0) > 0
+                        ? <>Fecha a cada {String(f.barra_tamanho)} {f.barra_tipo === 'dolar' ? 'dólares' : f.barra_tipo === 'tick' ? 'negócios' : 'BTC'} negociados, custe o tempo que custar.</>
+                        : <>A régua se calibra sozinha pelo fluxo observado, mirando uma barra a cada {String(f.barra_segundos_alvo ?? 30)}s. Um número fixo de BTC significa coisas muito diferentes às 3h e às 15h.</>}
+                      <div style={{ marginTop: 4 }}>
+                        Entra por absorção num nível (agressão contra o nível que o nível aguenta) ou por retomada com fluxo a favor. Longe de qualquer nível não entra: seria perseguir, com o stop no vazio.
+                      </div>
+                      <div style={{ marginTop: 4 }}>Liga o websocket junto: sem stream de negócios não existe barra de fluxo.</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </Card>
+          )}
 
           {f.estrategia === 'inverse_range' && (
             <Card title="Grade inversa" pad={false}>

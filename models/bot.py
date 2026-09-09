@@ -84,5 +84,13 @@ class Bot(Base):
     mover_stop_para_entrada = Column(Boolean, default=True)                 # após a 1ª realização, trava o zero a zero
     saida_estrutural = Column(Boolean, default=False)     # grade: fechar quando Elliott virar impulso de alta acima do topo
 
+    # motor de fluxo (scalp): decide por barra de volume, nao por candle de 1m (core/motor_fluxo.py).
+    # Em 1m a contagem de Elliott trocou de fase em 45% das leituras ao vivo; aqui ela vira contexto (15m/1h)
+    # e quem da a hora e a fita.
+    usar_motor_fluxo = Column(Boolean, default=False)
+    barra_tipo = Column(String(10), default="volume")     # 'volume' (BTC) | 'dolar' | 'tick'
+    barra_tamanho = Column(Float, default=0.0)            # 0 = a regua se calibra sozinha pelo fluxo
+    barra_segundos_alvo = Column(Float, default=30.0)     # ritmo alvo da barra quando o tamanho e automatico
+
     def as_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}

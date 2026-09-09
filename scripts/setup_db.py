@@ -59,6 +59,10 @@ COLUNAS_NOVAS_BOTS = {
     "escada_json": "VARCHAR(500) NULL",
     "grade_json": "NVARCHAR(MAX) NULL",
     "saida_estrutural": "BIT NOT NULL DEFAULT 0",
+    "usar_motor_fluxo": "BIT NOT NULL DEFAULT 0",
+    "barra_tipo": "VARCHAR(10) NOT NULL DEFAULT 'volume'",
+    "barra_tamanho": "FLOAT NOT NULL DEFAULT 0",
+    "barra_segundos_alvo": "FLOAT NOT NULL DEFAULT 30",
 }
 
 

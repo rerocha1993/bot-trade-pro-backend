@@ -41,3 +41,6 @@ simulador/*.csv
 # grafo de conhecimento (regeneravel com /graphify); o relatorio fica
 .graphify/*
 !.graphify/GRAPH_REPORT.md
+
+# negocios historicos baixados da Bybit para o backtest de fluxo (~20-90 MB por dia)
+dados/trades_bybit/

@@ -28,6 +28,7 @@ from core.perfil_saida import perfil as perfil_saida
 from core.saida_escalonada import (
     avanco as avanco_ate_alvo, escrever_feitas, ler_feitas, ler_plano, montar_fatias, pendentes,
 )
+from core.motor_fluxo import MotorFluxo
 from core.strategy_engine import StrategyEngine
 from core.utils_indicadores import normalizar_timeframe
 from api.database import SessionLocal
@@ -96,6 +97,12 @@ class BotExecutor:
         self._rodando = threading.Event()
         self.ordem_pendente: Optional[Dict] = None   # ordem limitada aguardando execução
         self.ws = None                               # DataSourceWebsocketUniversal (scalp)
+        # motor de fluxo: o scalp decide por barra de volume, nao por candle de 1m (core/motor_fluxo.py)
+        self.motor: Optional[MotorFluxo] = None
+        self._seq_trades = 0                         # cursor dos negocios ja consumidos do websocket
+        self._ohlcv_cache: Optional[list] = None
+        self._ohlcv_cache_ts = 0.0
+        self._ultimo_hold_persistido = 0.0
         self.estado: Dict = {"modo": self.modo, "par": self.par, "timeframe": self.timeframe, "ciclos": 0, "erros": 0,
                              "ultima_decisao": None, "ultimo_ciclo": None, "posicao": None, "pnl_dia": 0.0,
                              "trades_dia": 0, "dia": date.today().isoformat(), "inicio": datetime.utcnow().isoformat()}
@@ -515,7 +522,9 @@ class BotExecutor:
     def _persistir_decisao(self, d: Dict, candle_ts: int, preco: float):
         try:
             sent = d.get("sentimento") or {}
-            detalhes = {k: d.get(k) for k in ("cenarios", "alinhamento", "elliott", "validadores", "niveis", "zonas_institucionais", "votos_contra")}
+            detalhes = {k: d.get(k) for k in ("cenarios", "alinhamento", "elliott", "validadores", "niveis",
+                                              "zonas_institucionais", "votos_contra",
+                                              "motor", "contexto_fluxo", "fluxo", "barras")}
             self.db.add(DecisaoBot(
                 bot_id=self._attr("id"), par=self.par, timeframe=self.timeframe, candle_ts=candle_ts, preco=preco, acao=d["acao"],
                 fase_onda=d.get("fase_onda"), cenario=(d.get("cenario") or "")[:60], probabilidade=d.get("probabilidade"),
@@ -527,7 +536,169 @@ class BotExecutor:
             logger.error("falha ao persistir decisão: %s", e)
             self.db.rollback()
 
+    # ------------------------------------------------- motor de fluxo (scalp)
+    def _motor_fluxo_ligado(self) -> bool:
+        """O motor de fluxo só vale para o scalp: nos graus maiores o candle de tempo é uma régua honesta."""
+        if self.inverse is not None or not self._attr("usar_motor_fluxo", False):
+            return False
+        return "scalp" in (self._attr("estilo_trade", "") or "").lower()
+
+    def _montar_motor(self) -> MotorFluxo:
+        return MotorFluxo(self.bot, lambda tf, n: self._con_publico.obter_ohlcv(self.par, tf, n, somente_fechados=True))
+
+    def _leituras_estruturais(self) -> Dict:
+        """
+        Plano do par, contagem mestre e leitura do trader — as mesmas que o StrategyEngine usa.
+
+        Só é chamado quando o contexto vence (a cada poucos minutos): são consultas de banco e de rede, e
+        rodá-las a cada barra de fluxo seria pagar caro por um número que muda devagar.
+        """
+        out: Dict = {"plano": None, "trava": None, "trader": None}
+        try:
+            p = self.servicos.get("plano")
+            if p is not None:
+                out["plano"] = p.plano(self.par) if hasattr(p, "plano") else p
+            elif self.db is not None:
+                from services.plano_service import PlanoService
+                out["plano"] = PlanoService(self.servicos, db=self.db).plano(self.par)
+        except Exception as e:
+            logger.warning("[%s] plano do par indisponível: %s", self._attr("nome"), e)
+        try:
+            if self.db is not None:
+                from services.elliott_mestre_service import ElliottMestreService
+                out["trava"] = ElliottMestreService(self.db, self.con).trava_ativa(self.par, self.estado.get("preco") or 0)
+        except Exception as e:
+            logger.warning("[%s] trava mestre indisponível: %s", self._attr("nome"), e)
+        try:
+            t = self.servicos.get("trader")
+            if t is not None:
+                out["trader"] = t.leitura(self.par) if hasattr(t, "leitura") else t
+            elif self.db is not None:
+                from services.trader_service import TraderService
+                out["trader"] = TraderService(self.con).leitura(self.par)
+        except Exception as e:
+            logger.warning("[%s] leitura do trader indisponível: %s", self._attr("nome"), e)
+        return out
+
+    def _preco_agora(self, novos: list) -> float:
+        """O último negócio do stream é mais fresco e mais barato que uma chamada REST de preço."""
+        if novos:
+            return float(novos[-1]["price"])
+        try:
+            recentes = self.ws.get_trades() if self.ws is not None else []
+            if recentes:
+                return float(recentes[-1]["price"])
+        except Exception:
+            pass
+        return float(self._con_publico.obter_preco_atual(self.par))
+
+    def _candles_para_gestao(self, intervalo_s: float = 30.0):
+        """
+        O motor de fluxo não decide por candle, mas a gestão de posição ainda precisa de um: o simulador
+        usa máxima/mínima e a manutenção institucional usa o fechamento. Como não é o gatilho, dá para
+        buscar de vez em quando em vez de a cada ciclo — que agora roda a cada poucos segundos.
+        """
+        agora = time.time()
+        if self._ohlcv_cache is None or agora - self._ohlcv_cache_ts >= intervalo_s:
+            self._ohlcv_cache = self._con_publico.obter_ohlcv(self.par, self.timeframe, 300, somente_fechados=True)
+            self._ohlcv_cache_ts = agora
+        return self._ohlcv_cache
+
+    def _persistir_do_fluxo(self, decisao: Dict, candle_ts: int, preco: float):
+        """
+        Uma barra de fluxo fecha a cada poucos segundos: gravar todo 'hold' encheria a tabela de decisões
+        sem informação nova. Entrada sempre grava; espera grava no máximo uma por minuto.
+        """
+        agora = time.time()
+        if decisao["acao"] == "hold":
+            if agora - self._ultimo_hold_persistido < 60:
+                return
+            self._ultimo_hold_persistido = agora
+        self._persistir_decisao(decisao, candle_ts, preco)
+
+    def _ciclo_fluxo(self):
+        """
+        Ciclo do scalp por fluxo: o gatilho é a barra de volume fechando, não o minuto virando.
+
+        Elliott continua sendo a lei — só que lido em 15m/1h (onde a contagem para de pé) e como contexto:
+        ele diz o lado e os níveis, a fita diz a hora.
+        """
+        self._iniciar_websocket(forcar=True)
+        if self.ws is None:
+            logger.warning("[%s] sem websocket: o motor de fluxo não opera, voltando ao ciclo por candle",
+                           self._attr("nome"))
+            return self._ciclo_candle()
+        if self.motor is None:
+            self.motor = self._montar_motor()
+        novos, self._seq_trades, perdidos = self.ws.trades_desde(self._seq_trades)
+        if perdidos:
+            # o buffer girou antes de consumirmos: a barra em formação está incompleta e o delta dela mente
+            self.motor.agregador.lacunas += perdidos
+            logger.warning("[%s] %d negócios perdidos no buffer do websocket", self._attr("nome"), perdidos)
+        preco = self._preco_agora(novos)
+        ohlcv = self._candles_para_gestao()
+        if not ohlcv:
+            raise RuntimeError("sem candles para a gestão de posição")
+        ultimo = ohlcv[-1]
+        candle_novo = self.ultimo_candle_ts != int(ultimo[0])
+        if candle_novo:
+            self.ultimo_candle_ts = int(ultimo[0])
+        self.manutencao(preco, float(ultimo[4]))
+        self.gerir_ordem_pendente(preco, ultimo, candle_novo)
+        self.gerir_posicao(preco, ultimo, candle_novo)
+
+        barras = self.motor.ingerir(novos)
+        if barras:
+            leituras = self._leituras_estruturais() if self.motor.contexto_vencido else {}
+            decisao = self.motor.avaliar(preco, imbalance=self._imbalance(), **leituras)
+            self.estado["ultima_decisao"] = {k: decisao.get(k) for k in ("acao", "motivo", "tp", "sl", "votos")}
+            self._persistir_do_fluxo(decisao, int(barras[-1].inicio_ms), preco)
+            self._agir_no_fluxo(decisao, preco)
+        # o contexto virando contra é motivo para sair: foi ele que autorizou a entrada
+        self._saida_por_contexto(preco)
+        self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=datetime.utcnow().isoformat(), preco=preco,
+                           posicao=self.posicao.as_dict() if self.posicao else None, fluxo=self.motor.status())
+
+    def _imbalance(self) -> Optional[float]:
+        try:
+            livro = self.ws.get_order_book() if self.ws is not None else None
+            bids, asks = (livro or {}).get("bids") or [], (livro or {}).get("asks") or []
+            sb, sa = sum(float(q) for _, q in bids[:10]), sum(float(q) for _, q in asks[:10])
+            return (sb - sa) / (sb + sa) if sb + sa > 0 else None
+        except Exception:
+            return None
+
+    def _agir_no_fluxo(self, decisao: Dict, preco: float):
+        if decisao["acao"] not in ("buy", "sell"):
+            return
+        if self.posicao:
+            if self.posicao.direcao != decisao["acao"] and (self._attr("position_mode", "one-way") or "one-way") == "one-way":
+                self.fechar_posicao(f"Fluxo contrário: {decisao['motivo'][:120]}", preco)
+                self.abrir_posicao(decisao, preco)
+            return
+        ok, motivo = self._pode_operar()
+        if ok:
+            self.abrir_posicao(decisao, preco)
+        else:
+            self._log(acao="hold", tipo_operacao="info", preco=preco, motivo=motivo)
+
+    def _saida_por_contexto(self, preco: float):
+        """
+        Fecha quando os graus maiores viram para o LADO OPOSTO. Contexto sem lado não fecha nada: isso é
+        motivo para não abrir, não para desmontar uma posição que já está correndo.
+        """
+        pos, ctx = self.posicao, (self.motor.contexto if self.motor else None)
+        if not pos or ctx is None or ctx.direcao not in ("buy", "sell"):
+            return
+        if ctx.direcao != pos.direcao:
+            self.fechar_posicao(f"Contexto virou para {ctx.direcao}: {ctx.motivo[:150]}", preco)
+
     def ciclo(self):
+        if self._motor_fluxo_ligado():
+            return self._ciclo_fluxo()
+        return self._ciclo_candle()
+
+    def _ciclo_candle(self):
         ohlcv = self._con_publico.obter_ohlcv(self.par, self.timeframe, 300, somente_fechados=True)
         if len(ohlcv) < 60:
             raise RuntimeError("candles insuficientes")
@@ -579,9 +750,9 @@ class BotExecutor:
         self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=datetime.utcnow().isoformat(), preco=preco,
                            posicao=self.posicao.as_dict() if self.posicao else None)
 
-    def _iniciar_websocket(self):
+    def _iniciar_websocket(self, forcar: bool = False):
         """Stream público de trades/livro da Bybit (linear) para scalp: menos chamadas REST e delta em tempo real."""
-        if self.ws is not None or not self._attr("usar_websocket", False):
+        if self.ws is not None or not (forcar or self._attr("usar_websocket", False)):
             return
         try:
             from core.datasource_ws_universal import DataSourceWebsocketUniversal
