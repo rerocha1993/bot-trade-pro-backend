@@ -41,7 +41,7 @@ def bot_fluxo(**kw) -> SimpleNamespace:
                 usar_motor_fluxo=True, barra_tipo="volume", barra_tamanho=0.0, barra_segundos_alvo=30.0,
                 banca=10000.0, risco_pct=0.005, max_alocacao_pct=0.5, alavancagem=1, quantidade=0.001,
                 max_trades_dia=30, max_perda_dia_pct=0.03, rr_minimo=0,
-                tipo_entrada="limite", espera_limite_s=180,
+                tipo_entrada="limite", espera_limite_s=180, risco_minimo_pct=0, alvo_maximo_r=0,
                 usar_trailing_stop=True, usar_saida_escalonada=True, mover_stop_para_entrada=True,
                 ativador_trailing=None, distancia_trailing=None, saida_escalonada=None,
                 slippage_pct=0.0)

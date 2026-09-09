@@ -82,6 +82,12 @@ class MotorFluxo:
         self.limitada = (getattr(bot, "tipo_entrada", "mercado") or "mercado") == "limite"
         self.taxa_entrada = TAXA_MAKER if self.limitada else TAXA_TAKER
         self.taxa_saida = TAXA_TAKER
+        # piso do risco e teto do alvo sao a alavanca economica do scalp: com stop de 0,12%% e ida e volta de
+        # 0,075%%, a taxa sozinha vale 0,6R por trade, e o ponto de equilibrio sobe para 40%% de acerto. Stop
+        # mais largo dilui esse custo fixo, ao preco de o trade demorar mais. Ficam configuraveis para poder
+        # medir, em vez de ficar no chute.
+        self.risco_minimo_pct = float(getattr(bot, "risco_minimo_pct", 0) or RISCO_MINIMO_PCT)
+        self.alvo_maximo_r = float(getattr(bot, "alvo_maximo_r", 0) or ALVO_MAXIMO_R)
         self.ultima_barra: Optional[Barra] = None
         self.barras_avaliadas = 0
         self.ultimo_motivo: str = "ainda não avaliou nada"
@@ -131,7 +137,7 @@ class MotorFluxo:
         """
         rng = self.gatilho._range_medio(barras)
         custo = preco * (self.taxa_entrada + self.taxa_saida)
-        return max(rng * RISCO_MINIMO_RANGES, preco * RISCO_MINIMO_PCT, custo * 1.5)
+        return max(rng * RISCO_MINIMO_RANGES, preco * self.risco_minimo_pct, custo * 1.5)
 
     def _sl_tp(self, direcao: str, preco: float, nivel: Nivel, barras: Sequence[Barra],
                contexto: Contexto) -> Dict:
@@ -164,7 +170,7 @@ class MotorFluxo:
             return {"sl": None, "tp": None, "rr": 0.0, "rr_liquido": 0.0, "rr_minimo": 0.0,
                     "fonte_tp": None, "fonte_sl": None}
         s = 1 if direcao == "buy" else -1
-        teto = preco + s * risco * ALVO_MAXIMO_R
+        teto = preco + s * risco * self.alvo_maximo_r
         alvo = contexto.alvo_na_direcao(preco, direcao)
         if alvo is not None:
             # para no nível contrário, com uma folga para dentro: quem espera o preço exato costuma não ser servido
@@ -172,7 +178,7 @@ class MotorFluxo:
             fonte_tp = alvo.fonte
             # nível longe demais vira alvo de daytrade: o scalp encurta e realiza no que cabe no seu tempo
             if (tp > teto) if direcao == "buy" else (tp < teto):
-                tp, fonte_tp = teto, f"{ALVO_MAXIMO_R:g}R (nível {alvo.fonte} longe demais para scalp)"
+                tp, fonte_tp = teto, f"{self.alvo_maximo_r:g}R (nível {alvo.fonte} longe demais para scalp)"
         else:
             tp = preco + s * risco * 2.0
             fonte_tp = "2R (sem nível adiante)"
