@@ -89,6 +89,22 @@ def subcontas_configuradas(modo: str = "testnet") -> List[Dict[str, Any]]:
     return out
 
 
+def _erro_de_rede(e: Exception) -> bool:
+    """
+    Vale a pena repetir? Timeout, queda de conexão e limite de chamadas, sim — são transitórios. Erro de
+    parâmetro, de credencial ou de saldo, não: repetir só gasta chamada e atrasa o ciclo.
+    """
+    try:
+        if isinstance(e, (ccxt.NetworkError, ccxt.RequestTimeout, ccxt.ExchangeNotAvailable,
+                          ccxt.DDoSProtection, ccxt.RateLimitExceeded)):
+            return True
+    except AttributeError:
+        pass
+    texto = str(e).lower()
+    return any(t in texto for t in ("timeout", "timed out", "10006", "too many visits",
+                                    "temporarily unavailable", "connection", "bad gateway"))
+
+
 class BybitConnector:
     exchange_name = "bybit"
 
@@ -246,14 +262,43 @@ class BybitConnector:
         return arredondar_para_step(preco, info["price_step"], "nearest")
 
     # ------------------------------------------------------------ dados públicos
+    def _com_repeticao(self, descricao: str, chamada, tentativas: int = 3, espera: float = 1.0):
+        """
+        Repete uma LEITURA que falhou por rede. Só leitura: reenviar ordem por timeout duplicaria posição.
+
+        Sem isso, um timeout virava ciclo perdido. E ciclo perdido não é só um dado que falta: é a gestão da
+        posição que não roda — stop não sobe, parcial não sai, saída estrutural não é avaliada. Num episódio
+        real, 235 timeouts em dez minutos deixaram os quatro robôs cegos o tempo todo, e nenhum deles tentou
+        de novo dentro do próprio ciclo.
+
+        A espera cresce a cada tentativa, e o 10006 (limite de chamadas da corretora) espera mais: insistir
+        rápido num rate limit é a forma mais certa de continuar limitado.
+        """
+        ultimo = None
+        for n in range(1, tentativas + 1):
+            try:
+                return chamada()
+            except Exception as e:
+                ultimo = e
+                if not _erro_de_rede(e) or n == tentativas:
+                    raise
+                pausa = espera * n * (5.0 if "10006" in str(e) else 1.0)
+                logger.warning("%s falhou (%d/%d), repetindo em %.1fs: %s",
+                               descricao, n, tentativas, pausa, str(e)[:120])
+                time.sleep(pausa)
+        raise ultimo
+
     def obter_preco_atual(self, par: str) -> float:
-        ticker = self.exchange.fetch_ticker(self.simbolo(par))
+        ticker = self._com_repeticao(f"preço de {par}",
+                                     lambda: self.exchange.fetch_ticker(self.simbolo(par)))
         return float(ticker["last"])
 
     def obter_ohlcv(self, par: str, timeframe: str = "15m", limite: int = 200,
                     somente_fechados: bool = False, since_ms: Optional[int] = None) -> List[list]:
         tf = normalizar_timeframe(timeframe)
-        candles = self.exchange.fetch_ohlcv(self.simbolo(par), timeframe=tf, limit=limite, since=since_ms)
+        candles = self._com_repeticao(
+            f"candles {par} {tf}",
+            lambda: self.exchange.fetch_ohlcv(self.simbolo(par), timeframe=tf, limit=limite, since=since_ms))
         candles = [[int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5] or 0)] for c in candles]
         candles.sort(key=lambda c: c[0])
         if somente_fechados:

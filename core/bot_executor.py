@@ -343,8 +343,14 @@ class BotExecutor:
             try:
                 sit = self.ordens.situacao_ordem(self.par, ped["ordem_id"])
             except Exception as e:
-                logger.warning("situação da ordem falhou: %s", e)
-                return
+                # NÃO pode sair daqui: antes, uma consulta que falhava pulava a checagem de validade logo
+                # abaixo, e a ordem ficava pendente para sempre. Como um sinal novo é ignorado enquanto há
+                # ordem pendente, o robô parava de operar CALADO. Aconteceu de verdade: uma ordem de 14:06
+                # seguia "pendente" sete horas depois, com 311 candles de espera num limite de 2, enquanto
+                # 28 sinais de compra eram descartados sem deixar registro. Ordem que não dá para conferir
+                # tem que envelhecer e morrer como qualquer outra.
+                logger.warning("situação da ordem falhou (%s): a ordem segue envelhecendo", e)
+                sit = {"status": "desconhecida"}
         if sit["status"] == "executada":
             exec_ = {"ordem_id": ped["ordem_id"], "preco_exec": sit["preco_exec"], "quantidade": sit["quantidade"],
                      "simulado": self.ordens.simulado, "taxa": sit.get("taxa", 0.0)}
@@ -356,7 +362,9 @@ class BotExecutor:
         elif ped["candles"] >= int(self._attr("limite_candles_espera", 3) or 3):
             self.ordens.cancelar_ordem(self.par, ped["ordem_id"])
             self.ordem_pendente = None
-            self._log(acao="hold", tipo_operacao="info", preco=preco, motivo=f"Ordem limitada a {ped['preco']} expirou sem execução")
+            extra = " (sem conseguir confirmar a situação na corretora)" if sit["status"] == "desconhecida" else ""
+            self._log(acao="hold", tipo_operacao="info", preco=preco,
+                      motivo=f"Ordem limitada a {ped['preco']} expirou sem execução{extra}")
 
     # ---------------------------------------------------- gestão posição
     def aplicar_trailing_stop(self, preco: float):
@@ -737,12 +745,21 @@ class BotExecutor:
             self.estado["ultima_decisao"] = {k: decisao.get(k) for k in ("acao", "motivo", "fase_onda", "cenario", "probabilidade", "tp", "sl", "votos")}
             self._persistir_decisao(decisao, int(ultimo[0]), preco)
             if decisao["acao"] in ("buy", "sell") and self.ordem_pendente:
+                ped_avisado = bool(self.ordem_pendente.get("avisado"))
                 if self.ordem_pendente["direcao"] != decisao["acao"]:
                     self.ordens.cancelar_ordem(self.par, self.ordem_pendente["ordem_id"])
                     self.ordem_pendente = None
                     self._log(acao="hold", tipo_operacao="info", preco=preco, motivo="Ordem limitada cancelada: sinal mudou de direção")
                 else:
+                    # sinal engolido por ordem pendente era invisível: só ia para o console. Se a ordem
+                    # travar, o painel precisa mostrar POR QUE o robô parou de agir.
                     logger.info("[%s] ordem limitada já pendente", self._attr("nome"))
+                    if not ped_avisado:
+                        self._log(acao="hold", tipo_operacao="info", preco=preco,
+                                  motivo=f"Sinal {decisao['acao']} ignorado: ordem limitada a "
+                                         f"{self.ordem_pendente['preco']} ainda pendente "
+                                         f"({self.ordem_pendente['candles']} candles de espera)")
+                        self.ordem_pendente["avisado"] = True
                     decisao = dict(decisao, acao="hold")
             if decisao["acao"] in ("buy", "sell"):
                 if self.posicao:

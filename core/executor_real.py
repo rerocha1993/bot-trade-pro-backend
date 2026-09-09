@@ -80,7 +80,7 @@ class OrderExecutor:
         """'aberta' | 'executada' (com preco_exec/quantidade) | 'cancelada'."""
         if self.simulado:
             return {"status": "aberta"}
-        o = self.con.exchange.fetch_order(ordem_id, self.con.simbolo(par))
+        o = self._buscar_ordem(par, ordem_id)
         st = (o.get("status") or "").lower()
         if st == "closed" or (o.get("filled") and float(o["filled"]) >= float(o.get("amount") or 0) > 0):
             preco = float(o.get("average") or o.get("price") or 0)
@@ -89,6 +89,29 @@ class OrderExecutor:
         if st in ("canceled", "cancelled", "rejected", "expired"):
             return {"status": "cancelada"}
         return {"status": "aberta", "executada_parcial": float(o.get("filled") or 0)}
+
+    def _buscar_ordem(self, par: str, ordem_id: str) -> Dict:
+        """
+        A ccxt RECUSA `fetch_order` na Bybit sem `acknowledged`, porque ele só enxerga as últimas 500 ordens
+        da conta:
+
+            ArgumentsRequired: bybit fetchOrder() can only access an order if it is in last 500 orders
+
+        Isso estourava a cada ciclo, e a exceção fazia a ordem pendente nunca expirar. As consultas
+        específicas (aberta / encerrada) não têm essa limitação e são as que a própria ccxt recomenda.
+        """
+        simbolo = self.con.simbolo(par)
+        for buscar in (lambda: self.con.exchange.fetch_open_order(ordem_id, simbolo),
+                       lambda: self.con.exchange.fetch_closed_order(ordem_id, simbolo)):
+            try:
+                o = buscar()
+                if o:
+                    return o
+            except Exception:
+                continue
+        # último recurso, com o aviso reconhecido: se a ordem for antiga demais, isto também falha, e aí
+        # quem chama trata a ordem como não confirmável (ela envelhece e é cancelada por tempo)
+        return self.con.exchange.fetch_order(ordem_id, simbolo, params={"acknowledged": True})
 
     def cancelar_ordem(self, par: str, ordem_id: str) -> bool:
         if self.simulado:
