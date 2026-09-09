@@ -261,6 +261,12 @@ class BacktestFluxo:
                 if ts >= self._proximo_ctx_ms:
                     self.motor.contexto = self.motor.leitor.ler(preco)
                     self._proximo_ctx_ms = ts + self._intervalo_ctx_ms
+                    # o executor ao vivo fecha quando os graus maiores viram para o lado oposto; o teste
+                    # precisa fazer o mesmo, senão mede um robô que não é o que vai rodar
+                    ctx = self.motor.contexto
+                    if pos and ctx and ctx.direcao in ("buy", "sell") and ctx.direcao != pos["direcao"]:
+                        self._fechar(pos, preco, "contexto virou", ts)
+                        pos = None
                 d = self.motor.avaliar(preco)
                 self._marcar(d)
                 if d["acao"] in ("buy", "sell") and pos is None and self._pode_operar():
