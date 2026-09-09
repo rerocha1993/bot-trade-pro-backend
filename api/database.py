@@ -86,8 +86,10 @@ def _conecta() -> bool:
 
 def _matar_localdb_orfao() -> bool:
     """
-    Quando um sqlservr.exe do LocalDB fica órfão, a instância aparece como parada mas o 'start' falha com
-    "SQL Server process failed to start". Encerrar o processo pendurado é a saída documentada.
+    Encerra o sqlservr do LocalDB quando ele fica pendurado: a instância aparece como parada e o 'start' falha
+    com "SQL Server process failed to start".
+
+    DESLIGADO POR PADRÃO. Ligue com DB_LIMPAR_ORFAO=1, ciente de que pode derrubar robôs em operação.
 
     ANTES DE MATAR, TENTA CONECTAR. Um sqlservr do LocalDB é compartilhado por todos os processos deste usuário:
     se o banco atende, ele não está órfão, está EM USO — e derrubá-lo arranca o banco de baixo de quem já estava
@@ -96,6 +98,16 @@ def _matar_localdb_orfao() -> bool:
     """
     if _conecta():
         logger.info("o LocalDB atende: não há processo órfão para encerrar")
+        return False
+    # Não dá para distinguir com segurança um processo órfão de um banco EM USO: já vimos o `sqllocaldb info`
+    # dizer "Stopped" e o `start` falhar enquanto o sqlservr seguia servindo os robôs em execução — só conexões
+    # NOVAS falhavam. Matar ali arranca o banco de baixo de uma operação em andamento. Por isso é opt-in.
+    if (os.getenv("DB_LIMPAR_ORFAO", "0") or "0").lower() not in ("1", "true", "yes"):
+        logger.error(
+            "O LocalDB não aceita conexões novas e a instância não sobe. Pode haver um sqlservr pendurado — ou um "
+            "que ainda esteja servindo robôs em execução. NÃO vou encerrar processo nenhum por conta própria. "
+            "Feche o servidor, rode 'sqllocaldb stop MSSQLLocalDB -k' e depois 'sqllocaldb start MSSQLLocalDB'. "
+            "Para autorizar a limpeza automática, defina DB_LIMPAR_ORFAO=1.")
         return False
     try:
         subprocess.run(["powershell", "-NoProfile", "-Command", _PS_MATAR_ORFAO],

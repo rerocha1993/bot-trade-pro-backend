@@ -23,9 +23,19 @@ def test_banco_de_pe_nao_e_derrubado(monkeypatch):
     assert feito["matou"] == 0, "o banco atende: matar seria arrancar o banco de quem está usando"
 
 
-def test_so_mata_quando_o_banco_nao_atende(monkeypatch):
+def test_nao_mata_por_conta_propria(monkeypatch):
+    """Já vimos o LocalDB dizer 'Stopped', recusar conexões novas e ainda assim estar servindo robôs em execução."""
     feito = _sem_efeito(monkeypatch)
     monkeypatch.setattr(bd, "_conecta", lambda: False)
+    monkeypatch.delenv("DB_LIMPAR_ORFAO", raising=False)
+    assert bd._matar_localdb_orfao() is False
+    assert feito["matou"] == 0, "sem autorização explícita, ninguém mata processo de banco"
+
+
+def test_mata_quando_autorizado(monkeypatch):
+    feito = _sem_efeito(monkeypatch)
+    monkeypatch.setattr(bd, "_conecta", lambda: False)
+    monkeypatch.setenv("DB_LIMPAR_ORFAO", "1")
     assert bd._matar_localdb_orfao() is True
     assert feito["matou"] == 1
 
@@ -56,5 +66,6 @@ def test_instancia_realmente_travada_e_limpa(monkeypatch):
     monkeypatch.setattr(bd, "_conecta", lambda: False)
     monkeypatch.setattr(bd, "_rodando", lambda inst: False)
     monkeypatch.setattr(bd, "_instancia_localdb", lambda: "MSSQLLocalDB")
+    monkeypatch.setenv("DB_LIMPAR_ORFAO", "1")
     assert bd.acordar_localdb() is False
-    assert feito["matou"] == 1, "aí sim: não atende e não sobe"
+    assert feito["matou"] == 1, "aí sim: não atende, não sobe, e a limpeza foi autorizada"
