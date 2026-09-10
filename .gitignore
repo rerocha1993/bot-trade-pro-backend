@@ -44,3 +44,7 @@ simulador/*.csv
 
 # negocios historicos baixados da Bybit para o backtest de fluxo (~20-90 MB por dia)
 dados/trades_bybit/
+
+# trava de instancia unica dos robos (core/trava_instancia.py)
+.robos.lock
+.robos.lock.pid

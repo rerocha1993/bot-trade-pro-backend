@@ -178,3 +178,41 @@ def test_regua_entrega_o_ritmo_pedido_mesmo_com_fluxo_torto():
     ag.ingerir(trades)
     ritmo = ag.status()["ritmo_s"]
     assert 15.0 <= ritmo <= 60.0, f"ritmo de {ritmo}s por barra, longe dos 30s pedidos"
+
+
+def test_regua_nova_so_vale_a_partir_da_proxima_barra():
+    """
+    Regressão: trocar a régua com barra aberta recortava a barra retroativamente. Uma barra que já tinha
+    90 BTC fechava declarando 10, e o resto do laço cuspia oito barras sintéticas no MESMO milissegundo e
+    no MESMO preço — a janela de 5 barras do gatilho ficava inteiramente fantasma, com delta e concentração
+    inventados. E a régua encolhe toda vez que o mercado desacelera, então isso acontecia de verdade.
+    """
+    ag = AgregadorBarras(tipo="volume", tamanho=100.0, recalibrar_a_cada_s=0)
+    ag.ingerir([{"price": 100.0, "qty": 90.0, "side": "buy", "timestamp": 0}])
+    assert ag.parcial.volume == 90.0
+
+    ag._tamanho_pendente = 10.0        # é o que a recalibragem faz agora com uma barra aberta
+    fechadas = ag.ingerir([{"price": 100.0, "qty": 10.0, "side": "buy", "timestamp": 100}])
+    assert len(fechadas) == 1, f"{len(fechadas)} barras de uma vez: voltaram as barras fantasma"
+    assert fechadas[0].volume == 100.0, "a barra aberta foi recortada pela régua nova"
+    assert fechadas[0].delta == 100.0
+    assert ag.tamanho == 100.0, "a régua trocou antes de a barra fechar"
+
+    # a régua nova entra em vigor ao ABRIR a próxima barra, não antes
+    seguintes = ag.ingerir([{"price": 100.0, "qty": 10.0, "side": "buy", "timestamp": 200}])
+    assert ag.tamanho == 10.0
+    assert ag._tamanho_pendente == 0.0
+    assert len(seguintes) == 1 and seguintes[0].volume == 10.0
+
+
+def test_recalibragem_com_barra_aberta_nao_muda_a_regua_na_hora():
+    ag = AgregadorBarras(tipo="volume", tamanho=0.0, segundos_alvo=30.0, recalibrar_a_cada_s=1)
+    ag.ingerir(fluxo_constante(1.0, 300))
+    regua = ag.tamanho
+    ag.ingerir([{"price": 100.0, "qty": regua / 2, "side": "buy", "timestamp": 300_000}])
+    assert ag.parcial is not None                       # há barra aberta
+    ag.ingerir(fluxo_constante(10.0, 300, t0=301_000))   # mercado acelera: a régua deveria crescer
+    assert ag.tamanho > regua                            # e cresceu
+    # o que não pode é ter acontecido no meio: nenhuma barra pode ter saído menor que a régua antiga
+    for b in ag.ultimas(50):
+        assert b.volume >= regua * 0.99, f"barra de {b.volume} com régua de {regua}"

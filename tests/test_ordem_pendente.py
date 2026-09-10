@@ -130,3 +130,65 @@ def test_erro_que_nao_e_de_rede_estoura_na_primeira(monkeypatch):
     with pytest.raises(ccxt.InsufficientFunds):
         con._com_repeticao("teste", sem_saldo)
     assert tentativas["n"] == 1, "repetiu um erro que nunca vai passar"
+
+
+# ------------------------------------------------------------------ falha parcial não pode cegar o ciclo
+class _Publico:
+    """Conector público que pode estar fora do ar."""
+    def __init__(self, erro=None, candles=None):
+        self.erro, self.candles, self.chamadas = erro, candles or [], 0
+
+    def obter_ohlcv(self, *a, **kw):
+        self.chamadas += 1
+        if self.erro:
+            raise self.erro
+        return self.candles
+
+
+def _executor_fluxo(publico, cache=None, cache_ts=0.0):
+    ex = BotExecutor.__new__(BotExecutor)
+    ex.bot = type("B", (), {"id": 1, "nome": "teste"})()
+    ex.par, ex.timeframe = "BTCUSDT", "1m"
+    ex._con_publico = publico
+    ex._ohlcv_cache, ex._ohlcv_cache_ts = cache, cache_ts
+    ex.logs = []
+    ex._log = lambda **kw: ex.logs.append(kw)
+    return ex
+
+
+def test_candles_que_nao_renovam_caem_no_cache_em_vez_de_derrubar_o_ciclo():
+    """
+    Regressão: a exceção subia e derrubava `_ciclo_fluxo` INTEIRO — e com ele a gestão da posição. Numa
+    rajada de timeouts (235 em dez minutos, aconteceu) isso é trailing que não sobe e parcial que não sai
+    justamente durante a instabilidade. Um candle de meio minuto atrás serve para máxima/mínima.
+    """
+    import ccxt
+    velho = [[0, 1.0, 2.0, 0.5, 1.5, 10.0]]
+    ex = _executor_fluxo(_Publico(erro=ccxt.RequestTimeout("estourou")), cache=velho, cache_ts=1.0)
+    assert ex._candles_para_gestao() is velho
+
+
+def test_sem_cache_nenhum_a_falha_de_candles_sobe():
+    """Cair no cache é usar dado velho; sem dado nenhum não há o que gerir, e o ciclo tem que falhar alto."""
+    import ccxt
+    ex = _executor_fluxo(_Publico(erro=ccxt.RequestTimeout("estourou")))
+    with pytest.raises(ccxt.RequestTimeout):
+        ex._candles_para_gestao()
+
+
+def test_no_motor_de_fluxo_o_sinal_engolido_tambem_vira_registro():
+    """
+    Regressão: `_agir_no_fluxo` descartava em silêncio o sinal do mesmo lado de uma ordem pendente — o
+    mesmo buraco que deixou o robô parado sete horas sem ninguém ver, só que na metade do código que decide
+    por fluxo. Com barra a cada ~30s seriam ~120 sinais por hora sumindo do painel.
+    """
+    ex = _executor_fluxo(_Publico())
+    ex.ordens = _Ordens()
+    ex.ordem_pendente = {"ordem_id": "abc", "preco": 79096.1, "direcao": "buy", "candles": 3}
+    ex.posicao = None
+    ex._agir_no_fluxo({"acao": "buy", "motivo": "absorção"}, 79000.0)
+    assert len(ex.logs) == 1
+    assert "ignorado" in ex.logs[0]["motivo"] and "79096.1" in ex.logs[0]["motivo"]
+    # e não repete a cada barra: um aviso por ordem, senão vira enxurrada
+    ex._agir_no_fluxo({"acao": "buy", "motivo": "absorção"}, 79000.0)
+    assert len(ex.logs) == 1

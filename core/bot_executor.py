@@ -608,8 +608,18 @@ class BotExecutor:
         """
         agora = time.time()
         if self._ohlcv_cache is None or agora - self._ohlcv_cache_ts >= intervalo_s:
-            self._ohlcv_cache = self._con_publico.obter_ohlcv(self.par, self.timeframe, 300, somente_fechados=True)
-            self._ohlcv_cache_ts = agora
+            try:
+                self._ohlcv_cache = self._con_publico.obter_ohlcv(self.par, self.timeframe, 300,
+                                                                  somente_fechados=True)
+                self._ohlcv_cache_ts = agora
+            except Exception as e:
+                # deixar a excecao subir aqui derrubava o ciclo INTEIRO, e com ele a gestao da posicao --
+                # trailing que nao sobe, parcial que nao sai -- justamente durante a instabilidade que
+                # causou a falha. Um candle de meio minuto atras serve para maxima/minima e fechamento.
+                if self._ohlcv_cache is None:
+                    raise
+                logger.warning("[%s] candles nao renovaram (%s): seguindo com os de %.0fs atras",
+                               self._attr("nome"), str(e)[:120], agora - self._ohlcv_cache_ts)
         return self._ohlcv_cache
 
     def _persistir_do_fluxo(self, decisao: Dict, candle_ts: int, preco: float):
@@ -688,6 +698,14 @@ class BotExecutor:
                 self._log(acao="hold", tipo_operacao="info", preco=preco,
                           motivo="Ordem limitada cancelada: o fluxo virou de lado")
             else:
+                # descartar isto em silêncio era o mesmo buraco que deixou o robô parado sete horas sem
+                # ninguém ver, só que na metade do código que decide por fluxo. Uma barra fecha a cada ~30s,
+                # então seriam ~120 sinais por hora sumindo sem uma linha no painel.
+                if not self.ordem_pendente.get("avisado"):
+                    self.ordem_pendente["avisado"] = True
+                    self._log(acao="hold", tipo_operacao="info", preco=preco,
+                              motivo=f"Sinal {decisao['acao']} ignorado: ordem limitada a "
+                                     f"{self.ordem_pendente['preco']} ainda pendente")
                 return
         if self.posicao:
             if self.posicao.direcao != decisao["acao"] and (self._attr("position_mode", "one-way") or "one-way") == "one-way":

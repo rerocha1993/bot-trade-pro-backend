@@ -9,6 +9,14 @@ from models.bot import Bot
 from models.bot_indicador import BotIndicador
 
 CAMPOS_BOT = {c.name for c in Bot.__table__.columns} - {"id"}
+
+
+def _numero(d: dict, campo: str, rotulo: str) -> float:
+    """Le um numero recusando o valor com uma mensagem util, em vez do ValueError cru do float()."""
+    try:
+        return float(d[campo])
+    except (TypeError, ValueError):
+        raise ValueError(f"{rotulo}: {d[campo]!r} nao e um numero.") from None
 OBRIGATORIOS = ("nome", "ativo", "timeframe", "quantidade")
 
 
@@ -57,9 +65,11 @@ class BotService:
             d["barra_tipo"] = str(d["barra_tipo"]).strip().lower()
             if d["barra_tipo"] not in TIPOS_BARRA:
                 raise ValueError(f"Tipo de barra invalido: {d['barra_tipo']!r}. Use: {', '.join(TIPOS_BARRA)}.")
-        if d.get("barra_tamanho") is not None and float(d["barra_tamanho"]) < 0:
+        # numero que nao da para ler tem que ser recusado COM explicacao: um campo esvaziado no painel
+        # virava um ValueError cru do float(), sem dizer ao usuario o que estava errado
+        if d.get("barra_tamanho") is not None and _numero(d, "barra_tamanho", "Tamanho da barra") < 0:
             raise ValueError("Tamanho da barra nao pode ser negativo (use 0 para calibrar pelo fluxo).")
-        if d.get("barra_segundos_alvo") is not None and float(d["barra_segundos_alvo"]) <= 0:
+        if d.get("barra_segundos_alvo") is not None and _numero(d, "barra_segundos_alvo", "Ritmo alvo da barra") <= 0:
             raise ValueError("O ritmo alvo da barra tem que ser maior que zero.")
         if d.get("usar_motor_fluxo"):
             estilo = d.get("estilo_trade")

@@ -93,3 +93,13 @@ def test_o_que_o_motor_grava_cabe_nas_colunas():
     for campo, valor in escritos.items():
         assert largura[campo] is None or len(valor) <= largura[campo], \
             f"{campo}={valor!r} não cabe em {largura[campo]} caracteres"
+
+
+def test_numero_invalido_e_recusado_com_explicacao():
+    """Campo numérico esvaziado no painel virava um `ValueError` cru do float(), sem dizer o que houve."""
+    with pytest.raises(ValueError, match="não é um numero|nao e um numero"):
+        BotService._normalizar({"barra_tamanho": ""})
+    with pytest.raises(ValueError, match="não é um numero|nao e um numero"):
+        BotService._normalizar({"barra_segundos_alvo": "abc"})
+    # e o caminho normal segue funcionando
+    assert BotService._normalizar({"barra_tamanho": "2.5"})["barra_tamanho"] == "2.5"

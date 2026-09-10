@@ -110,6 +110,7 @@ class AgregadorBarras:
         self._janela_calibragem_ms = int(max(segundos_alvo * 8, 240) * 1000)
         self._calibragem: Deque[tuple] = deque(maxlen=60000)
         self._calibrado_em_ms = 0
+        self._tamanho_pendente = 0.0           # regua nova esperando a barra atual fechar
         self._tamanho_anterior = 0.0
         self.negocios_vistos = 0
         self.lacunas = 0                       # negócios perdidos, contados por quem alimenta
@@ -169,9 +170,17 @@ class AgregadorBarras:
         if not amostra:
             return
         fluxo_s = sum(amostra) / len(amostra)
-        if fluxo_s > 0:
-            self.tamanho = fluxo_s * self.segundos_alvo
-            self._calibrado_em_ms = fim
+        if fluxo_s <= 0:
+            return
+        novo = fluxo_s * self.segundos_alvo
+        self._calibrado_em_ms = fim
+        if self.parcial is None:
+            self.tamanho = novo
+        else:
+            # NUNCA no meio de uma barra. Trocar a regua com barra aberta a recorta retroativamente: uma
+            # barra que ja tinha 90 BTC fechava declarando 10, e o resto virava um punhado de barras
+            # sinteticas no mesmo milissegundo e no mesmo preco. A janela do gatilho ficava toda fantasma.
+            self._tamanho_pendente = novo
 
     # ------------------------------------------------------------------ ingestão
     def ingerir(self, trades: Sequence[Dict]) -> List[Barra]:
@@ -214,6 +223,8 @@ class AgregadorBarras:
         fechadas: List[Barra] = []
         while restante > 0:
             if self.parcial is None:
+                if self._tamanho_pendente:      # a regua nova so vale a partir de uma barra nova
+                    self.tamanho, self._tamanho_pendente = self._tamanho_pendente, 0.0
                 self.parcial = Barra(inicio_ms=ts, fim_ms=ts, abertura=preco, maxima=preco,
                                      minima=preco, fechamento=preco)
                 self._acumulado = 0.0

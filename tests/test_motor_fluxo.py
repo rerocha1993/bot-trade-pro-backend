@@ -236,3 +236,19 @@ def test_risco_retorno_e_medido_liquido_de_taxa():
     niveis = m._sl_tp("buy", 100.05, contexto().niveis[0], list(m.agregador.fechadas), contexto())
     assert niveis["rr_liquido"] < niveis["rr"]
     assert niveis["custo_em_r"] > 0
+
+
+def test_contexto_velho_nao_autoriza_entrada():
+    """
+    Regressão: se a leitura dos graus maiores falha de forma persistente, `atualizar_contexto` mantém o
+    contexto anterior e empurra o próximo recálculo adiante do mesmo jeito. O robô seguiria entrando com um
+    viés de 15m/1h de horas atrás, tendo como única pista um warning no console. `idade_s` já era calculado
+    e mostrado no painel, mas nenhuma decisão o consultava.
+    """
+    m = motor_com_contexto(contexto(), absorcao_no_suporte())
+    assert m.avaliar(preco=100.05)["acao"] == "buy"          # contexto fresco: entra
+
+    m.contexto.calculado_em = time.time() - m.intervalo_contexto * 10
+    d = m.avaliar(preco=100.05)
+    assert d["acao"] == "hold"
+    assert "velho" in d["motivo"]

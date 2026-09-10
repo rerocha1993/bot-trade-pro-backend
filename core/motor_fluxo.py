@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 RR_MINIMO = {"conservador": 1.2, "turbo": 1.0}
 # o contexto vem dos graus 15m/1h: recalcular a cada 3 minutos já é mais frequente do que eles mudam
 INTERVALO_CONTEXTO_S = 180.0
+# quantos intervalos o contexto pode envelhecer antes de deixar de valer. Se a leitura dos graus maiores
+# falha de forma persistente, o contexto anterior fica de pé e continuaria autorizando entradas com um viés
+# de horas atrás — com um warning no console como única pista.
+IDADE_MAXIMA_CONTEXTO = 3.0
 # piso do stop: fora do ruído da barra e bem acima do custo. Ver `_risco_minimo`.
 RISCO_MINIMO_RANGES = 3.0
 RISCO_MINIMO_PCT = 0.0012
@@ -220,6 +224,11 @@ class MotorFluxo:
                          "barras": self.agregador.status()}
         if contexto is None:
             return _hold("Sem contexto para o scalp", **detalhes_base)
+        idade = time.time() - contexto.calculado_em
+        if idade > self.intervalo_contexto * IDADE_MAXIMA_CONTEXTO:
+            return _hold(f"Contexto dos graus maiores está velho ({idade / 60:.0f} min): não dá para "
+                         f"autorizar entrada com um viés que pode ter virado. {contexto.motivo[:120]}",
+                         **detalhes_base)
         if not self.agregador.calibrado:
             return _hold(f"Régua da barra ainda calibrando pelo fluxo "
                          f"({self.agregador.negocios_vistos} negócios vistos)", **detalhes_base)

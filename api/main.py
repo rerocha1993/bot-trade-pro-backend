@@ -34,6 +34,7 @@ logger = logging.getLogger("api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from core.trava_instancia import TravaInstancia
     from services.bot_manager import get_manager
     from services.indicador_service import IndicadorService
     from api.database import SessionLocal, aguardar_banco, manter_banco_acordado, parar_keepalive
@@ -55,7 +56,11 @@ async def lifespan(app: FastAPI):
             db.close()
 
     manager = get_manager()
-    if banco_ok and os.getenv("INICIAR_BOTS", "1") != "0":
+    # o uvicorn roda ISTO antes de reservar a porta: numa segunda janela, os robos subiriam, falariam com a
+    # corretora, e so entao a porta falharia. Por um instante haveria dois executores por subconta -- e a
+    # Bybit tem UMA posicao por simbolo por conta. A trava vale para qualquer porta (core/trava_instancia.py)
+    trava = TravaInstancia()
+    if banco_ok and os.getenv("INICIAR_BOTS", "1") != "0" and trava.adquirir():
         try:
             n = manager.start_all()
             logger.info("BotManager iniciou %d bot(s)", n)
@@ -70,6 +75,7 @@ async def lifespan(app: FastAPI):
         manager.stop_all()
     except Exception:
         pass
+    trava.liberar()
 
 
 app = FastAPI(title="Bot Trade Pro API", version="2.0", lifespan=lifespan)
