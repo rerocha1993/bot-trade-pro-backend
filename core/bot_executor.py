@@ -615,8 +615,11 @@ class BotExecutor:
         if self._ohlcv_cache is None or self.ultimo_candle_ts is None:
             return True
         dur = timeframe_ms(self.timeframe)
-        # margem para o atraso da própria corretora em publicar o candle recém-fechado
-        return time.time() * 1000 >= self.ultimo_candle_ts + 2 * dur + 2000
+        # margem MÍNIMA para o atraso da corretora em publicar o candle recém-fechado. Ela é pequena de
+        # propósito: se o candle ainda não saiu, a condição continua verdadeira e o ciclo seguinte busca de
+        # novo — ou seja, degrada exatamente para o comportamento antigo justamente quando precisa. Margem
+        # grande custaria tempo real de reação no robô de 1m sem comprar nada em troca.
+        return time.time() * 1000 >= self.ultimo_candle_ts + 2 * dur + 500
 
     def _candles_para_gestao(self, intervalo_s: float = 30.0):
         """
