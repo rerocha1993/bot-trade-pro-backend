@@ -151,6 +151,7 @@ def _executor_fluxo(publico, cache=None, cache_ts=0.0):
     ex.par, ex.timeframe = "BTCUSDT", "1m"
     ex._con_publico = publico
     ex._ohlcv_cache, ex._ohlcv_cache_ts = cache, cache_ts
+    ex.ultimo_candle_ts = None
     ex.logs = []
     ex._log = lambda **kw: ex.logs.append(kw)
     return ex
@@ -192,3 +193,57 @@ def test_no_motor_de_fluxo_o_sinal_engolido_tambem_vira_registro():
     # e não repete a cada barra: um aviso por ordem, senão vira enxurrada
     ex._agir_no_fluxo({"acao": "buy", "motivo": "absorção"}, 79000.0)
     assert len(ex.logs) == 1
+
+
+# ------------------------------------------------------------------ volume de chamadas na corretora
+def _executor_tf(tf, ultimo_candle_ts, cache=None):
+    ex = _executor_fluxo(_Publico(candles=[[0, 1.0, 2.0, 0.5, 1.5, 10.0]]), cache=cache, cache_ts=1.0)
+    ex.timeframe = tf
+    ex.ultimo_candle_ts = ultimo_candle_ts
+    return ex
+
+
+def test_nao_rebusca_candle_que_nao_pode_ter_mudado():
+    """
+    Regressão do 10006 (rate limit da Bybit). O Hedge Inverso opera em 4h com ciclo de 10s e buscava 300
+    candles 1440 vezes para cada UM que trazia dado novo. Somados, os quatro robôs faziam 52 chamadas por
+    minuto onde cabiam 2 — e o balde estourava em rajada nas viradas de 15 minutos e de hora, quando as
+    decisões pesadas de todos coincidem.
+    """
+    import time as _t
+    agora_ms = _t.time() * 1000
+    velho = [[0, 1.0, 2.0, 0.5, 1.5, 10.0]]
+
+    # candle de 4h que abriu ha 10 minutos: o proximo so fecha daqui a horas
+    recente = _executor_tf("4h", int(agora_ms - 600_000), cache=velho)
+    assert recente._candle_pode_ter_mudado() is False
+
+    # candle de 1m que abriu ha 5 minutos: ja fechou candle novo faz tempo
+    vencido = _executor_tf("1m", int(agora_ms - 300_000), cache=velho)
+    assert vencido._candle_pode_ter_mudado() is True
+
+    # sem cache nenhum, sempre busca
+    assert _executor_tf("4h", int(agora_ms - 600_000))._candle_pode_ter_mudado() is True
+
+
+def test_limitador_espaca_as_leituras_do_processo_inteiro():
+    """
+    O `enableRateLimit` da ccxt é por INSTÂNCIA e não é seguro entre threads: quatro robôs, quatro
+    conectores, um IP só. Cada um respeitava um limite próprio e somados estouravam o da corretora.
+    """
+    import time as _t
+
+    from core.conexoes import conexao_bybit as cb
+
+    original = cb._REQ_POR_S
+    cb._REQ_POR_S = 20.0          # 50ms entre chamadas
+    cb._proximo_livre = 0.0
+    try:
+        t0 = _t.monotonic()
+        for _ in range(5):
+            cb._esperar_vez()
+        gasto = _t.monotonic() - t0
+        assert gasto >= 0.15, f"cinco chamadas saíram em {gasto:.3f}s: o limitador não segurou"
+    finally:
+        cb._REQ_POR_S = original
+        cb._proximo_livre = 0.0

@@ -30,7 +30,7 @@ from core.saida_escalonada import (
 )
 from core.motor_fluxo import MotorFluxo
 from core.strategy_engine import StrategyEngine
-from core.utils_indicadores import normalizar_timeframe
+from core.utils_indicadores import normalizar_timeframe, timeframe_ms
 from api.database import SessionLocal
 from models.decisao_bot import DecisaoBot
 from models.log_execucao import LogExecucaoBot
@@ -600,14 +600,32 @@ class BotExecutor:
             pass
         return float(self._con_publico.obter_preco_atual(self.par))
 
+    def _candle_pode_ter_mudado(self) -> bool:
+        """
+        Já pode existir candle fechado novo desde a última busca?
+
+        Rebuscar 300 candles a cada ciclo é jogar chamada fora: o Hedge Inverso opera em 4h com ciclo de 10s
+        e buscava 1440 vezes o MESMO candle para cada um que trazia dado novo; os quatro robôs somavam 52
+        chamadas por minuto de onde caberiam 2. Era isso que enchia o balde e fazia o 10006 estourar em
+        rajada nas viradas de 15 minutos e de hora, quando as decisões pesadas coincidem.
+
+        O candle mais recente abriu em `ultimo_candle_ts` e fechou um período depois; o PRÓXIMO só fecha um
+        período adiante disso. Antes desse instante, buscar de novo devolve exatamente a mesma coisa.
+        """
+        if self._ohlcv_cache is None or self.ultimo_candle_ts is None:
+            return True
+        dur = timeframe_ms(self.timeframe)
+        # margem para o atraso da própria corretora em publicar o candle recém-fechado
+        return time.time() * 1000 >= self.ultimo_candle_ts + 2 * dur + 2000
+
     def _candles_para_gestao(self, intervalo_s: float = 30.0):
         """
         O motor de fluxo não decide por candle, mas a gestão de posição ainda precisa de um: o simulador
-        usa máxima/mínima e a manutenção institucional usa o fechamento. Como não é o gatilho, dá para
-        buscar de vez em quando em vez de a cada ciclo — que agora roda a cada poucos segundos.
+        usa máxima/mínima e a manutenção institucional usa o fechamento.
         """
         agora = time.time()
-        if self._ohlcv_cache is None or agora - self._ohlcv_cache_ts >= intervalo_s:
+        if self._ohlcv_cache is None or (self._candle_pode_ter_mudado()
+                                         and agora - self._ohlcv_cache_ts >= intervalo_s):
             try:
                 self._ohlcv_cache = self._con_publico.obter_ohlcv(self.par, self.timeframe, 300,
                                                                   somente_fechados=True)
@@ -735,7 +753,10 @@ class BotExecutor:
         return self._ciclo_candle()
 
     def _ciclo_candle(self):
-        ohlcv = self._con_publico.obter_ohlcv(self.par, self.timeframe, 300, somente_fechados=True)
+        if self._candle_pode_ter_mudado():
+            self._ohlcv_cache = self._con_publico.obter_ohlcv(self.par, self.timeframe, 300, somente_fechados=True)
+            self._ohlcv_cache_ts = time.time()
+        ohlcv = self._ohlcv_cache or []
         if len(ohlcv) < 60:
             raise RuntimeError("candles insuficientes")
         preco = self._con_publico.obter_preco_atual(self.par)

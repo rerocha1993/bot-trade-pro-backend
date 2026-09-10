@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -87,6 +88,36 @@ def subcontas_configuradas(modo: str = "testnet") -> List[Dict[str, Any]]:
             k, s = os.getenv(nome), os.getenv(f"{prefixo}{slug}_SECRET_KEY_{sufixo}")
             out.append({"subconta": slug.lower(), "configurada": bool(k and s), "variavel": nome})
     return out
+
+
+# LIMITADOR DE UMA VEZ SO PARA O PROCESSO INTEIRO.
+#
+# O `enableRateLimit` da ccxt e por INSTANCIA e nao e seguro entre threads: cada robo tem o seu conector, os
+# quatro rodam em threads separadas, e todos saem pelo MESMO IP. Cada um respeitava um limite proprio e
+# somados estouravam o da corretora -- o 10006 aparecia em rajada nas viradas de 15 minutos e de hora, que e
+# quando os robos fazem a decisao pesada ao mesmo tempo.
+#
+# Aqui o espacamento e global: nao importa quantos conectores ou threads existam, as LEITURAS publicas saem
+# no maximo `BYBIT_REQ_POR_S` por segundo. Envio de ordem nao passa por aqui: atraso em ordem custa preco.
+_REQ_POR_S = float(os.getenv("BYBIT_REQ_POR_S", "5") or 5)
+_trava_taxa = threading.Lock()
+_proximo_livre = 0.0
+
+
+def _esperar_vez():
+    """Pega o proximo lugar na fila global e dorme so o que falta para ele."""
+    global _proximo_livre
+    if _REQ_POR_S <= 0:
+        return
+    intervalo = 1.0 / _REQ_POR_S
+    with _trava_taxa:
+        agora = time.monotonic()
+        meu_horario = max(_proximo_livre, agora)
+        _proximo_livre = meu_horario + intervalo
+    # dorme FORA da trava: senao as threads se serializariam na propria trava, e nao na fila
+    espera = meu_horario - time.monotonic()
+    if espera > 0:
+        time.sleep(espera)
 
 
 def _erro_de_rede(e: Exception) -> bool:
@@ -277,6 +308,7 @@ class BybitConnector:
         ultimo = None
         for n in range(1, tentativas + 1):
             try:
+                _esperar_vez()
                 return chamada()
             except Exception as e:
                 ultimo = e
@@ -333,7 +365,9 @@ class BybitConnector:
         return saida
 
     def obter_order_book(self, par: str, profundidade: int = 50) -> Dict[str, list]:
-        book = self.exchange.fetch_order_book(self.simbolo(par), limit=profundidade)
+        book = self._com_repeticao(
+            f"livro de {par}",
+            lambda: self.exchange.fetch_order_book(self.simbolo(par), limit=profundidade))
         return {
             "bids": [(float(p), float(q)) for p, q in book["bids"][:profundidade]],
             "asks": [(float(p), float(q)) for p, q in book["asks"][:profundidade]],
@@ -342,7 +376,9 @@ class BybitConnector:
 
     def obter_trades(self, par: str, limit: int = 500) -> List[Dict[str, Any]]:
         """Últimos negócios públicos, no formato usado pelo OrderFlowAnalyzerPro."""
-        raw = self.exchange.fetch_trades(self.simbolo(par), limit=limit)
+        raw = self._com_repeticao(
+            f"negócios de {par}",
+            lambda: self.exchange.fetch_trades(self.simbolo(par), limit=limit))
         trades = []
         for t in raw:
             side = t.get("side") or "buy"
