@@ -55,3 +55,6 @@ dados/candles/
 # grafo do graphify (local, com cache)
 .graphify/*
 !.graphify/GRAPH_REPORT.md
+
+# contagens de Elliott reconstruidas do historico (scripts/cenarios_historicos.py)
+data/cenarios/
