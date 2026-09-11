@@ -12,7 +12,8 @@ vêm as duas coisas que o scalp precisa:
 
 O momento da entrada não sai daqui: sai da fita (core/gatilho_fluxo.py). Aqui é a estrutura.
 
-O plano do par (orquestrador) continua mandando: se ele bloqueia compra, não há fluxo que autorize compra.
+O plano do par (orquestrador) continua mandando nos extremos do ciclo — fundo de ciclo, ninguém vende;
+correção de ciclo recém-iniciada, ninguém compra — e no tamanho. Fora deles, o lado vem dos graus do scalp.
 Nada aqui envia ordem.
 """
 from __future__ import annotations
@@ -182,7 +183,10 @@ class LeitorContexto:
 
         # o PLANO DO PAR é a última palavra: o robô é tático, o orquestrador é estratégico
         if plano and not plano.get("erro"):
-            pode_c, pode_v = plano.get("pode_comprar", True), plano.get("pode_vender", True)
+            # o mesmo alcance do motor por candle: o scalp obedece só os vetos dos extremos do ciclo
+            from core.orquestrador.plano import escopo_do_plano
+            esc = escopo_do_plano(plano, "scalping")
+            pode_c, pode_v = esc["pode_comprar"], esc["pode_vender"]
             if not pode_c and not pode_v:
                 direcao = "hold"
             elif not pode_c and direcao in ("buy", "ambos"):

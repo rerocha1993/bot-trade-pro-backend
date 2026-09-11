@@ -380,6 +380,13 @@ class StrategyEngine:
                     "macro": {k: elliott["graus"]["macro"].get(k) for k in ("timeframe", "fase", "prob_bull", "prob_bear")},
                 }, "preco": preco, "tendencia_macro": alin.get("tendencia_macro")}
 
+        # o plano do par vale para cada robô no alcance do seu grau (core/orquestrador/plano.py: escopo_do_plano).
+        # Fica registrado na decisão para dar para auditar POR QUE um robô obedeceu ou não obedeceu o plano.
+        from core.orquestrador.plano import escopo_do_plano
+        esc = escopo_do_plano(self._plano, self.estilo)
+        if base.get("plano") is not None:
+            base["plano"]["escopo"] = esc["escopo"]
+
         direcao = alin.get("direcao", "hold")
         if direcao not in ("buy", "sell"):
             return _hold(f"Elliott sem direção operável: {alin.get('motivo')}", **base)
@@ -387,12 +394,12 @@ class StrategyEngine:
         # 1b. O PLANO DO PAR manda: o bot é tático, quem decide a direção do grau maior é o orquestrador.
         plano = self._plano
         if plano and not plano.get("erro"):
-            if direcao == "buy" and not plano.get("pode_comprar", True):
-                return _hold(f"Plano do par em modo '{plano.get('modo')}' ({plano.get('estado')}): compra bloqueada. "
-                             f"{plano.get('motivo', '')[:200]}", **base)
-            if direcao == "sell" and not plano.get("pode_vender", True):
-                return _hold(f"Plano do par em modo '{plano.get('modo')}' ({plano.get('estado')}): venda bloqueada. "
-                             f"{plano.get('motivo', '')[:200]}", **base)
+            if direcao == "buy" and not esc["pode_comprar"]:
+                return _hold(f"Plano do par em modo '{plano.get('modo')}' ({plano.get('estado')}): compra bloqueada "
+                             f"[{esc['escopo']}]. {plano.get('motivo', '')[:200]}", **base)
+            if direcao == "sell" and not esc["pode_vender"]:
+                return _hold(f"Plano do par em modo '{plano.get('modo')}' ({plano.get('estado')}): venda bloqueada "
+                             f"[{esc['escopo']}]. {plano.get('motivo', '')[:200]}", **base)
 
         # 2. Regras da fase x perfil, regime e probabilidade calibrada
         regime = op.get("regime") or {}

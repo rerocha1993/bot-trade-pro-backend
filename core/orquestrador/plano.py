@@ -52,6 +52,46 @@ POR_ESTADO = {
     "recuo_profundo":   ("aguardar", "hold", 0.5),
 }
 
+# ALCANCE DO PLANO POR ROBÔ.
+#
+# O plano é montado a partir do superciclo (semanas, meses). Para o swing, cujo grau macro é praticamente o
+# ciclo, ele é a lei inteira. Para o scalp não: um robô que opera 1m estava obedecendo uma leitura de várias
+# semanas. Medido ao vivo, o grau do próprio scalp (15m/1h) enxergava uma queda de 2,7% e ele estava proibido
+# de vender por causa do ciclo. Os robôs operam ondas de graus diferentes — o scalp pode vender uma onda 4
+# corretiva enquanto o swing segura comprado a onda maior —, e cada um opera na SUA subconta, então lados
+# opostos não disputam posição na corretora.
+#
+# O que continua valendo para TODOS, em qualquer grau, são os extremos do ciclo — regras que o usuário fixou:
+# ninguém vende fundo de ciclo, ninguém compra correção de ciclo recém-iniciada. E o TAMANHO continua limitado
+# pelo plano para todos (`risco_permitido`): ciclo maduro é todo mundo operando menor.
+VETO_VENDA_UNIVERSAL = ("fundo_terminal", "novo_impulso", "zona_onda_2")
+VETO_COMPRA_UNIVERSAL = ("correcao_inicial",)
+ALCANCE_POR_ESTILO = {"swing": "total", "daytrade": "vetos", "scalping": "vetos"}
+
+
+def _estilo(estilo: Optional[str]) -> str:
+    e = (estilo or "").lower()
+    return "scalping" if "scalp" in e else "swing" if "swing" in e else "daytrade"
+
+
+def escopo_do_plano(plano: Optional[Dict], estilo: Optional[str]) -> Dict:
+    """
+    O que o plano do par permite a UM robô, dado o grau em que ele opera.
+
+    Devolve {'pode_comprar', 'pode_vender', 'escopo'}. Sem plano (ou com plano em erro) o robô não trava: cai
+    na análise dos próprios graus, que é o comportamento que já existia para orquestrador fora do ar.
+    """
+    if not plano or plano.get("erro"):
+        return {"pode_comprar": True, "pode_vender": True, "escopo": "sem plano"}
+    if ALCANCE_POR_ESTILO.get(_estilo(estilo), "total") == "total":
+        return {"pode_comprar": bool(plano.get("pode_comprar", True)),
+                "pode_vender": bool(plano.get("pode_vender", True)), "escopo": "plano inteiro"}
+    estado = plano.get("estado")
+    return {"pode_comprar": estado not in VETO_COMPRA_UNIVERSAL,
+            "pode_vender": estado not in VETO_VENDA_UNIVERSAL,
+            "escopo": "só vetos do ciclo"}
+
+
 TETO_HEDGE_POR_MODO = {"acumular": 0.0, "deixar_andar": 0.0, "nao_perseguir": 0.5, "reduzir": 1.0, "hedge": 1.0, "aguardar": 0.0}
 
 

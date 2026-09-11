@@ -154,13 +154,29 @@ def test_sem_lado_em_nenhum_grau_o_scalp_opera_as_duas_pontas():
     assert d == "ambos" and fator < 1.0
 
 
-def test_o_plano_do_par_tem_a_ultima_palavra():
-    plano = {"modo": "defensivo", "pode_comprar": False, "pode_vender": True, "risco_permitido": 0.5}
-    d, fator, *_ = leitor()._direcao(grau(bull=0.9), grau(bull=0.9, tf="1h"), plano, None, None)
-    assert d == "hold"
-    plano2 = {"modo": "defensivo", "pode_comprar": False, "pode_vender": True, "risco_permitido": 0.5}
-    d2, fator2, *_ = leitor()._direcao(grau(), grau(tf="1h"), plano2, None, None)
-    assert d2 == "sell" and fator2 <= 0.5
+def test_o_plano_do_par_manda_no_scalp_so_nos_extremos_do_ciclo():
+    """
+    Regra trocada de propósito. Antes o plano tinha a última palavra sobre o scalp em qualquer estado, e um robô
+    de 1m obedecia uma leitura de semanas: num dia de queda de 2,7% ele estava proibido de vender. Agora o scalp
+    tira o lado dos próprios graus e o plano só veta os extremos do ciclo — mas o tamanho continua limitado.
+    """
+    # ciclo maduro "aguardando a barreira": o swing não abre nada, o scalp segue os graus dele, com meio tamanho
+    maduro = {"modo": "nao_perseguir", "estado": "impulso_maduro", "pode_comprar": False, "pode_vender": False,
+              "risco_permitido": 0.5}
+    d, fator, *_ = leitor()._direcao(grau(bear=0.9), grau(bear=0.9, tf="1h"), maduro, None, None)
+    assert d == "sell" and fator <= 0.5
+
+    # correção de ciclo recém-iniciada: ninguém compra, nem o scalp
+    correcao = {"modo": "hedge", "estado": "correcao_inicial", "pode_comprar": False, "pode_vender": True,
+                "risco_permitido": 1.0}
+    d2, *_ = leitor()._direcao(grau(bull=0.9), grau(bull=0.9, tf="1h"), correcao, None, None)
+    assert d2 == "hold"
+
+    # fundo de ciclo: ninguém vende, nem o scalp
+    fundo = {"modo": "acumular", "estado": "fundo_terminal", "pode_comprar": True, "pode_vender": False,
+             "risco_permitido": 1.0}
+    d3, *_ = leitor()._direcao(grau(bear=0.9), grau(bear=0.9, tf="1h"), fundo, None, None)
+    assert d3 == "hold"
 
 
 def test_contagem_mestre_travada_manda_na_leitura_automatica():
