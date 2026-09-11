@@ -31,11 +31,22 @@ class _Ordens:
         return True
 
 
-def _executor(ordens, candles_esperados=2, candles_ja=0):
+class _Con:
+    """Corretora de mentira: por padrão, nenhuma posição aberta."""
+    def __init__(self, posicao=None):
+        self.posicao = posicao
+
+    def obter_posicao(self, par):
+        return self.posicao
+
+
+def _executor(ordens, candles_esperados=2, candles_ja=0, posicao_na_corretora=None):
     ex = BotExecutor.__new__(BotExecutor)
     ex.bot = type("B", (), {"id": 1, "nome": "teste", "limite_candles_espera": candles_esperados})()
     ex.par = "BTCUSDT"
     ex.ordens = ordens
+    ex.con = _Con(posicao_na_corretora)
+    ex.posicao = None
     ex.logs = []
     ex._log = lambda **kw: ex.logs.append(kw)
     ex.ordem_pendente = {"ordem_id": "abc", "preco": 79096.1, "direcao": "buy", "quantidade": 0.3,
@@ -72,6 +83,33 @@ def test_ordem_executada_vira_posicao():
     ex.gerir_ordem_pendente(79000.0, [0, 0, 79100.0, 78900.0, 79000.0, 1.0], candle_novo=False)
     assert ex.ordem_pendente is None
     assert registrou == {"preco": 100.0, "qty": 1.0}
+
+
+def test_ordem_vencida_que_executou_sem_confirmacao_e_adotada():
+    """
+    09/09 14:06: a compra executou em 29 s, o robô não conseguia consultar, deu por vencida e seguiu. A posição
+    ficou na corretora sem gestão até o stop anexado fechar (−96,41), fora do banco.
+    """
+    ordens = _Ordens(erro=RuntimeError("bybit fetchOrder() can only access an order in last 500 orders"))
+    na_corretora = {"side": "buy", "quantidade": 0.316, "preco_entrada": 79096.1, "sl": 78858.0, "tp": 80142.0}
+    ex = _executor(ordens, candles_esperados=2, candles_ja=1, posicao_na_corretora=na_corretora)
+    registrou = {}
+    ex._registrar_entrada = lambda decisao, exec_, preco, sl, tp: registrou.update(
+        preco=preco, qty=exec_["quantidade"], sl=sl, motivo=decisao["motivo"])
+    ex.gerir_ordem_pendente(79000.0, [0, 0, 79100.0, 78900.0, 79000.0, 1.0], candle_novo=True)
+    assert ex.ordem_pendente is None
+    assert registrou["preco"] == 79096.1 and registrou["qty"] == 0.316 and registrou["sl"] == 78858.0
+    assert "adotada" in registrou["motivo"]
+    assert not any("expirou" in (l.get("motivo") or "") for l in ex.logs), "não pode dizer que expirou"
+
+
+def test_posicao_do_outro_lado_nao_e_adotada_como_se_fosse_a_ordem():
+    ordens = _Ordens(erro=RuntimeError("timeout"))
+    ex = _executor(ordens, candles_esperados=1, candles_ja=0,
+                   posicao_na_corretora={"side": "sell", "quantidade": 0.1, "preco_entrada": 79500.0})
+    ex._registrar_entrada = lambda *a: pytest.fail("adotou posição que não é desta ordem")
+    ex.gerir_ordem_pendente(79000.0, [0, 0, 79100.0, 78900.0, 79000.0, 1.0], candle_novo=True)
+    assert "expirou" in ex.logs[-1]["motivo"]
 
 
 def test_ordem_cancelada_na_corretora_libera_o_robo():

@@ -17,7 +17,7 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from types import SimpleNamespace
 from typing import Dict, Optional
 
@@ -38,6 +38,20 @@ from models.posicao_bot import PosicaoBot
 from services.telegram_alert_service import TelegramAlertService
 
 logger = logging.getLogger(__name__)
+
+
+def _agora_utc() -> datetime:
+    """UTC sem fuso, como o banco guarda (o mesmo valor do antigo datetime.utcnow(), sem o aviso)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _ms_utc(momento: datetime) -> int:
+    """Epoch em ms de um datetime do banco. Os do banco são UTC SEM fuso (_agora_utc); o .timestamp() do
+    Python leria como hora LOCAL e erraria pelo fuso (3 h aqui), jogando a consulta para o futuro."""
+    if momento.tzinfo is None:
+        momento = momento.replace(tzinfo=timezone.utc)
+    return int(momento.timestamp() * 1000)
+
 
 MODOS = {"simulador": "simulador", "paper": "simulador", "demo": "demo", "testnet": "testnet", "real": "real"}
 
@@ -105,7 +119,7 @@ class BotExecutor:
         self._ultimo_hold_persistido = 0.0
         self.estado: Dict = {"modo": self.modo, "par": self.par, "timeframe": self.timeframe, "ciclos": 0, "erros": 0,
                              "ultima_decisao": None, "ultimo_ciclo": None, "posicao": None, "pnl_dia": 0.0,
-                             "trades_dia": 0, "dia": date.today().isoformat(), "inicio": datetime.utcnow().isoformat()}
+                             "trades_dia": 0, "dia": date.today().isoformat(), "inicio": _agora_utc().isoformat()}
         self._engine: Optional[StrategyEngine] = None
 
     # ------------------------------------------------------------ util
@@ -130,7 +144,7 @@ class BotExecutor:
             self.db.rollback()
         sessao = SessionLocal()
         try:
-            sessao.add(LogExecucaoBot(bot_id=self._attr("id"), data_execucao=datetime.utcnow(), **kw))
+            sessao.add(LogExecucaoBot(bot_id=self._attr("id"), data_execucao=_agora_utc(), **kw))
             sessao.commit()
         except Exception as e:
             logger.error("falha ao gravar log: %s", e)
@@ -153,9 +167,13 @@ class BotExecutor:
         return banca
 
     # ---------------------------------------------------- inicialização
+    def _manda_ordem(self) -> bool:
+        """Demo, testnet e real mandam ordem de verdade para a corretora; só o simulador não."""
+        return self.modo != "simulador" and bool(self.con.pode_enviar_ordens)
+
     def inicializar(self):
         logger.info("[%s] inicializando modo=%s par=%s tf=%s", self._attr("nome"), self.modo, self.par, self.timeframe)
-        if self.modo in ("testnet", "real") and self.con.pode_enviar_ordens:
+        if self._manda_ordem():
             try:
                 try:
                     teto = (self.con.info_mercado(self.par) or {}).get("max_leverage")
@@ -172,6 +190,26 @@ class BotExecutor:
             self.inverse.carregar()
             return
         self._reconciliar()
+        self._cancelar_entradas_esquecidas()
+
+    def _cancelar_entradas_esquecidas(self):
+        """
+        Ordem de ENTRADA que ficou no livro de um processo anterior não tem mais ninguém cuidando: a ordem
+        pendente vive na memória do robô, e um reinício a apaga. Aconteceu de verdade: uma compra limitada das
+        03:35 executou 11 h depois, às 15:07, sem registro no banco — e o stop anexado, calculado para o preço da
+        madrugada, disparou 4 s depois (−50,26). Na subida, o que é entrada (não reduce-only, não condicional)
+        é cancelado. O SL/TP de uma posição aberta não é tocado.
+        """
+        if not self._manda_ordem():
+            return
+        try:
+            n = self.con.cancelar_entradas_abertas(self.par)
+        except Exception as e:
+            logger.warning("[%s] não consegui conferir ordens esquecidas: %s", self._attr("nome"), e)
+            return
+        if n:
+            self._log(acao="hold", tipo_operacao="info", preco=None,
+                      motivo=f"{n} ordem(ns) de entrada esquecida(s) de um processo anterior cancelada(s) na subida")
 
     def _carregar_posicao(self):
         self.posicao = self.db.query(PosicaoBot).filter_by(bot_id=self._attr("id"), status="aberta").order_by(PosicaoBot.id.desc()).first()
@@ -287,31 +325,44 @@ class BotExecutor:
 
     # ------------------------------------------------------------ saída
     def _registrar_saida(self, preco_saida: float, motivo: str, pnl_exchange: bool = False, taxa_saida: float = None):
+        """
+        Fecha o registro. O P&L gravado é o da operação INTEIRA: parciais já realizadas + o resto + todas as taxas.
+
+        Pela corretora (pnl_exchange): soma o P&L fechado desde a abertura — as parciais estão lá, líquidas.
+        Pela conta local: pnl_parcial (já líquido da taxa de cada fatia) + o resto − (taxa de entrada + taxa final).
+        Antes a conta local usava só o resto e esquecia as parciais, e a da corretora pegava o preço de saída do
+        registro MAIS ANTIGO (a Bybit devolve do mais novo para o mais velho).
+        """
         pos = self.posicao
         if not pos:
             return
+        parcial = float(pos.pnl_parcial or 0)
         pnl = None
         if pnl_exchange and self.con.pode_enviar_ordens:
             try:
-                desde = int(pos.aberto_em.timestamp() * 1000) - 60_000
-                fechados = self.con.obter_pnl_fechado(self.par, desde)
+                # 5 s de folga para relógio; uma janela maior pegaria o fechamento da operação anterior
+                desde = _ms_utc(pos.aberto_em) - 5_000
+                fechados = [f for f in (self.con.obter_pnl_fechado(self.par, desde) or [])
+                            if not f.get("timestamp") or f["timestamp"] >= desde]
                 if fechados:
                     pnl = sum(f["pnl"] for f in fechados)
-                    preco_saida = fechados[-1]["preco_saida"] or preco_saida
+                    ultimo = max(fechados, key=lambda f: f.get("timestamp") or 0)
+                    preco_saida = ultimo["preco_saida"] or preco_saida
             except Exception as e:
                 logger.warning("pnl da exchange indisponível: %s", e)
         if pnl is None:
             s = 1 if pos.direcao == "buy" else -1
             taxas = (pos.taxas or 0.0) + (taxa_saida if taxa_saida is not None else preco_saida * pos.quantidade * TAXA_TAKER)
-            pnl = (preco_saida - pos.preco_entrada) * pos.quantidade * s - taxas
+            pnl = parcial + (preco_saida - pos.preco_entrada) * pos.quantidade * s - taxas
             pos.taxas = taxas
         pos.status = "fechada"
         pos.preco_saida = preco_saida
         pos.pnl = round(pnl, 4)
         pos.motivo_saida = motivo[:255]
-        pos.fechado_em = datetime.utcnow()
+        pos.fechado_em = _agora_utc()
         self.db.commit()
-        self.estado["pnl_dia"] += pos.pnl
+        # as parciais já entraram no resultado do dia quando saíram: aqui entra só o que faltava
+        self.estado["pnl_dia"] += pos.pnl - parcial
         self._log(acao="sell" if pos.direcao == "buy" else "buy", tipo_operacao="saida", direcao=pos.direcao, preco=preco_saida,
                   preco_entrada=pos.preco_entrada, preco_saida=preco_saida, quantidade=pos.quantidade, resultado=pos.pnl, motivo=motivo)
         self.alertas.ordem(self._attr("nome"), self.par, f"saída {pos.direcao}", preco_saida, f"P&L {pos.pnl:+.2f} USDT | {motivo}")
@@ -362,9 +413,37 @@ class BotExecutor:
         elif ped["candles"] >= int(self._attr("limite_candles_espera", 3) or 3):
             self.ordens.cancelar_ordem(self.par, ped["ordem_id"])
             self.ordem_pendente = None
+            if self._adotar_se_executou(ped, preco):
+                return
             extra = " (sem conseguir confirmar a situação na corretora)" if sit["status"] == "desconhecida" else ""
             self._log(acao="hold", tipo_operacao="info", preco=preco,
                       motivo=f"Ordem limitada a {ped['preco']} expirou sem execução{extra}")
+
+    def _adotar_se_executou(self, ped: Dict, preco: float) -> bool:
+        """
+        Depois de cancelar por tempo, confere a POSIÇÃO na corretora. A ordem pode ter executado sem o robô ver
+        (consulta que falhou, ou execução entre a última consulta e o cancelamento). Foi o que aconteceu às 14:06
+        de 09/09: a compra executou em 29 s, o robô não conseguia consultar a ordem, deu por vencida — e a
+        posição ficou na corretora sem gestão até o stop anexado fechar (−96,41), fora do banco.
+        """
+        if self.ordens.simulado or self.posicao is not None:
+            return False
+        try:
+            pos_ex = self.con.obter_posicao(self.par)
+        except Exception as e:
+            logger.warning("[%s] conferência de posição após vencer a ordem falhou: %s", self._attr("nome"), e)
+            return False
+        if not pos_ex or pos_ex["side"] != ped["direcao"]:
+            return False
+        q, p = float(pos_ex["quantidade"]), float(pos_ex["preco_entrada"] or ped["preco"])
+        exec_ = {"ordem_id": ped["ordem_id"], "preco_exec": p, "quantidade": q, "simulado": False,
+                 "taxa": p * q * TAXA_MAKER}
+        decisao = dict(ped["decisao"])
+        decisao["motivo"] = f"[executada sem confirmação, adotada da corretora] {decisao.get('motivo') or ''}"
+        self._registrar_entrada(decisao, exec_, p, pos_ex.get("sl") or ped["sl"], pos_ex.get("tp") or ped["tp"])
+        logger.warning("[%s] ordem %s executou sem confirmação: posição adotada (%s @ %s)",
+                       self._attr("nome"), ped["ordem_id"], q, p)
+        return True
 
     # ---------------------------------------------------- gestão posição
     def aplicar_trailing_stop(self, preco: float):
@@ -474,8 +553,11 @@ class BotExecutor:
         if not self.posicao:
             return                      # as parciais fecharam a posição inteira
         self.aplicar_trailing_stop(preco)
-        # 1) exchange já fechou por SL/TP?
-        if self.modo in ("testnet", "real") and self.con.pode_enviar_ordens:
+        # 1) exchange já fechou por SL/TP? Vale para TODO modo que manda ordem de verdade — inclusive o demo.
+        # Antes só testnet/real consultavam a corretora; o demo caía no ramo do simulador e deduzia o stop pela
+        # mínima do candle: gravava o preço do stop em vez do executado e podia dar a posição por fechada
+        # enquanto ela seguia aberta na corretora (ou o contrário).
+        if self._manda_ordem():
             try:
                 if self.con.obter_posicao(self.par) is None:
                     self._registrar_saida(preco, "SL/TP executado pela exchange", pnl_exchange=True)
@@ -697,7 +779,7 @@ class BotExecutor:
             self._agir_no_fluxo(decisao, preco)
         # o contexto virando contra é motivo para sair: foi ele que autorizou a entrada
         self._saida_por_contexto(preco)
-        self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=datetime.utcnow().isoformat(), preco=preco,
+        self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
                            posicao=self.posicao.as_dict() if self.posicao else None, fluxo=self.motor.status())
 
     def _imbalance(self) -> Optional[float]:
@@ -771,7 +853,7 @@ class BotExecutor:
             # modo inverse: escada de range; nada do fluxo de Elliott operacional
             self.inverse.ciclo(ohlcv, preco, candle_novo)
             self.ultimo_candle_ts = int(ultimo[0])
-            self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=datetime.utcnow().isoformat(), preco=preco,
+            self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
                                posicao=self.inverse.posicao.as_dict() if self.inverse.posicao else None, inverse=self.inverse.status())
             return
         self.manutencao(preco, float(ultimo[4]))
@@ -818,7 +900,7 @@ class BotExecutor:
                         self.abrir_posicao(decisao, preco)
                     else:
                         self._log(acao="hold", tipo_operacao="info", preco=preco, motivo=motivo)
-        self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=datetime.utcnow().isoformat(), preco=preco,
+        self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
                            posicao=self.posicao.as_dict() if self.posicao else None)
 
     def _iniciar_websocket(self, forcar: bool = False):

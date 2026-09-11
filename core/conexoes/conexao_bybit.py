@@ -533,6 +533,28 @@ class BybitConnector:
                 logger.warning("Falha ao cancelar ordem %s: %s", o.get("id"), e)
         return len(abertas)
 
+    def cancelar_entradas_abertas(self, par: str) -> int:
+        """
+        Cancela só as ordens de ENTRADA abertas no par: nem reduce-only (saídas), nem condicionais (SL/TP).
+        Devolve quantas cancelou. É o que um robô recém-iniciado não pode herdar sem saber.
+        """
+        self._exigir_credenciais("cancelar_entradas_abertas")
+        n = 0
+        for o in self.exchange.fetch_open_orders(self.simbolo(par)):
+            info = o.get("info") or {}
+            reduz = o.get("reduceOnly") or str(info.get("reduceOnly")).lower() == "true"
+            condicional = bool(info.get("stopOrderType")) or bool(o.get("triggerPrice") or o.get("stopPrice"))
+            if reduz or condicional:
+                continue
+            try:
+                self.exchange.cancel_order(o["id"], self.simbolo(par))
+                n += 1
+                logger.warning("ordem de entrada esquecida cancelada: %s %s %s @ %s", o.get("id"), o.get("side"),
+                               o.get("amount"), o.get("price"))
+            except Exception as e:
+                logger.warning("Falha ao cancelar ordem %s: %s", o.get("id"), e)
+        return n
+
     def obter_pnl_fechado(self, par: str, desde_ms: Optional[int] = None, limit: int = 20) -> List[Dict[str, Any]]:
         """Histórico de P&L realizado da Bybit (linear)."""
         self._exigir_credenciais("obter_pnl_fechado")
