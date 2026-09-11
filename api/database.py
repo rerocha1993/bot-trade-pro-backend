@@ -17,6 +17,9 @@ A string vem do ambiente, com os valores atuais como padrão para não quebrar q
 O LocalDB desliga sozinho por ociosidade e leva alguns segundos para subir. A primeira conexão depois de um tempo
 parado falha com "o tempo limite do logon expirou", e antes isso derrubava a subida inteira do sistema. Agora
 `aguardar_banco()` acorda a instância e tenta de novo com espera crescente.
+
+E quando o nome `(localdb)\\...` deixa de resolver com a instância ainda de pé, a conexão cai no pipe dela
+(`_pipes_localdb`), em vez de o servidor novo não subir.
 """
 import logging
 import os
@@ -39,14 +42,16 @@ def _servidor() -> str:
     return os.getenv("DB_SERVER", "(localdb)\\MSSQLLocalDB")
 
 
-def _url() -> str:
+def _url_explicita() -> str:
     url = (os.getenv("DATABASE_URL") or "").strip()
     # só aceita uma URL de verdade: um valor solto (ex.: o próprio nome da variável) é ignorado
-    if url and "://" in url:
-        return url
+    return url if url and "://" in url else ""
+
+
+def _odbc(servidor: str) -> str:
     partes = [
         f"DRIVER={{{os.getenv('DB_DRIVER', 'ODBC Driver 17 for SQL Server')}}}",
-        f"SERVER={_servidor()}",
+        f"SERVER={servidor}",
         f"DATABASE={os.getenv('DB_NAME', 'dbo_trading_bot')}",
     ]
     if (os.getenv("DB_TRUSTED", "yes") or "yes").lower() in ("yes", "true", "1"):
@@ -55,7 +60,11 @@ def _url() -> str:
         partes.append(f"UID={os.getenv('DB_USER', '')}")
         partes.append(f"PWD={os.getenv('DB_PASSWORD', '')}")
     partes.append(f"Encrypt={os.getenv('DB_ENCRYPT', 'no')}")
-    return f"mssql+pyodbc:///?odbc_connect={urlparse.quote_plus(';'.join(partes) + ';')}"
+    return ";".join(partes) + ";"
+
+
+def _url() -> str:
+    return _url_explicita() or f"mssql+pyodbc:///?odbc_connect={urlparse.quote_plus(_odbc(_servidor()))}"
 
 
 def _instancia_localdb() -> str:
@@ -170,8 +179,73 @@ def acordar_localdb() -> bool:
 # timeout de logon vai pelo pyodbc (SQL_ATTR_LOGIN_TIMEOUT), não como atributo da string ODBC:
 # 'Connection Timeout' é palavra do .NET e o driver ODBC reclama dela no diagnóstico.
 _TIMEOUT = int(os.getenv("DB_TIMEOUT", "30"))
-engine = create_engine(_url(), pool_pre_ping=True, pool_recycle=1800, future=True,
-                       connect_args={"timeout": _TIMEOUT})
+_TIMEOUT_PIPE = 5
+
+
+def _pipes_localdb() -> list:
+    r"""
+    Pipes das instâncias LocalDB de pé nesta máquina (np:\\.\pipe\LOCALDB#XXXX\tsql\query).
+
+    Já aconteceu de o `(localdb)\MSSQLLocalDB` parar de resolver para processos NOVOS — o `sqllocaldb info` diz
+    "Stopped", o `start` falha — enquanto o sqlservr segue de pé servindo quem já estava conectado. Nesse estado
+    o pipe continua listado e atende; o nome é que não chega nele.
+    """
+    if os.name != "nt":
+        return []
+    try:
+        nomes = os.listdir("\\\\.\\pipe\\")
+    except OSError:
+        return []
+    return ["np:\\\\.\\pipe\\" + n for n in sorted(nomes) if n.upper().startswith("LOCALDB#")]
+
+
+_alvo_ok = None                 # servidor que conectou por último: é tentado primeiro
+_trava_alvo = threading.Lock()
+
+
+def _alvos() -> list:
+    """
+    Ordem de tentativa: o último que funcionou; se for LocalDB, os pipes de pé; por fim o nome configurado.
+
+    O pipe vem antes do nome porque, com a instância de pé, os dois levam ao mesmo lugar — e quando o nome não
+    resolve ele só desiste depois do timeout inteiro de logon (35 s medidos). Sem pipe listado (instância
+    dormindo por ociosidade) sobra o nome, que é quem acorda o LocalDB.
+    """
+    pipes = _pipes_localdb() if _instancia_localdb() else []
+    candidatos = [_alvo_ok] + pipes + [_servidor()]
+    vistos, out = set(), []
+    for c in candidatos:
+        if c and c not in vistos:
+            vistos.add(c)
+            out.append(c)
+    return out
+
+
+def _nova_conexao():
+    """Conexão DBAPI para o pool: o nome configurado, ou o pipe da instância quando o nome não resolve."""
+    global _alvo_ok
+    import pyodbc
+    ultimo = None
+    for srv in _alvos():
+        try:
+            con = pyodbc.connect(_odbc(srv), timeout=_TIMEOUT_PIPE if srv.startswith("np:") else _TIMEOUT)
+        except pyodbc.Error as e:
+            ultimo = e
+            continue
+        with _trava_alvo:
+            if srv != _alvo_ok:
+                logger.info("banco conectado por %s", srv)
+                _alvo_ok = srv
+        return con
+    raise ultimo or RuntimeError("nenhum servidor de banco para tentar")
+
+
+if _url_explicita():
+    engine = create_engine(_url_explicita(), pool_pre_ping=True, pool_recycle=1800, future=True,
+                           connect_args={"timeout": _TIMEOUT})
+else:
+    engine = create_engine("mssql+pyodbc://", creator=_nova_conexao, pool_pre_ping=True, pool_recycle=1800,
+                           future=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
