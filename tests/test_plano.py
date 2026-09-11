@@ -101,3 +101,37 @@ def test_estado_desconhecido_cai_em_aguardar():
     p = montar_plano("BTCUSDT", ohlcv[-1][4], _trader("estado_que_nao_existe"), {"1d": ohlcv})
     assert p["modo"] == "aguardar"
     assert p["pode_comprar"] is False and p["pode_vender"] is False
+
+
+def _lateral(n=320, base=100.0):
+    """Série sem tendência: RSI no meio e sem exaustão, para cair no ramo 'aguardar a barreira'."""
+    return gerar_candles([base + (0.4 if i % 2 else -0.4) for i in range(n)], dur_ms=86_400_000)
+
+
+def test_contagem_virada_bear_sem_exaustao_nao_libera_compra(monkeypatch):
+    """
+    Regressão medida ao vivo: contagens 82% bear, o trader mandando vender, e o plano liberando COMPRA e
+    proibindo venda. 'nao_perseguir' cobre dois casos opostos — contagens ainda bull (comprar recuo) e
+    contagens viradas bear sem exaustão (aguardar a barreira) — e o segundo herdava a compra do primeiro
+    porque `pode_comprar` olhava só o nome do modo. Num dia de queda de 2,7% o scalp só podia comprar:
+    cinco recuos, -70,79, e 495 vendas barradas. Este teste só conferia a venda; a compra passou.
+    """
+    # a exaustão tem pontuação própria (sentimento, VWAP, RSI...) e não é o que está em teste: o que se testa
+    # é o RAMO — contagem virada sem exaustão confirmada — então ela é fixada em "não confirmada"
+    monkeypatch.setattr("core.orquestrador.plano.exaustao",
+                        lambda sinais: {"score": 0.1, "confluencias": 0, "componentes": {}})
+    ohlcv = _lateral()
+    p = montar_plano("BTCUSDT", ohlcv[-1][4], _trader("impulso_maduro", prob_bear=0.82, prob_bull=0.18), {"1d": ohlcv})
+    assert p["exaustao"]["confirmada"] is False, "o cenário do teste deixou de ser 'sem exaustão'"
+    assert p["modo"] == "nao_perseguir"
+    assert p["pode_vender"] is False, "sem exaustão confirmada ainda não é hora de vender"
+    assert p["pode_comprar"] is False, "contagens 82% bear liberando compra: voltou o bug"
+    assert p["aguardando_barreira"] is True
+
+
+def test_contagem_ainda_bull_segue_comprando_recuo():
+    """O outro lado da mesma regra: com contagens bull, o impulso maduro continua comprando recuo."""
+    ohlcv = _lateral()
+    p = montar_plano("BTCUSDT", ohlcv[-1][4], _trader("impulso_maduro", prob_bear=0.2, prob_bull=0.8), {"1d": ohlcv})
+    assert p["pode_comprar"] is True
+    assert p["aguardando_barreira"] is False

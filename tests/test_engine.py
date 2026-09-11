@@ -112,3 +112,23 @@ def test_backtest_roda_em_dados_sinteticos():
     assert r["candles"] == len(c)
     assert isinstance(r["trades"], int)
     assert "drawdown_max_pct" in r
+
+
+def test_stop_nunca_fica_dentro_do_ruido_do_1m():
+    """
+    Regressão medida ao vivo: o scalp saiu com stop a 39 dólares da entrada (0,05%) e foi acionado por ruído
+    em 1m39s. Já existia um piso — meio ATR —, mas no 1m isso dá uns 38 dólares e o stop passou raspando por
+    cima. E o piso era medido do preço atual, não do preço da ordem limitada que de fato executa.
+    """
+    from core.strategy_engine import RISCO_MINIMO_PCT
+    preco = 77000.0
+    ohlcv = gerar_candles([preco] * 60, dur_ms=60_000, amplitude=0.00001)
+    bot = bot_padrao(estilo_trade="scalping", timeframe="1m", tipo_entrada="limite", usar_fibonacci=False)
+    eng = StrategyEngine(ohlcv, bot, servicos={"preco_atual": preco})
+    assert eng.atr == pytest.approx(preco * 0.001)      # ATR do 1m no piso de 0,1%: meio ATR = 38,50
+    # invalidação de Elliott colada no preço: sem o piso novo o stop nasceria a 39 dólares, como ao vivo
+    inv = preco - 39.0 + 0.15 * eng.atr
+    niveis = eng.calcular_tp_sl("buy", "meio_onda_3", [], {"invalidacao": inv, "alvos": []}, {})
+    piso = preco * RISCO_MINIMO_PCT
+    assert preco - niveis["sl"] >= piso - 1e-6, f"stop a {preco - niveis['sl']:.2f} do preço"
+    assert niveis["preco_limite"] - niveis["sl"] >= piso - 1e-6, "o piso não valeu para onde a ordem executa"

@@ -172,13 +172,22 @@ def montar_plano(par: str, preco: float, trader: Optional[Dict], ohlcv_por_tf: D
 
     # ---------------------------------------------------------------- decisão do orquestrador
     motivos = [f"superciclo {estado}: {sc.get('leitura', '')}"]
+    # 'nao_perseguir' cobre DOIS casos opostos, e so o primeiro admite compra:
+    #   - perna madura com contagens ainda bull -> comprar so recuo, com metade do tamanho
+    #   - perna madura com contagens VIRADAS bear, sem exaustao confirmada -> aguardar a barreira
+    # Como `pode_comprar` era decidido so pelo nome do modo, o segundo herdava a compra do primeiro. Medido ao
+    # vivo: contagens 82% bear, o trader mandando vender, e o plano liberando compra e proibindo venda. Num dia
+    # de queda de 2,7% o scalp so podia comprar, comprou cinco recuos e fechou em -70,79; 495 vendas barradas.
+    aguardando_barreira = False
     if estado == "impulso_maduro":
         if max(prob_bear, 0.0) >= 0.5 and exausto:
             modo, direcao, risco = "reduzir", "sell", 0.5
             motivos.append(f"contagens viraram (bear {prob_bear:.0%}) com exaustão {ex['score']:.2f}: reduzir e liberar hedge")
         elif max(prob_bear, 0.0) >= 0.5:
             modo, direcao = "nao_perseguir", "hold"
-            motivos.append(f"contagens bear {prob_bear:.0%} sem exaustão confirmada: não perseguir, aguardar a barreira")
+            aguardando_barreira = True
+            motivos.append(f"contagens bear {prob_bear:.0%} sem exaustão confirmada: não perseguir, aguardar a "
+                           f"barreira — nenhum lado abre posição nova até a exaustão confirmar")
         else:
             motivos.append(f"perna madura mas contagens ainda bull ({prob_bull:.0%}): segurar, comprar só recuo com metade do tamanho")
     elif modo == "acumular":
@@ -222,7 +231,8 @@ def montar_plano(par: str, preco: float, trader: Optional[Dict], ohlcv_por_tf: D
         "direcao_grau_maior": direcao, "risco_permitido": round(risco, 2),
         "teto_hedge": TETO_HEDGE_POR_MODO.get(modo, 0.0),
         "pode_vender": modo in ("reduzir", "hedge") or estado in ("correcao_inicial", "correcao_em_curso"),
-        "pode_comprar": modo in ("acumular", "deixar_andar", "nao_perseguir"),
+        "pode_comprar": modo in ("acumular", "deixar_andar", "nao_perseguir") and not aguardando_barreira,
+        "aguardando_barreira": aguardando_barreira,
         "graus": graus,
         "barreira": barreira, "suporte": suporte,
         "zonas_compra": zonas_compra, "zonas_venda": zonas_venda,

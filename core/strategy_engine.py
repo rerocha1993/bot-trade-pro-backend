@@ -25,6 +25,7 @@ from core.fase_onda_rules import (
     INDICADORES_VOTANTES, bloquear_zona_institucional, direcao_permitida, get_tolerancia_preco,
     get_tp_sl_prioritario, indicadores_para_fase,
 )
+from core.executor_real import TAXA_MAKER, TAXA_TAKER
 from core.fibonacci_strategies import FibonacciStrategies
 from core.order_block import OrderBlockDetector
 from core.order_flow import OrderFlowAnalyzerPro
@@ -37,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 JANELA_POR_PERFIL = {"scalping": 150, "daytrade": 200, "swing": 300}
 RR_MINIMO = {"conservador": 1.2, "turbo": 1.0}
+# piso do stop em fração do preço. O mesmo número que o backtest de 30 dias do motor de fluxo pediu: abaixo
+# disso a taxa de ida e volta passa a valer uma fatia grande do risco e o stop fica dentro do ruído. Nos graus
+# maiores ele praticamente nunca age, porque meio ATR de 15m ou de 4h já é maior que isso.
+RISCO_MINIMO_PCT = 0.0012
 
 
 def _hold(motivo: str, **extra) -> Dict:
@@ -308,8 +313,14 @@ class StrategyEngine:
                 sl, fonte_sl = min(sl_validos, key=lambda x: abs(preco - x[0]))  # mais apertado
             else:
                 sl, fonte_sl = max(sl_validos, key=lambda x: abs(preco - x[0]))  # mais folgado
-        if sl is None or abs(preco - sl) < 0.5 * self.atr:
-            sl, fonte_sl = preco - s * 1.5 * self.atr, "atr"
+        # PISO DO STOP. Meio ATR sozinho não bastava no 1m: dá uns 38 dólares, e o scalp saiu com stop a 39 dólares
+        # da entrada (0,05%) — acionado por ruído em 1m39s. O stop tem que ficar fora do ruído E bem acima do custo
+        # de ida e volta, senão a taxa sozinha come boa parte do que ele arrisca.
+        custo = preco * ((TAXA_MAKER if getattr(self.bot, "tipo_entrada", "mercado") == "limite" else TAXA_TAKER)
+                         + TAXA_TAKER)
+        piso = max(0.5 * self.atr, preco * RISCO_MINIMO_PCT, custo * 1.5)
+        if sl is None or abs(preco - sl) < piso:
+            sl, fonte_sl = preco - s * max(1.5 * self.atr, piso), "atr"
         risco = abs(preco - sl)
 
         # TP: candidatos além do preço com R:R >= mínimo; conservador pega o mais próximo, turbo o 2º mais distante
@@ -334,8 +345,10 @@ class StrategyEngine:
         vwap = (resultados.get("VWAP") or {}).get("vwap")
         if vwap and ((up and sl < vwap < preco) or (not up and preco < vwap < sl)) and abs(vwap - preco) < 1.0 * self.atr:
             preco_limite = vwap
-        if abs(preco_limite - sl) < 0.5 * self.atr:
-            preco_limite = sl + s * 0.5 * self.atr
+        # o piso vale para onde a posição NASCE: com ordem limitada é o preço da ordem, não o de agora. Medido do
+        # preço atual, a distância real até o stop saía menor que o próprio piso.
+        if abs(preco_limite - sl) < piso:
+            preco_limite = sl + s * piso
         return {"tp": round(tp, 2), "sl": round(sl, 2), "preco_limite": round(preco_limite, 2), "fonte_tp": fonte_tp, "fonte_sl": fonte_sl, "rr": round(rr, 2),
                 "rr_minimo": rr_min, "candidatos_tp": [(round(p, 2), f) for p, f in tp_validos[:8]],
                 "candidatos_sl": [(round(p, 2), f) for p, f in sl_validos[:8]]}
