@@ -574,3 +574,32 @@ export interface RangeContexto {
   barrado: PlanoRange | null
   motivo: string
 }
+
+/** Mesa de posições (GET /posicoes/abertas) */
+export interface PosicaoAberta {
+  id: number
+  bot_id: number
+  bot: string
+  estrategia: string | null
+  modo: string
+  par: string
+  timeframe: string | null
+  direcao: string
+  quantidade: number
+  quantidade_inicial: number
+  preco_entrada: number
+  preco: number | null
+  sl: number | null
+  sl_inicial: number | null
+  tp: number | null
+  pnl_aberto: number | null
+  pnl_parcial: number
+  pnl_total: number | null
+  r_corrido: number | null
+  zero_a_zero: boolean
+  aberto_em: string | null
+  motivo_entrada: string | null
+  cenario: string | null
+  rodando: boolean
+  escada: { pendentes: number; executadas?: number | null; de?: number | null; preco?: number } | null
+}

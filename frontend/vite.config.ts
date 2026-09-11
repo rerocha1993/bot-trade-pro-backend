@@ -5,7 +5,7 @@ import { defineConfig } from 'vite'
 // pelo FastAPI em /painel e as chamadas são relativas à mesma origem.
 const API = process.env.VITE_API_URL || 'http://localhost:8000'
 const ROTAS_API = ['/status', '/bots', '/bot-control', '/backtest', '/inverse', '/logs', '/coins', '/indicadores',
-  '/pontos-institucionais', '/orderblocks', '/institucional', '/api']
+  '/pontos-institucionais', '/posicoes', '/orderblocks', '/institucional', '/api']
 
 export default defineConfig({
   plugins: [react()],

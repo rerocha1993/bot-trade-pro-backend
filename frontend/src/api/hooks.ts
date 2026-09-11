@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type {
   Backtest, BacktestsBot, BotStatusItem, Decisao, Dial, LogExecucao, Mestre, MultiGrau, NiveisResp, PontoInstitucional,
-  OpcoesAlavancagem, Plano, PosicoesResp, RangeContexto, Sentimento, StatusBot, Trader, InverseEstado, PropostaRange } from './types'
+  OpcoesAlavancagem, Plano, PosicoesResp, PosicaoAberta, RangeContexto, Sentimento, StatusBot, Trader, InverseEstado, PropostaRange } from './types'
 import { candlesDaApi } from './adapters'
 
 export const useBots = () => useQuery({ queryKey: ['bots'], queryFn: () => api.get<BotStatusItem[]>('/bot-control/'), refetchInterval: 5_000 })
@@ -141,4 +141,9 @@ export function useRangeInverse() {
 export const useRangeContexto = (par = 'BTCUSDT') => useQuery({
   queryKey: ['range-contexto', par], refetchInterval: 60_000,
   queryFn: () => api.get<RangeContexto>('/api/range/contexto', { par }),
+})
+
+export const usePosicoesAbertas = () => useQuery({
+  queryKey: ['posicoes-abertas'], refetchInterval: 10_000,
+  queryFn: () => api.get<PosicaoAberta[]>('/posicoes/abertas'),
 })

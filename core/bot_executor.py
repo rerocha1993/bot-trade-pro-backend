@@ -119,6 +119,12 @@ class BotExecutor:
         self._ultima_manutencao = 0.0
         self._ultimo_orderblock = 0.0
         self._rodando = threading.Event()
+        # INTERVENÇÃO MANUAL do painel: a thread da API não pode tocar no ORM desta sessão, então ela só deixa o
+        # pedido aqui e acorda o robô; quem executa (e grava) é sempre a thread do robô.
+        self._acordar = threading.Event()
+        self._pedidos: list = []
+        self._trava_pedidos = threading.Lock()
+        self.intervencoes: Dict[str, Dict] = {}
         self.ordem_pendente: Optional[Dict] = None   # ordem limitada aguardando execução
         self.ws = None                               # DataSourceWebsocketUniversal (scalp)
         # motor de fluxo: o scalp decide por barra de volume, nao por candle de 1m (core/motor_fluxo.py)
@@ -997,8 +1003,11 @@ class BotExecutor:
                 if self.estado["erros"] % 10 == 1:
                     self.alertas.erro(self._attr("nome"), e)
                 time.sleep(5)
+            self._processar_pedidos()
             gasto = time.time() - t0
-            time.sleep(max(1.0, self.delay - gasto))
+            if self._acordar.wait(max(1.0, self.delay - gasto)):
+                self._acordar.clear()
+                self._processar_pedidos()
         logger.info("[%s] loop encerrado", self._attr("nome"))
 
     def parar(self):
@@ -1009,6 +1018,117 @@ class BotExecutor:
                 self.ws.stop()
             except Exception:
                 pass
+
+    # ---------------------------------------------------- intervenção manual
+    def pedir_intervencao(self, acao: str, fracao: Optional[float] = None, motivo: Optional[str] = None) -> str:
+        """
+        Chamado pela thread da API. Só enfileira e acorda o robô — nada de ORM nem de ordem aqui.
+        `acao`: 'fechar' | 'parcial' | 'zero_a_zero' | 'cancelar_escada'.
+        """
+        token = f"{self.bot_id}-{int(time.time() * 1000)}"
+        pedido = {"token": token, "acao": acao, "fracao": fracao, "motivo": motivo or "Intervenção manual pelo painel"}
+        with self._trava_pedidos:
+            self._pedidos.append(pedido)
+            self.intervencoes[token] = {**pedido, "status": "pendente"}
+        self._acordar.set()
+        return token
+
+    def resultado_intervencao(self, token: str) -> Optional[Dict]:
+        return self.intervencoes.get(token)
+
+    def _processar_pedidos(self):
+        with self._trava_pedidos:
+            pedidos, self._pedidos = self._pedidos, []
+        for p in pedidos:
+            try:
+                r = self._executar_intervencao(p)
+                self.intervencoes[p["token"]] = {**p, "status": "feita", **r}
+            except Exception as e:
+                logger.exception("[%s] intervenção %s falhou: %s", self._attr("nome"), p["acao"], e)
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+                self.intervencoes[p["token"]] = {**p, "status": "erro", "erro": str(e)[:300]}
+
+    def _executar_intervencao(self, p: Dict) -> Dict:
+        """Roda na thread do robô: pode mandar ordem e gravar no banco."""
+        acao, motivo = p["acao"], p["motivo"]
+        if self.inverse is not None:
+            raise RuntimeError("O hedge inverso tem grade própria: use a tela do inverse")
+        preco = self._con_publico.obter_preco_atual(self.par)
+        if acao == "cancelar_escada":
+            n = self._cancelar_escada(motivo)
+            return {"canceladas": n, "preco": preco}
+        if acao == "zero_a_zero":
+            if not self.posicao:
+                raise RuntimeError("Sem posição aberta")
+            alvo = self.con.arredondar_preco(self.par, float(self.posicao.preco_entrada))
+            if not self.ordens.atualizar_stop(self.par, alvo, self.posicao.tp, self._attr("position_mode", "one-way"), self.posicao.direcao):
+                raise RuntimeError("A corretora não aceitou mover o stop")
+            self.posicao.sl = alvo
+            self.db.commit()
+            self._log(acao="ajuste_sl", tipo_operacao="info", preco=preco, sl=alvo, motivo=f"{motivo}: stop no zero a zero")
+            return {"stop": alvo, "preco": preco}
+        if acao == "parcial":
+            if not self.posicao:
+                raise RuntimeError("Sem posição aberta")
+            fracao = float(p.get("fracao") or 0.5)
+            return {**self.realizar_fracao(fracao, preco, motivo), "preco": preco}
+        if acao == "fechar":
+            if not self.posicao:
+                raise RuntimeError("Sem posição aberta")
+            self._cancelar_escada(motivo)
+            pos = self.posicao
+            self.fechar_posicao(f"{motivo} (fechada pelo usuário)", preco)
+            for mod in (self.fatias, self.range):
+                if mod is not None and getattr(mod, "trade", None) is not None:
+                    mod._encerrar()
+            # o resultado é o da operação inteira: parciais + o resto, líquido de taxas
+            return {"fechada": True, "preco": preco, "resultado": round(float(pos.pnl or 0), 4),
+                    "preco_saida": pos.preco_saida}
+        raise RuntimeError(f"Ação desconhecida: {acao}")
+
+    def _cancelar_escada(self, motivo: str) -> int:
+        """Cancela as ordens de ENTRADA ainda no livro (fatias do robô 9/10 ou ordem limitada pendente)."""
+        n = 0
+        for mod in (self.fatias, self.range):
+            if mod is not None and getattr(mod, "trade", None) is not None and mod.trade.get("pendentes"):
+                n += len(mod.trade["pendentes"])
+                mod._cancelar_pendentes(motivo)
+                mod._salvar()
+        if self.ordem_pendente:
+            self.ordens.cancelar_ordem(self.par, self.ordem_pendente["ordem_id"])
+            self.ordem_pendente = None
+            n += 1
+        return n
+
+    def realizar_fracao(self, fracao: float, preco: float, motivo: str) -> Dict:
+        """Realiza uma fração da posição a mercado (reduce-only) e registra o lucro da fatia."""
+        pos = self.posicao
+        fracao = min(max(fracao, 0.01), 1.0)
+        qty = self.con.arredondar_quantidade(self.par, float(pos.quantidade) * fracao)
+        if qty <= 0:
+            raise RuntimeError("Fração abaixo do mínimo negociável")
+        ex = self.ordens.reduzir(self.par, pos.direcao, qty, self._attr("position_mode", "one-way"), preco_ref=preco)
+        feita = float(ex.get("quantidade") or 0)
+        if feita <= 0:
+            raise RuntimeError("A corretora não executou a redução")
+        pexec = float(ex.get("preco_exec") or preco)
+        sinal = 1 if pos.direcao == "buy" else -1
+        lucro = (pexec - float(pos.preco_entrada)) * feita * sinal - float(ex.get("taxa") or 0)
+        pos.quantidade = round(float(pos.quantidade) - feita, 8)
+        pos.pnl_parcial = round(float(pos.pnl_parcial or 0) + lucro, 8)
+        self.estado["pnl_dia"] += lucro
+        self.db.commit()
+        self._log(acao="parcial", tipo_operacao="saida_parcial", direcao=pos.direcao, preco=pexec, quantidade=feita,
+                  resultado=lucro, motivo=f"{motivo}: {fracao:.0%} da mão realizados")
+        if float(pos.quantidade or 0) <= 0:
+            self._registrar_saida(pexec, f"{motivo}: posição toda realizada")
+            for mod in (self.fatias, self.range):
+                if mod is not None and getattr(mod, "trade", None) is not None:
+                    mod._encerrar()
+        return {"quantidade": feita, "preco_exec": pexec, "resultado": round(lucro, 4), "resta": float(pos.quantidade or 0)}
 
     def status(self) -> Dict:
         """Chamado pela thread da API: NÃO pode tocar no ORM, que pertence à sessão da thread do robô."""
