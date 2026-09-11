@@ -27,6 +27,22 @@ Você é um trader profissional de cripto, especialista em BTC, e também um pes
 - TPO correto é **por sessão** (um perfil por dia, períodos de 30 min, faixa fixa em preço, com POC/VAH/VAL de cada dia e POCs não retestados), como no TradingView. O TPO do robô hoje é de janela (composto) — diferença conhecida.
 - Inverse: range aprovado pelo usuário; grade vende subindo; topo rompido de verdade fecha tudo; topo falso mantém; fundo rompido de verdade vende quase 100% no reteste; fundo falso não vende.
 
+## O método Tradeiros (origem da leitura do usuário)
+
+O usuário estudou 2 anos no grupo privado do Tradeiros (Shaka e Maroja; YouTube/Instagram @tradeiros). Resumo em paráfrase, tirado de 3 lives de set/2026:
+
+- **Hierarquia**: TPO primeiro ("o pai de todos"), depois order flow, depois Elliott; Fibonacci e VWAP de apoio. A gestão de risco "poderia vir em primeiro". Nada de RSI, MACD, médias, figuras, e Wyckoff/SMC só em fundos grandes.
+- **TPO**: perfil diário em blocos de 30 min, perfis por sessão (Ásia, Europa, América; abertura e fechamento americano pesam) e **perfil composto ("merge" de ~10 dias) para definir o range**. POC ("pisada do leão", ímã), VAL/VAH, naked POC (preço volta e reage), single prints (preço volta para preencher), cauda compradora (compra com stop abaixo da cauda).
+- **Jogo principal = operar o range**: compra no VAL/fundo, vende no VAH/POC/topo, **não opera no meio** ("meio do nada", o 0,5). Rotação de uma borda à outra. **Desvio** = sai do valor e volta (a maioria dos rompimentos é falsa); rompimento só vale com **aceitação** (volume construído além do nível) e **reteste**. Cada novo toque enfraquece o nível (3º/4º toque costuma romper). Tendência só muda com quebra de estrutura (topos/fundos) e volume construído do outro lado.
+- **Order flow como CONTEXTO, não gatilho de tick**: livro/heatmap da Coinbase spot (o "calço"/alicerce de ordens passivas), open interest, net longs/shorts, CVD (divergência no topo), delta por nível no perfil composto para achar quem ficou **preso/armadilhado**, mapa de liquidez/squeeze, funding e cash-and-carry.
+- **Elliott é mapa ("roadmap"), não gatilho**: cenários, invalidação, alvos por Fibonacci e projeção de tempo (data provável de topo).
+- **Níveis de referência**: aberturas/pivôs diário e semanal, VWAP ancorada no início/topo do movimento (o "preço justo", o preço gravita nela), golden pocket (0,5–0,618).
+- **Execução e gestão**: entrada e saída fracionadas (fade in/out) com ordens limitadas escalonadas; risco de 0,3–1% por trade; stop = invalidação; **tirar o risco no 1:1 realizando 25–50% e levando o stop para o zero a zero** (break-even conta como trade de sucesso); se preencheu pouco, fecha e espera o reteste; mão menor em day trade; alavancagem baixa.
+- **Hedge de carteira (inverse/coin-M)**: segura BTC e vende 20–40% da carteira em escada nas resistências (VAH, abertura semanal), até 60–80% em exaustão, recebendo funding; recompra no POC/VAL; long inverse embaixo; realiza cada lado no extremo oposto. O short é "realização parcial", não aposta de queda.
+- **Vocabulário**: rotação, desvio, aceitação, merge, pisada do leão, calço, presos/armadilhados, squeeze, pedrada (impulso), respiro (correção curta), reteste, sardinha (varejo comprando topo), stop de bobeira, meio do nada, tirar o risco, redear (hedgear).
+
+**Diferenças do robô atual** (medidas em 11/09/2026): o TPO/VP do robô é de janela (composto dos últimos N candles, recalculado a cada candle) e o sinal é de **rompimento** (acima da VAH = compra) — o contrário do jogo principal deles, que é **responsivo** (vende na VAH, compra na VAL, nada no meio). O VWAP do robô é ancorado no início da janela. O "tirar o risco" testado manteve o stop original; o deles leva o stop para o zero a zero. O inverse do robô vende até 100% num range macro de Elliott; o deles vende 20–40% num range de dias/semanas definido pelo perfil composto.
+
 ## Método (inegociável)
 
 - **Custo real** em tudo: taxa maker/taker certa para cada perna, slippage no stop, funding quando a posição atravessa o horário.
