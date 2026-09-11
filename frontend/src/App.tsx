@@ -6,6 +6,7 @@ import Dashboard from './screens/Dashboard'
 import Historico from './screens/Historico'
 import Mercado from './screens/Mercado'
 import Pontos from './screens/Pontos'
+import Range from './screens/Range'
 import Sentimento from './screens/Sentimento'
 import Trader from './screens/Trader'
 
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/trader" element={<Trader />} />
           <Route path="/mercado" element={<Mercado />} />
           <Route path="/pontos" element={<Pontos />} />
+          <Route path="/range" element={<Range />} />
           <Route path="/sentimento" element={<Sentimento />} />
           <Route path="/historico" element={<Historico />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -552,3 +552,25 @@ export interface PropostaRange {
   proposta: { valido: boolean; low?: number; high?: number; motivo: string } | null
   elliott_primario: { nome?: string; fase?: string; vies?: string; alvos?: number[]; invalidacao?: number } | null
 }
+
+/** Jogo do range (GET /api/range/contexto) */
+export interface NiveisPerfil { inicio: number; poc: number; val: number; vah: number; minima: number; maxima: number; blocos: number }
+export interface PerfilDia extends NiveisPerfil { sessoes: Record<string, NiveisPerfil> }
+export interface PlanoRange {
+  lado: number; jogada: string; niveis: number[]; stop: number; alvo1: number; alvo2: number; rr: number; motivo: string
+}
+export interface RangeContexto {
+  par: string
+  preco: number
+  ate_ms: number | null
+  range: { val: number; poc: number; vah: number; minima: number; maxima: number; largura_pct: number | null; pocs_diarios: number[]; dias: number; valido: boolean } | null
+  perfis: PerfilDia[]
+  hoje: PerfilDia | null
+  naked_pocs: { preco: number; dia_ms: number }[]
+  toques: { val: number | null; vah: number | null }
+  aceitacao: number
+  long_short: { atual: number | null; mediana_30d: number | null; presos_no_val: boolean | null; presos_no_vah: boolean | null } | null
+  plano: PlanoRange | null
+  barrado: PlanoRange | null
+  motivo: string
+}
