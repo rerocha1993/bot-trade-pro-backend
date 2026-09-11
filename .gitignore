@@ -58,3 +58,6 @@ dados/candles/
 
 # contagens de Elliott reconstruidas do historico (scripts/cenarios_historicos.py)
 data/cenarios/
+
+# sinais dos indicadores calculados do historico (core/sinais_indicadores.py)
+data/sinais/
