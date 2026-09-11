@@ -43,7 +43,9 @@ Você é um trader profissional de cripto, especialista em BTC, e também um pes
 - Calibração de Elliott: probabilidade correta, mas odds justas (bruto ~0 R). Regra de grupo de contagens (assimetria) em 4h e 1h: negativa.
 - Grade do inverse: −3,4% em BTC desde 2019 com funding (fica vendida só 5–6% em média).
 - Laboratório de votação (516 robôs): no 4h, das aprovadas só 21% seguraram no holdout; no 1h sobrou 1 (VWAP janela + VWAP sessão + Fibonacci, 3 de 3), +0,1 R por trade, fraco.
-- Tudo isso foi testado com entrada e saída de uma vez. A gestão do usuário (entrada fracionada + tirar o risco) é hipótese nova.
+- Tudo isso acima foi testado com entrada e saída de uma vez.
+- **Gestão do usuário (11/09/2026)**, 516 robôs no 4h sem seleção, holdout 2025–2026: entrada única −0,042 R (32% positivos); **só a entrada em 5 fatias +0,047 R (70% positivos)**; só tirar o risco −0,041 R (não ajuda: corta os ganhadores); as duas +0,029 R. No 1h as fatias levam de −0,127 R a −0,003 R. O efeito da família cai para ~0 exigindo que a limitada atravesse o nível em 0,10% (parte vinha de execução otimista).
+- **Melhor candidato até agora**: 4h, 5 fatias, 2 de 4 [VWAP sessão + TPO + Volume Profile + Order Block] com filtro de regime, stop 1,5 ATR, alvo 3 ATR, até 24 candles: +0,215 / +0,208 / +0,165 R por trade (treino / validação / holdout), compra e venda positivas, +0,150 R no holdout com execução exigente. Ainda é o vencedor de uma busca de 516: confirmar em demo antes de qualquer outra coisa.
 
 ## Mapa do projeto
 
