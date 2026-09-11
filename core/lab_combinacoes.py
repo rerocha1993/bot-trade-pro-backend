@@ -68,10 +68,47 @@ def lados(d, v: Variante) -> np.ndarray:
     return lado
 
 
+def _resumo(trades: List[float], lados_t: List[int]) -> Dict:
+    if not trades:
+        return {"trades": 0, "soma_r": 0.0, "medio_r": 0.0, "fator_lucro": None, "acerto": None,
+                "compra_r": 0.0, "venda_r": 0.0, "n_compra": 0, "n_venda": 0}
+    t = np.array(trades)
+    ld = np.array(lados_t)
+    ganhos, perdas = t[t > 0].sum(), -t[t <= 0].sum()
+    return {"trades": len(t), "soma_r": round(float(t.sum()), 2), "medio_r": round(float(t.mean()), 4),
+            "fator_lucro": round(float(ganhos / perdas), 2) if perdas > 0 else None,
+            "acerto": round(float((t > 0).mean()), 3),
+            "compra_r": round(float(t[ld == 1].sum()), 2), "venda_r": round(float(t[ld == -1].sum()), 2),
+            "n_compra": int((ld == 1).sum()), "n_venda": int((ld == -1).sum())}
+
+
+def simular_gestao(lado: np.ndarray, idx: np.ndarray, close: np.ndarray, high: np.ndarray, low: np.ndarray,
+                   atr: np.ndarray, horizonte: int = 24, mult_stop: float = 1.5, mult_alvo: float = 3.0,
+                   n_entradas: int = 5, fracao_realizar: float = 0.5, folga_execucao: float = 0.0) -> Dict:
+    """Como `simular`, mas cada trade usa a gestão do usuário (entrada em 5 fatias + tirar o risco em 1 R).
+    `n_entradas=1` isola o "tirar o risco"; `fracao_realizar=0` isola a entrada fracionada."""
+    from core.gestao_trade import trade_gestao
+    trades: List[float] = []
+    lados_t: List[int] = []
+    n, j = len(idx), 0
+    while j < n:
+        if lado[j] == 0 or atr[j] <= 0:
+            j += 1
+            continue
+        s, i0 = int(lado[j]), int(idx[j])
+        r = trade_gestao(s, i0, close[i0], mult_stop * atr[j], close, high, low, horizonte, mult_alvo,
+                         n_entradas=n_entradas, fracao_realizar=fracao_realizar, folga_execucao=folga_execucao)
+        trades.append(r["liquido_r"])
+        lados_t.append(s)
+        j = int(np.searchsorted(idx, r["i_saida"], side="right"))
+    return _resumo(trades, lados_t)
+
+
 def simular(lado: np.ndarray, idx: np.ndarray, close: np.ndarray, high: np.ndarray, low: np.ndarray,
             atr: np.ndarray, horizonte: int = 24, mult_stop: float = 1.5, mult_alvo: float = 3.0) -> Dict:
     """Uma posição por vez, stop/alvo em ATR e saída por tempo. Devolve o resultado em R (1 R = o stop)."""
     trades: List[float] = []
+    lados_t: List[int] = []
     n = len(idx)
     j = 0
     while j < n:
@@ -99,25 +136,37 @@ def simular(lado: np.ndarray, idx: np.ndarray, close: np.ndarray, high: np.ndarr
         bruto_r = (saida - entrada) * s / risco
         custo_r = (entrada * CUSTO_ENTRADA + saida * (TAXA_TAKER + (SLIPPAGE if motivo != "alvo" else 0))) / risco
         trades.append(bruto_r - custo_r)
+        lados_t.append(s)
         # o próximo sinal só vale depois que esta posição fechou
         j = int(np.searchsorted(idx, i_saida, side="right"))
-    if not trades:
-        return {"trades": 0, "soma_r": 0.0, "medio_r": 0.0, "fator_lucro": None, "acerto": None}
-    t = np.array(trades)
-    ganhos, perdas = t[t > 0].sum(), -t[t <= 0].sum()
-    return {"trades": len(t), "soma_r": round(float(t.sum()), 2), "medio_r": round(float(t.mean()), 4),
-            "fator_lucro": round(float(ganhos / perdas), 2) if perdas > 0 else None,
-            "acerto": round(float((t > 0).mean()), 3)}
+    return _resumo(trades, lados_t)
+
+
+_ARRAYS: Dict[int, tuple] = {}
+
+
+def _arrays(candles: Sequence[Sequence[float]]):
+    chave = id(candles)
+    if chave not in _ARRAYS:
+        _ARRAYS[chave] = (np.array([c[4] for c in candles], dtype=float), np.array([c[2] for c in candles], dtype=float),
+                          np.array([c[3] for c in candles], dtype=float))
+    return _ARRAYS[chave]
 
 
 def rodar(d, candles: Sequence[Sequence[float]], v: Variante, inicio_ms: int, fim_ms: Optional[int],
-          horizonte: int = 24) -> Dict:
-    close = np.array([c[4] for c in candles], dtype=float)
-    high = np.array([c[2] for c in candles], dtype=float)
-    low = np.array([c[3] for c in candles], dtype=float)
+          horizonte: int = 24, gestao: str = "unica", folga_execucao: float = 0.0) -> Dict:
+    """
+    `gestao`: 'unica' (entra e sai de uma vez), 'usuario' (5 fatias + tirar o risco em 1 R),
+    'so_risco' (entrada única + tirar o risco) ou 'so_fatias' (5 fatias, sem realização em 1 R).
+    """
+    close, high, low = _arrays(candles)
     m = (d["ts"].values >= inicio_ms) & ((d["ts"].values < fim_ms) if fim_ms else True)
     sub = d[m]
-    return simular(lados(sub, v)[:], sub["i"].values, close, high, low, sub["atr"].values, horizonte)
+    args = (lados(sub, v), sub["i"].values, close, high, low, sub["atr"].values, horizonte)
+    if gestao == "unica":
+        return simular(*args)
+    extra = {"usuario": {}, "so_risco": {"n_entradas": 1}, "so_fatias": {"fracao_realizar": 0.0}}[gestao]
+    return simular_gestao(*args, folga_execucao=folga_execucao, **extra)
 
 
 CRITERIO = {"trades_min_treino": 50, "trades_min_validacao": 30, "medio_min": 0.0}
