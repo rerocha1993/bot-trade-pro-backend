@@ -57,7 +57,7 @@ def bot_padrao(**kw) -> SimpleNamespace:
                 usar_orderflow=False, usar_volume_profile=True, usar_orderblock=True, usar_sentimento=False,
                 usar_tendencia_macro=True, usar_api_macro=False, banca=10000.0, risco_pct=0.01, max_alocacao_pct=0.5,
                 alavancagem=1, quantidade=0.01, usar_trailing_stop=False, ativador_trailing=0.005, distancia_trailing=0.003,
-                position_mode="one-way", max_trades_dia=10, usar_filtro_regime=True, prob_sucesso_minima=0.45,
+                position_mode="one-way", max_trades_dia=10, max_perda_dia_pct=0.03, usar_filtro_regime=True, prob_sucesso_minima=0.45,
                 tipo_entrada="mercado", slippage_pct=0.0002, limite_candles_espera=3, taxa_historica_minima=0.0, rr_minimo=0.0)
     base.update(kw)
     return SimpleNamespace(**base)
@@ -85,6 +85,7 @@ class BacktestEngine:
         self.decisoes: List[Dict] = []
         self.pendentes_executadas = 0
         self.pendentes_expiradas = 0
+        self.bloqueios_limite_dia = 0
         self.curva: List[float] = []
         self._cache_tf: Dict[str, List[list]] = {}
 
@@ -117,6 +118,11 @@ class BacktestEngine:
         return round(min(qty, teto), 6)
 
     def executar(self) -> Dict:
+        """
+        Os limites do dia valem como no robô (BotExecutor._pode_operar): com `max_trades_dia` entradas no dia, ou
+        com a perda do dia chegando a `max_perda_dia_pct` da banca, nenhuma entrada nova até o dia seguinte (UTC).
+        Sem isso o backtest contava trades que o robô ao vivo não faria — justamente nos dias ruins.
+        """
         t0 = time.time()
         pos: Optional[Dict] = None
         pendente: Optional[Dict] = None
@@ -125,9 +131,14 @@ class BacktestEngine:
         slip = float(getattr(self.bot, "slippage_pct", 0.0) or 0.0)
         limite = getattr(self.bot, "tipo_entrada", "mercado") == "limite"
         espera = int(getattr(self.bot, "limite_candles_espera", 3) or 3)
+        max_trades = int(getattr(self.bot, "max_trades_dia", 10) or 10)
+        max_perda = float(getattr(self.bot, "max_perda_dia_pct", 0.03) or 0.03) * self.banca_inicial
+        dia, self._trades_dia, self._pnl_dia = None, 0, 0.0
         for i in range(self.janela, n):
             c = self.ohlcv[i]           # candle "atual" que acabou de fechar
             preco = c[4]
+            if c[0] // 86_400_000 != dia:
+                dia, self._trades_dia, self._pnl_dia = c[0] // 86_400_000, 0, 0.0
             # 0) ordem limitada pendente: executa se o candle tocou o preço (taxa maker), expira após `espera` candles
             if pendente and not pos:
                 tocou = c[3] <= pendente["preco"] if pendente["direcao"] == "buy" else c[2] >= pendente["preco"]
@@ -135,6 +146,7 @@ class BacktestEngine:
                     pos = {**pendente["pos"], "preco_entrada": pendente["preco"], "ts_entrada": c[0], "taxa_entrada": TAXA_MAKER}
                     pendente = None
                     self.pendentes_executadas += 1
+                    self._trades_dia += 1
                 else:
                     pendente["candles"] += 1
                     if pendente["candles"] >= espera:
@@ -175,7 +187,10 @@ class BacktestEngine:
                 self.curva.append(self.banca)
                 continue
             self.decisoes.append({"ts": c[0], "acao": d["acao"], "fase": d.get("fase_onda"), "motivo": d.get("motivo", "")[:160]})
-            if d["acao"] in ("buy", "sell") and not pos and d.get("sl"):
+            pode = self._trades_dia < max_trades and self._pnl_dia > -max_perda
+            if d["acao"] in ("buy", "sell") and not pos and d.get("sl") and not pode:
+                self.bloqueios_limite_dia += 1
+            elif d["acao"] in ("buy", "sell") and not pos and d.get("sl") and not pendente:
                 s = 1 if d["acao"] == "buy" else -1
                 if limite and d.get("preco_limite"):
                     qty = self._tamanho(d["preco_limite"], d["sl"], d.get("tamanho_fator", 1.0))
@@ -189,6 +204,7 @@ class BacktestEngine:
                     if qty > 0:
                         pos = {"direcao": d["acao"], "preco_entrada": preco_exec, "qty": qty, "sl": d["sl"], "tp": d["tp"], "ts_entrada": c[0],
                                "fase": d.get("fase_onda"), "cenario": d.get("cenario"), "motivo": d.get("motivo", "")[:200], "taxa_entrada": TAXA}
+                        self._trades_dia += 1
                         if self.verbose:
                             print(f"{pd.to_datetime(c[0], unit='ms')} ENTRADA {d['acao']} @ {preco_exec:.2f} sl={d['sl']} tp={d['tp']} qty={qty} | {d.get('fase_onda')}")
             self.curva.append(self.banca)
@@ -205,6 +221,7 @@ class BacktestEngine:
         pnl = (preco_saida - pos["preco_entrada"]) * pos["qty"] * s - taxas
         r = (preco_saida - pos["preco_entrada"]) * s / abs(pos["preco_entrada"] - pos["sl"]) if pos["sl"] else 0.0
         self.banca += pnl
+        self._pnl_dia = getattr(self, "_pnl_dia", 0.0) + pnl
         self.trades.append({**pos, "preco_saida": preco_saida, "pnl": round(pnl, 2), "r": round(r, 2), "motivo_saida": motivo,
                             "ts_saida": ts, "banca": round(self.banca, 2)})
         if self.verbose:
@@ -235,6 +252,7 @@ class BacktestEngine:
             "drawdown_max_pct": round(dd_max * 100, 2), "banca_final": round(self.banca, 2),
             "decisoes": acoes, "fases": fases, "tempo_s": round(tempo, 1), "lista_trades": t,
             "ordens_limite": {"executadas": self.pendentes_executadas, "expiradas": self.pendentes_expiradas},
+            "bloqueios_limite_dia": self.bloqueios_limite_dia,
         }
 
     def salvar_resultado(self, caminho_saida: str):
