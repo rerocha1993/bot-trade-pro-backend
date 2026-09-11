@@ -48,3 +48,10 @@ dados/trades_bybit/
 # trava de instancia unica dos robos (core/trava_instancia.py)
 .robos.lock
 .robos.lock.pid
+
+# candles historicos baixados para os backtests do scalp
+dados/candles/
+
+# grafo do graphify (local, com cache)
+.graphify/*
+!.graphify/GRAPH_REPORT.md
