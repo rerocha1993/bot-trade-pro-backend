@@ -80,6 +80,32 @@ def candles(tf: str) -> List[list]:
     return [[int(x[0])] + [float(k) for k in x[1:]] for x in v]
 
 
+def atr_simples(win: Sequence) -> float:
+    """Média simples do true range dos últimos 14 candles — a régua de stop/alvo do laboratório e do robô."""
+    return float(np.mean([max(x[2] - x[3], abs(x[2] - win[j - 1][4]), abs(x[3] - win[j - 1][4]))
+                          for j, x in enumerate(win[-15:], start=len(win) - 15)]))
+
+
+def sinais_do_candle(win: Sequence) -> Dict[str, int]:
+    """
+    Os sinais de um candle fechado (o último de `win`, com JANELA candles). A MESMA função serve ao histórico
+    (`calcular`) e ao robô ao vivo (core/estrategia_votacao.py): o que roda é o que foi testado.
+    Levanta exceção se algum indicador não conseguir calcular.
+    """
+    preco = win[-1][4]
+    s = {
+        "VWAP_janela": LADO[VWAPCalculator(win[-150:]).sinal(preco)["acao"]],
+        "VWAP_sessao": sinal_vwap_sessao(win, preco),
+        "TPO": LADO[TPOProfile(win, bins=30).sinal_estrategico(preco)["acao"]],
+        "Volume_Profile": LADO[VolumeProfilePRO(win, num_bins=40).price_signal(preco)["acao"]],
+        "Order_Block": LADO[OrderBlockDetector(win[-150:]).sinal(preco)["acao"]],
+        "Fibonacci": sinal_fibonacci(win, preco),
+    }
+    r = analisar_regime(win, 40)
+    s["Regime"] = 0 if r["regime"] == "serrilhado" else (1 if win[-1][4] > win[-20][4] else -1)
+    return s
+
+
 def calcular(tf: str, passo: int = 1, desde_ms: int = 0, verbose: bool = True) -> pd.DataFrame:
     c = candles(tf)
     ell = _elliott(tf)
@@ -90,22 +116,11 @@ def calcular(tf: str, passo: int = 1, desde_ms: int = 0, verbose: bool = True) -
         win = c[i - JANELA + 1:i + 1]
         preco = win[-1][4]
         try:
-            s = {
-                "VWAP_janela": LADO[VWAPCalculator(win[-150:]).sinal(preco)["acao"]],
-                "VWAP_sessao": sinal_vwap_sessao(win, preco),
-                "TPO": LADO[TPOProfile(win, bins=30).sinal_estrategico(preco)["acao"]],
-                "Volume_Profile": LADO[VolumeProfilePRO(win, num_bins=40).price_signal(preco)["acao"]],
-                "Order_Block": LADO[OrderBlockDetector(win[-150:]).sinal(preco)["acao"]],
-                "Fibonacci": sinal_fibonacci(win, preco),
-            }
+            s = sinais_do_candle(win)
         except Exception:
             continue
-        r = analisar_regime(win, 40)
-        s["Regime"] = 0 if r["regime"] == "serrilhado" else (1 if win[-1][4] > win[-20][4] else -1)
         s["Elliott"] = ell.get(win[-1][0], 0)
-        atr = float(np.mean([max(x[2] - x[3], abs(x[2] - win[j - 1][4]), abs(x[3] - win[j - 1][4]))
-                             for j, x in enumerate(win[-15:], start=len(win) - 15)]))
-        linhas.append({"i": i, "ts": win[-1][0], "preco": preco, "atr": atr, **s})
+        linhas.append({"i": i, "ts": win[-1][0], "preco": preco, "atr": atr_simples(win), **s})
         if verbose and len(linhas) % 5000 == 0:
             print(f"  {tf}: {len(linhas)} candles", flush=True)
     return pd.DataFrame(linhas)

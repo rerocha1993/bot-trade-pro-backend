@@ -54,6 +54,18 @@ def variantes(indicadores: Sequence[str], min_tamanho: int = 2) -> List[Variante
     return out
 
 
+def lado_da_votacao(sinais: Dict[str, int], v: Variante) -> int:
+    """A mesma regra de `lados`, para UM candle (é o que o robô ao vivo usa)."""
+    compra = sum(1 for i in v.indicadores if sinais.get(i) == 1)
+    venda = sum(1 for i in v.indicadores if sinais.get(i) == -1)
+    lado = 1 if compra >= v.votos_min and compra > venda else -1 if venda >= v.votos_min and venda > compra else 0
+    if v.usar_elliott and sinais.get("Elliott") == -lado:
+        lado = 0
+    if v.usar_regime and sinais.get("Regime") == 0:
+        lado = 0
+    return lado
+
+
 def lados(d, v: Variante) -> np.ndarray:
     """+1 / −1 / 0 por candle: votação do grupo, com os filtros de contexto aplicados."""
     m = np.vstack([d[i].values for i in v.indicadores])

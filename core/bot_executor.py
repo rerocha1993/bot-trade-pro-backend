@@ -98,6 +98,11 @@ class BotExecutor:
         if self.estrategia == "inverse_range":
             from core.inverse_executor import InverseRangeExecutor
             self.inverse = InverseRangeExecutor(self)
+        # votação dos indicadores + entrada em 5 fatias (o robô que saiu do laboratório, core/estrategia_votacao.py)
+        self.fatias = None
+        if self.estrategia == "votacao_fatias":
+            from core.fatias_executor import FatiasExecutor
+            self.fatias = FatiasExecutor(self)
         self.alavancagem = normalizar_alavancagem(getattr(bot, "alavancagem", 1) or 1)
         self.ordens = OrderExecutor(self.con)
         self.alertas: TelegramAlertService = self.servicos.get("telegram") or TelegramAlertService()
@@ -190,6 +195,10 @@ class BotExecutor:
             self.inverse.carregar()
             return
         self._reconciliar()
+        if self.fatias is not None:
+            # as fatias pendentes são ordens de entrada DESTE robô, guardadas no estado: não são esquecidas
+            self.fatias.carregar()
+            return
         self._cancelar_entradas_esquecidas()
 
     def _cancelar_entradas_esquecidas(self):
@@ -855,6 +864,14 @@ class BotExecutor:
             self.ultimo_candle_ts = int(ultimo[0])
             self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
                                posicao=self.inverse.posicao.as_dict() if self.inverse.posicao else None, inverse=self.inverse.status())
+            return
+        if self.fatias is not None:
+            # votação + fatias: decisão e gestão próprias (stop, alvo e tempo), sem o fluxo de Elliott
+            self.fatias.ciclo(ohlcv, preco, candle_novo)
+            if candle_novo:
+                self.ultimo_candle_ts = int(ultimo[0])
+            self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
+                               posicao=self.posicao.as_dict() if self.posicao else None, fatias=self.fatias.status())
             return
         self.manutencao(preco, float(ultimo[4]))
 
