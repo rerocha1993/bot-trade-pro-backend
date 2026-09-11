@@ -4,8 +4,9 @@ Modo inverse (short-only em range, acumulação de BTC).
 
     GET  /inverse/{bot_id}/estado                 range atual, alocação, posição, leitura da contagem mestre
     GET  /inverse/{bot_id}/range/proposta         proposta automática (pivôs primários no diário + regime + Elliott)
-    POST /inverse/{bot_id}/range/aprovar?low&high aprova (manual ou a proposta), status 'aprovado'
-    POST /inverse/{bot_id}/range/cancelar         volta a 'sem range'
+    POST /inverse/{bot_id}/range/aprovar?low&high aprova (manual ou a proposta), status 'aprovado'; recusa com os
+                                                  motivos quando algo não fecha, a menos que venha forcar=true
+    POST /inverse/{bot_id}/range/cancelar         volta a 'sem range' (recusa com short aberto, salvo forcar=true)
     POST /inverse/backtest?desde=2017-01-01       backtest em BTC no histórico 4h da Bitstamp
 """
 import json
@@ -50,14 +51,40 @@ def proposta(bot_id: int, db: Session = Depends(get_db)):
     return {"preco": preco, "proposta": prop, "elliott_primario": prim.get("primario"), "trava": m.get("trava")}
 
 
+def _contratos_abertos(bot) -> float:
+    """Short ainda aberto na grade salva (fatias + short de reteste)."""
+    try:
+        g = json.loads(bot.grade_json) if bot.grade_json else {}
+    except Exception:
+        return 0.0
+    total = sum(float(f.get("contratos") or 0) for f in (g.get("fatias") or []))
+    reteste = (g.get("rompimento") or {}).get("reteste") or {}
+    return total + float(reteste.get("contratos") or 0)
+
+
 @router.post("/{bot_id}/range/aprovar")
 def aprovar(bot_id: int, low: Optional[float] = None, high: Optional[float] = None, folga_stop: float = 0.01,
-            short_base_max: float = 0.5, escada: Optional[str] = Query(None, description='JSON {"0.236":0.1,...}'), db: Session = Depends(get_db)):
+            short_base_max: float = 0.5, escada: Optional[str] = Query(None, description='JSON {"0.236":0.1,...}'),
+            forcar: bool = Query(False, description="aprova mesmo com avisos (sem proposta válida, preço fora do range)"),
+            db: Session = Depends(get_db)):
+    """
+    Antes esta rota aceitava tudo calada — inclusive a proposta que o próprio robô marcava como inválida. Agora
+    confere antes: range impossível e grade com short aberto BLOQUEIAM; o resto vira aviso e só passa com forcar.
+    """
+    from core.inverse_rompimento import validar_aprovacao
     bot = _bot(db, bot_id)
     low = low or bot.range_low
     high = high or bot.range_high
-    if not low or not high or high <= low:
-        raise HTTPException(400, "informe low e high válidos (ou gere uma proposta antes)")
+    try:
+        preco = get_manager().servicos["connectors"]["simulador"].obter_preco_atual(bot.ativo)
+    except Exception:
+        preco = None
+    bloqueios, avisos = validar_aprovacao(low, high, preco, bot.range_status, _contratos_abertos(bot))
+    if bloqueios:
+        raise HTTPException(400, {"motivo": "aprovação impossível", "bloqueios": bloqueios, "avisos": avisos})
+    if avisos and not forcar:
+        raise HTTPException(400, {"motivo": "aprovação recusada", "avisos": avisos,
+                                  "como_forcar": "repita com forcar=true se tiver certeza"})
     bot.range_low, bot.range_high, bot.range_status = float(low), float(high), "aprovado"
     bot.folga_stop, bot.short_base_max = folga_stop, short_base_max
     if escada:
@@ -65,17 +92,29 @@ def aprovar(bot_id: int, low: Optional[float] = None, high: Optional[float] = No
             bot.escada_json = json.dumps(json.loads(escada))
         except Exception:
             raise HTTPException(400, "escada deve ser JSON")
-    bot.range_motivo = (bot.range_motivo or "") + " | aprovado pelo usuário"
+    # a grade é remontada do zero no próximo ciclo, com o preço daquele momento
+    bot.grade_json = None
+    bot.range_motivo = ((bot.range_motivo or "") + " | aprovado pelo usuário"
+                        + (f" (forçado: {'; '.join(avisos)})" if avisos else ""))[:255]
     db.commit()
-    return {"ok": True, "range": [bot.range_low, bot.range_high], "status": bot.range_status}
+    return {"ok": True, "range": [bot.range_low, bot.range_high], "status": bot.range_status, "preco": preco,
+            "avisos": avisos, "forcado": bool(avisos)}
 
 
 @router.post("/{bot_id}/range/cancelar")
-def cancelar(bot_id: int, db: Session = Depends(get_db)):
+def cancelar(bot_id: int, forcar: bool = Query(False, description="cancela mesmo com short aberto"),
+             db: Session = Depends(get_db)):
+    """Cancelar com short aberto deixa essa posição na corretora sem ninguém cuidando dela."""
     bot = _bot(db, bot_id)
+    abertos = _contratos_abertos(bot)
+    if abertos > 0 and not forcar:
+        raise HTTPException(400, {"motivo": "cancelamento recusado",
+                                  "avisos": [f"a grade tem short aberto ({abertos:,.0f} contratos): cancelar agora deixa "
+                                             f"essa posição na corretora sem gestão"],
+                                  "como_forcar": "repita com forcar=true se tiver certeza"})
     bot.range_status, bot.range_motivo = None, "cancelado pelo usuário"
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "short_abandonado": abertos if abertos > 0 else 0}
 
 
 @router.get("/dial")

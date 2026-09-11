@@ -2,8 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type {
   Backtest, BacktestsBot, BotStatusItem, Decisao, Dial, LogExecucao, Mestre, MultiGrau, NiveisResp, PontoInstitucional,
-  OpcoesAlavancagem, Plano, PosicoesResp, Sentimento, StatusBot, Trader,
-} from './types'
+  OpcoesAlavancagem, Plano, PosicoesResp, Sentimento, StatusBot, Trader, InverseEstado, PropostaRange } from './types'
 import { candlesDaApi } from './adapters'
 
 export const useBots = () => useQuery({ queryKey: ['bots'], queryFn: () => api.get<BotStatusItem[]>('/bot-control/'), refetchInterval: 5_000 })
@@ -106,4 +105,35 @@ export function useControleBot() {
   const trailing = useMutation({ mutationFn: ({ id, on }: { id: number; on: boolean }) => api.post(`/bots/${id}/${on ? 'ativar_trailing' : 'desativar_trailing'}`), onSuccess: invalidar })
   const backtest = useMutation({ mutationFn: ({ id, dias }: { id: number; dias?: number }) => api.post(`/backtest/bots/${id}`, { dias }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['backtests'] }); qc.invalidateQueries({ queryKey: ['backtests-bot'] }) } })
   return { ativar, parar, trailing, backtest }
+}
+
+export const useInverseEstado = (id: number | null) => useQuery({
+  queryKey: ['inverse-estado', id], enabled: id !== null, refetchInterval: 30_000,
+  queryFn: () => api.get<InverseEstado>(`/inverse/${id}/estado`),
+})
+
+/** A proposta roda a contagem mestre no diário: é cara, então fica em cache por minutos. */
+export const usePropostaRange = (id: number | null) => useQuery({
+  queryKey: ['inverse-proposta', id], enabled: id !== null, staleTime: 5 * 60_000, refetchInterval: 15 * 60_000,
+  queryFn: () => api.get<PropostaRange>(`/inverse/${id}/range/proposta`),
+})
+
+/** Aprovar / cancelar o range. A API recusa com os motivos; `forcar` só vence avisos, nunca bloqueios. */
+export function useRangeInverse() {
+  const qc = useQueryClient()
+  const invalidar = () => {
+    qc.invalidateQueries({ queryKey: ['inverse-estado'] })
+    qc.invalidateQueries({ queryKey: ['status-bot'] })
+    qc.invalidateQueries({ queryKey: ['bots-detalhe'] })
+  }
+  const aprovar = useMutation({
+    mutationFn: ({ id, low, high, forcar }: { id: number; low: number; high: number; forcar?: boolean }) =>
+      api.post(`/inverse/${id}/range/aprovar`, { low, high, forcar: !!forcar }),
+    onSuccess: invalidar,
+  })
+  const cancelar = useMutation({
+    mutationFn: ({ id, forcar }: { id: number; forcar?: boolean }) => api.post(`/inverse/${id}/range/cancelar`, { forcar: !!forcar }),
+    onSuccess: invalidar,
+  })
+  return { aprovar, cancelar }
 }

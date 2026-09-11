@@ -6,6 +6,7 @@ import type { GrauKey, Overlays } from '../components/elliott'
 import { AlinhamentoBox, CenarioCard, GRAUS, GrafPainel, OV_CHIPS } from '../components/elliott'
 import { Header, Page, usePreco } from '../components/Layout'
 import { Btn, Card, Chip, Empty, Err, KV, Loading, ModoTag, ProbBar, Tag } from '../components/ui'
+import { InverseRangeCard } from '../components/InverseRange'
 import { corAcao, corPnl, fmt, fmtSigned, hora, pct, preco, rotuloAcao } from '../lib/format'
 
 export default function BotDetail() {
@@ -135,6 +136,7 @@ export default function BotDetail() {
               <KV k="Trades do dia" v={`${estado?.trades_dia ?? 0} / ${bot.max_trades_dia}`} />
               <KV k="P&L do dia" v={fmtSigned(estado?.pnl_dia ?? 0)} color={corPnl(estado?.pnl_dia ?? 0)} src={`limite −${pct(bot.max_perda_dia_pct, 1)}`} />
             </Card>
+            {bot.estrategia === 'inverse_range' && <InverseRangeCard id={id} />}
             {fluxo && (
               <Card>
                 <div className="eyebrow" style={{ marginBottom: 9 }}>Motor de fluxo</div>

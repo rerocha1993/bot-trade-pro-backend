@@ -515,3 +515,40 @@ export interface Plano {
   motivo: string
   erro?: string
 }
+
+/** Máquina de rompimento do modo inverse (core/inverse_rompimento.py). */
+export interface RompimentoInverse {
+  estado: string
+  descricao: string
+  contagem: number
+  nivel_rompido: number | null
+  alvo: number | null
+  fonte_alvo: string | null
+  stop: number | null
+  candles_espera: number
+  reteste: { contratos: number; preco_entrada: number; fracao: number } | null
+  ultimo_evento: string | null
+  pnl_reteste_btc: number | null
+}
+
+export interface GradeInverseResumo {
+  low: number
+  high: number
+  fracao_aberta: number
+  contratos: number
+  btc_realizado: number
+  pnl_aberto_btc: number
+  ciclos: number
+}
+
+export interface InverseEstado {
+  range: { low: number | null; high: number | null; status: string | null; motivo: string | null }
+  estado: { grade: GradeInverseResumo | null; posicao: unknown; rompimento?: RompimentoInverse } | null
+  ultima_decisao: { acao: string; motivo: string } | null
+}
+
+export interface PropostaRange {
+  preco: number
+  proposta: { valido: boolean; low?: number; high?: number; motivo: string } | null
+  elliott_primario: { nome?: string; fase?: string; vies?: string; alvos?: number[]; invalidacao?: number } | null
+}

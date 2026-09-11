@@ -5,14 +5,17 @@ Executor do modo inverse: GRADE de acumulação de BTC (short-only, sem stop de 
 Ciclo (a cada candle FECHADO do timeframe do bot, 4h por padrão):
     1. range: só opera com range APROVADO pelo usuário (bot.range_low/high, range_status 'aprovado'); sem range,
        publica uma proposta (status 'proposto') a partir da contagem mestre no diário e espera
-    2. grade: fatias de Fibonacci (0..100% + extensões 127,2% / 161,8%), cada uma com 3 sub-fatias progressivas;
+    2. grade: fatias de Fibonacci de 0 a 100% do range (nada acima do topo), cada uma com 3 sub-fatias progressivas;
        vende quando a máxima do candle toca o preço da fatia, recompra quando a mínima toca o nível abaixo
        (toda recompra é lucro em BTC). Estado da grade persistido em bot.grade_json
     3. short de base: com a contagem mestre (trava ou primário) de baixa e alvo abaixo do fundo, as fatias mais
        baixas só recompram no alvo de Elliott
-    4. saída de CENÁRIO (opcional, bot.saida_estrutural): se a contagem virou impulso de alta acima do topo,
-       fecha as fatias abertas (aceita perda em BTC) e libera a grade para uma nova correção
-    5. grade concluída: fechamento abaixo do fundo sem fatia aberta -> range_status 'concluido', nova proposta
+    4. ROMPIMENTO do range (core/inverse_rompimento.py), regra de preço, não palpite:
+         - topo rompido de verdade (2 fechamentos além de 1%, ou 1 além de 3%) -> fecha todo o short, 'encerrado'
+         - topo rompido em falso (fechou de volta para dentro) -> o short fica
+         - fundo rompido de verdade -> espera o respiro e vende quase 100% no reteste; stop e alvo próprios
+         - fundo rompido em falso -> não vende nada
+    5. range encerrado ou concluído -> grade zerada e nova proposta
 Em testnet/real as execuções são ordens a mercado no fechamento do candle que tocou o nível (aproximação das
 ordens limitadas); em simulador o preenchimento é no preço do nível.
 """
@@ -26,6 +29,7 @@ from typing import Dict, Optional
 
 from core.inverse_grade import GradeInversa, Fatia
 from core.inverse_range import propor_range
+from core.inverse_rompimento import MaquinaRompimento, ParametrosRompimento, pesos_inverse
 from models.decisao_bot import DecisaoBot
 from models.posicao_bot import PosicaoBot
 
@@ -43,10 +47,14 @@ class InverseRangeExecutor:
         self.posicao: Optional[PosicaoBot] = None
         self._mestre_cache: Optional[Dict] = None
         self._mestre_ts = 0.0
+        self.maquina = MaquinaRompimento(self._parametros_rompimento())
 
     def _attr(self, nome, default=None):
         v = getattr(self.bot, nome, None)
         return default if v is None else v
+
+    def _parametros_rompimento(self) -> ParametrosRompimento:
+        return ParametrosRompimento(folga=float(self._attr("folga_stop", 0.01) or 0.01))
 
     # ------------------------------------------------------------ banca
     def _banca_btc(self) -> float:
@@ -68,13 +76,21 @@ class InverseRangeExecutor:
                 self.grade = GradeInversa(d["low"], d["high"], pesos={float(k): v for k, v in d["pesos"].items()}, subfatias=d.get("subfatias", 3),
                                           fatias=[Fatia(**f) for f in d["fatias"]], btc_realizado=d.get("btc_realizado", 0.0),
                                           taxas_btc=d.get("taxas_btc", 0.0))
+                self.maquina = MaquinaRompimento.from_dict(d.get("rompimento"), self._parametros_rompimento())
             except Exception as e:
                 logger.warning("grade salva inválida, recriando: %s", e)
                 self.grade = None
-        if self.grade is None and self._attr("range_status") == "aprovado" and self._attr("range_low") and self._attr("range_high"):
-            self.grade = self._nova_grade()
+        # a grade NOVA é montada no primeiro ciclo, que conhece o preço. Montar aqui, sem preço, era justamente o que
+        # deixava todos os níveis ativos e fazia o primeiro candle vender de uma vez tudo abaixo do preço
 
-    def _nova_grade(self) -> GradeInversa:
+    def _nova_grade(self, preco: float) -> GradeInversa:
+        """
+        Monta a grade com o preço de AGORA: os níveis abaixo dele só entram depois que o preço cair abaixo deles.
+
+        Antes ela nascia com todos os níveis ativos, e o primeiro candle vendia de uma vez cada nível que tinha ficado
+        abaixo do preço. Medido no range que o robô propunha (57.647–82.800) com o preço em 76.810: 14 fatias, 60% da
+        carteira vendida num candle só, a mercado. O guarda (`desativar_abaixo`) existia e o hedge dial usava.
+        """
         pesos = None
         try:
             esc = json.loads(self._attr("escada_json") or "null")
@@ -82,9 +98,16 @@ class InverseRangeExecutor:
                 pesos = {float(k): float(v) for k, v in esc.items()}
         except Exception:
             pesos = None
-        g = GradeInversa(float(self._attr("range_low")), float(self._attr("range_high")), pesos=pesos or dict(GradeInversa.__dataclass_fields__["pesos"].default_factory()))
+        g = GradeInversa(float(self._attr("range_low")), float(self._attr("range_high")), pesos=pesos or pesos_inverse())
+        g.desativar_abaixo(preco)
+        self.maquina = MaquinaRompimento(self._parametros_rompimento())
         self._salvar_grade(g)
         return g
+
+    def _encerrar_grade(self):
+        self.grade = None
+        self.maquina = MaquinaRompimento(self._parametros_rompimento())
+        self._salvar_grade(None)
 
     def _salvar_grade(self, g: Optional[GradeInversa]):
         if g is None:
@@ -92,7 +115,7 @@ class InverseRangeExecutor:
         else:
             self.bot.grade_json = json.dumps({"low": g.low, "high": g.high, "pesos": {str(k): v for k, v in g.pesos.items()}, "subfatias": g.subfatias,
                                               "btc_realizado": g.btc_realizado, "taxas_btc": g.taxas_btc,
-                                              "fatias": [f.__dict__ for f in g.fatias]})
+                                              "fatias": [f.__dict__ for f in g.fatias], "rompimento": self.maquina.as_dict()})
         self.db.commit()
 
     # ------------------------------------------------------------ mestre
@@ -181,40 +204,46 @@ class InverseRangeExecutor:
             prop = self.propor(close, leitura)
             self._decisao(ts, preco, "hold", f"sem range aprovado; proposta: {(prop or {}).get('low')}-{(prop or {}).get('high')} ({(prop or {}).get('motivo')})", leitura)
             return
-        if self.grade is None:
-            self.grade = self._nova_grade()
+        faixa = (float(self._attr("range_low")), float(self._attr("range_high")))
+        if self.grade is None or (self.grade.low, self.grade.high) != faixa:
+            self.grade = self._nova_grade(close)
         banca = self._banca_btc()
-        equity = banca + self.grade.pnl_nao_realizado(close)
-        # saída de cenário (opcional)
-        if self._attr("saida_estrutural", False) and close > self.grade.high and self.grade.contratos_abertos() > 0:
-            prim = leitura.get("primario") or {}
-            ciclo = leitura.get("ciclo") or {}
-            if (prim.get("vies") == "bull" and prim.get("fase") in ("inicio_onda_3", "meio_onda_3", "onda_5", "onda_1", "final_onda_3")) or ciclo.get("prob_bull", 0) >= 0.6:
-                execs = []
-                for f in self.grade.fatias:
-                    if f.contratos > 0:
-                        pnl = f.contratos * (1 / close - 1 / f.preco_venda)
-                        execs.append({"ts": ts, "tipo": "recompra", "nivel": f.nivel, "preco": close, "contratos": f.contratos, "pnl_btc": pnl})
-                        f.contratos = 0.0
-                self._executar(execs, close)
-                self.bot.range_status, self.bot.range_motivo = "encerrado", "saída de cenário: Elliott virou impulso de alta acima do topo"
-                self.grade = None
-                self._salvar_grade(None)
-                self.ex.alertas.info(f"{self._attr('nome')}: grade encerrada por cenário de alta")
-                self._decisao(ts, preco, "buy", "saída de cenário: impulso de alta", leitura)
-                return
-        execs = self.grade.processar_candle(ts, hi, lo, close, max(equity, 1e-6), leitura.get("guia"))
+        equity = banca + self.grade.pnl_nao_realizado(close) + self.maquina.pnl_nao_realizado(close)
+        guia = leitura.get("guia") or {}
+        alvos = [a for a in (guia.get("alvos") or []) if a] if guia.get("vies") == "bear" else []
+        r = self.maquina.avaliar(ts, hi, lo, close, max(equity, 1e-6), self.grade.low, self.grade.high, alvos,
+                                 fracao_ja_vendida=self.grade.fracao_aberta())
+        execs = list(r["execs"])
+        # o resultado do short de reteste entra no BTC realizado da grade, para o painel mostrar o resultado inteiro
+        self.grade.btc_realizado += sum(e.get("pnl_btc", 0.0) for e in r["execs"] if e["tipo"] == "recompra")
+        if r["fechar_grade"]:
+            for f in self.grade.fatias:
+                if f.contratos > 0:
+                    pnl = f.contratos * (1 / close - 1 / f.preco_venda)
+                    self.grade.btc_realizado += pnl
+                    execs.append({"ts": ts, "tipo": "recompra", "nivel": f.nivel, "preco": close, "contratos": f.contratos, "pnl_btc": pnl})
+                    f.contratos = 0.0
+        else:
+            # só dentro do range a grade vende. Rompendo, esperando o reteste ou vendido no reteste, o range acabou ou
+            # está em xeque — as recompras continuam, porque recompra é lucro. O estado vale DEPOIS do fechamento:
+            # um pavio acima do topo que fecha de volta dentro vende o pavio, que é o que se quer num falso
+            execs += self.grade.processar_candle(ts, hi, lo, close, max(equity, 1e-6), guia or None,
+                                                 vender=self.maquina.no_range)
         self._executar(execs, close)
-        self._salvar_grade(self.grade)
-        if close < self.grade.low and self.grade.contratos_abertos() <= 0:
-            self.bot.range_status, self.bot.range_motivo = "concluido", f"grade concluída abaixo do fundo; BTC realizado {self.grade.btc_realizado:.6f}"
-            self.grade = None
-            self._salvar_grade(None)
-            self.ex.alertas.info(f"{self._attr('nome')}: grade concluída, aguardando novo range")
+        if r["fechar_grade"] or r["concluido"]:
+            realizado = self.grade.btc_realizado
+            self.bot.range_status = "encerrado" if r["fechar_grade"] else "concluido"
+            self.bot.range_motivo = f"{r['motivo']}; BTC realizado {realizado:.6f}"[:255]
+            self.ex.alertas.info(f"{self._attr('nome')}: {r['motivo'][:220]}")
+            self._encerrar_grade()
+        else:
+            self._salvar_grade(self.grade)
         vendas = sum(1 for e in execs if e["tipo"] == "venda"); recompras = sum(1 for e in execs if e["tipo"] == "recompra")
         acao = "sell" if vendas > recompras else "buy" if recompras > vendas else "hold"
         resumo = self.grade.resumo(close) if self.grade else {}
-        self._decisao(ts, preco, acao, f"grade: {vendas} vendas, {recompras} recompras | em dólar {resumo.get('fracao_aberta', 0):.0%} | BTC realizado {resumo.get('btc_realizado', 0):.6f}", leitura)
+        self._decisao(ts, preco, acao, f"{r['motivo']} | grade: {vendas} vendas, {recompras} recompras | em dólar "
+                                       f"{resumo.get('fracao_aberta', 0):.0%} | BTC realizado {resumo.get('btc_realizado', 0):.6f}",
+                      leitura)
 
     def _decisao(self, ts, preco, acao, motivo, leitura):
         guia = leitura.get("guia") or {}
@@ -232,4 +261,5 @@ class InverseRangeExecutor:
     def status(self) -> Dict:
         return {"range": [self._attr("range_low"), self._attr("range_high"), self._attr("range_status")],
                 "grade": self.grade.resumo(self.ex.estado.get("preco") or 0) if self.grade else None,
-                "posicao": self.posicao.as_dict() if self.posicao else None}
+                "posicao": self.posicao.as_dict() if self.posicao else None,
+                "rompimento": self.maquina.resumo(self.ex.estado.get("preco") or None)}
