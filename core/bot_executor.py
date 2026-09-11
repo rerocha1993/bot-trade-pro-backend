@@ -103,6 +103,11 @@ class BotExecutor:
         if self.estrategia == "votacao_fatias":
             from core.fatias_executor import FatiasExecutor
             self.fatias = FatiasExecutor(self)
+        # jogo do range do Tradeiros: compra no VAL, vende no VAH, com o contexto de presos (core/range_executor.py)
+        self.range = None
+        if self.estrategia == "range_tradeiros":
+            from core.range_executor import RangeExecutor
+            self.range = RangeExecutor(self)
         self.alavancagem = normalizar_alavancagem(getattr(bot, "alavancagem", 1) or 1)
         self.ordens = OrderExecutor(self.con)
         self.alertas: TelegramAlertService = self.servicos.get("telegram") or TelegramAlertService()
@@ -198,6 +203,10 @@ class BotExecutor:
         if self.fatias is not None:
             # as fatias pendentes são ordens de entrada DESTE robô, guardadas no estado: não são esquecidas
             self.fatias.carregar()
+            return
+        if self.range is not None:
+            # a escada no livro é deste robô e está guardada no estado: não é "entrada esquecida"
+            self.range.carregar()
             return
         self._cancelar_entradas_esquecidas()
 
@@ -872,6 +881,14 @@ class BotExecutor:
                 self.ultimo_candle_ts = int(ultimo[0])
             self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
                                posicao=self.posicao.as_dict() if self.posicao else None, fatias=self.fatias.status())
+            return
+        if self.range is not None:
+            # jogo do range: leitura por bloco de 30 min fechado, escada, tirar o risco e tempo próprios
+            self.range.ciclo(ohlcv, preco, candle_novo)
+            if candle_novo:
+                self.ultimo_candle_ts = int(ultimo[0])
+            self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
+                               posicao=self.posicao.as_dict() if self.posicao else None, range=self.range.status())
             return
         self.manutencao(preco, float(ultimo[4]))
 

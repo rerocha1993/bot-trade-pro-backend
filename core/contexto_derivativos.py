@@ -11,8 +11,12 @@ O valor de cada hora só é usado depois que a hora fecha (sem olhar o futuro).
 """
 from __future__ import annotations
 
+import logging
+import time
 from bisect import bisect_right
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 HORA_MS = 3_600_000
 JANELA_MS = 30 * 24 * HORA_MS
@@ -59,3 +63,40 @@ class ContextoLSR:
             r = self.presos_contra(ts + 30 * 60 * 1000, lado)       # a decisão é no fechamento do bloco de 30 min
             return sem_dado if r is None else r
         return f
+
+
+def baixar_lsr(exchange=None, dias: int = 32, simbolo: str = "BTCUSDT") -> Dict[int, float]:
+    """Long/short de contas da Bybit (1h), dado público da mainnet: {timestamp_ms: compradas / vendidas}."""
+    if exchange is None:
+        import ccxt
+        exchange = ccxt.bybit({"enableRateLimit": True})
+    out: Dict[int, float] = {}
+    fim = int(time.time() * 1000)
+    desde = fim - dias * 24 * HORA_MS
+    while fim > desde:
+        ini = max(desde, fim - 500 * HORA_MS)
+        r = exchange.publicGetV5MarketAccountRatio({"category": "linear", "symbol": simbolo, "period": "1h",
+                                                     "startTime": ini, "endTime": fim, "limit": 500})
+        for x in (r.get("result") or {}).get("list") or []:
+            out[int(x["timestamp"])] = float(x["buyRatio"]) / max(float(x["sellRatio"]), 1e-9)
+        fim = ini - 1
+    return out
+
+
+class LeitorLSR:
+    """Mantém o ContextoLSR ao vivo, relendo a cada `validade_s`. Falha de rede mantém a última leitura."""
+
+    def __init__(self, validade_s: float = 900, baixar=baixar_lsr):
+        self.validade_s = validade_s
+        self.baixar = baixar
+        self._ctx: Optional[ContextoLSR] = None
+        self._lido_em = 0.0
+
+    def contexto(self) -> Optional[ContextoLSR]:
+        if self._ctx is None or time.time() - self._lido_em > self.validade_s:
+            try:
+                self._ctx = ContextoLSR(self.baixar())
+                self._lido_em = time.time()
+            except Exception as e:
+                logger.warning("long/short da Bybit indisponível: %s", e)
+        return self._ctx

@@ -306,25 +306,7 @@ class BacktestRange:
                     continue
                 hoje.append(b)
                 # 1) leitura do bloco (sempre, com ou sem posição): toques na borda, desvio, aceitação
-                ac = 0
-                if ctx is not None:
-                    w = ctx.largura
-                    for lado in (1, -1):
-                        de, ate = ctx.zona(lado, p)
-                        na_zona = (l <= ate) if lado == 1 else (h >= de)
-                        afastado = (c >= ctx.val + p.afastamento_toque * w) if lado == 1 else (c <= ctx.vah - p.afastamento_toque * w)
-                        rodou = (c >= ctx.poc) if lado == 1 else (c <= ctx.poc)   # rotação: foi até o POC
-                        if rodou:
-                            toques[lado], longe[lado] = 0, True
-                        elif na_zona and longe[lado]:
-                            toques[lado] += 1
-                            longe[lado] = False
-                        elif afastado:
-                            longe[lado] = True
-                        if (c < ctx.val) if lado == 1 else (c > ctx.vah):          # fechou fora do valor
-                            desvio[lado] = (l if lado == 1 else h) if desvio[lado] is None else \
-                                (min(desvio[lado], l) if lado == 1 else max(desvio[lado], h))
-                    ac = aceitacao(hoje, ctx, p)
+                ac = self._ler(ctx, b, hoje, toques, longe, desvio)
                 # 2) posição aberta (ou escada esperando execução)
                 if pos is not None:
                     r = passo_posicao(pos, b, self.gestao, p)
@@ -344,12 +326,32 @@ class BacktestRange:
                     if pl is not None and (self.filtro is None or self.filtro(ts, pl.lado)):
                         pos = abrir(pl)
                         armado = (pl, 0)
-                # o desvio vale até o preço fechar de volta dentro do valor (usado ou não)
-                if ctx is not None:
-                    for lado in (1, -1):
-                        if desvio[lado] is not None and ((c > ctx.val) if lado == 1 else (c < ctx.vah)):
-                            desvio[lado] = None
+                _fim_do_bloco(ctx, c, desvio)
         return resumo(trades)
+
+    def _ler(self, ctx: Optional[Contexto], b, hoje, toques, longe, desvio) -> int:
+        """Leitura de um bloco fechado: toques na borda, desvio e aceitação. Devolve a aceitação (+1, −1, 0)."""
+        if ctx is None:
+            return 0
+        p = self.p
+        _, _, h, l, c, _ = b
+        w = ctx.largura
+        for lado in (1, -1):
+            de, ate = ctx.zona(lado, p)
+            na_zona = (l <= ate) if lado == 1 else (h >= de)
+            afastado = (c >= ctx.val + p.afastamento_toque * w) if lado == 1 else (c <= ctx.vah - p.afastamento_toque * w)
+            rodou = (c >= ctx.poc) if lado == 1 else (c <= ctx.poc)   # rotação: foi até o POC
+            if rodou:
+                toques[lado], longe[lado] = 0, True
+            elif na_zona and longe[lado]:
+                toques[lado] += 1
+                longe[lado] = False
+            elif afastado:
+                longe[lado] = True
+            if (c < ctx.val) if lado == 1 else (c > ctx.vah):          # fechou fora do valor
+                desvio[lado] = (l if lado == 1 else h) if desvio[lado] is None else \
+                    (min(desvio[lado], l) if lado == 1 else max(desvio[lado], h))
+        return aceitacao(hoje, ctx, p)
 
     def _toques_anteriores(self, dias_ord, por_dia, k, ctx, lado) -> int:
         """
@@ -405,6 +407,68 @@ class BacktestRange:
                     if pl is not None:
                         return pl
         return None
+
+
+def _fim_do_bloco(ctx: Optional[Contexto], c: float, desvio: Dict[int, Optional[float]]):
+    """O desvio vale até o preço fechar de volta dentro do valor (usado ou não)."""
+    if ctx is None:
+        return
+    for lado in (1, -1):
+        if desvio[lado] is not None and ((c > ctx.val) if lado == 1 else (c < ctx.vah)):
+            desvio[lado] = None
+
+
+# ------------------------------------------------------------------ leitura ao vivo
+def leitura_ao_vivo(blocos: Sequence[Tuple], jogada: str = "borda", p: ParametrosRange = ParametrosRange(),
+                    filtro: Optional[Callable[[int, int], bool]] = None) -> Dict:
+    """
+    O que o backtest faria no ÚLTIMO bloco fechado, com o mesmo código: contexto dos dias anteriores completos,
+    toques e desvios refeitos desde o começo do dia, e o plano de entrada (ou o motivo de não haver).
+    Recalcula tudo a cada bloco, então sobrevive a reinício sem estado.
+    """
+    bt = BacktestRange(blocos, jogada, "tradeiros", p, filtro)
+    por_dia: Dict[int, list] = {}
+    for b in bt.blocos:
+        por_dia.setdefault(b[0] // DIA_MS, []).append(b)
+    dias_ord = sorted(por_dia)
+    if not dias_ord:
+        return {"plano": None, "contexto": None, "motivo": "sem candles"}
+    k = len(dias_ord) - 1
+    olhar = p.max_dias if p.range_adaptativo else p.n_dias
+    ctx = contexto([Perfil(por_dia[x]) for x in dias_ord[max(0, k - olhar):k]], p) if k >= p.min_dias else None
+    if ctx is None:
+        return {"plano": None, "contexto": None, "motivo": "histórico curto para montar o range"}
+    toques = {1: bt._toques_anteriores(dias_ord, por_dia, k, ctx, 1), -1: bt._toques_anteriores(dias_ord, por_dia, k, ctx, -1)}
+    longe = {1: True, -1: True}
+    desvio: Dict[int, Optional[float]] = {1: None, -1: None}
+    hoje: List[Tuple] = []
+    ac, pl = 0, None
+    do_dia = por_dia[dias_ord[k]]
+    for i, b in enumerate(do_dia):
+        hoje.append(b)
+        ac = bt._ler(ctx, b, hoje, toques, longe, desvio)
+        if i == len(do_dia) - 1:
+            pl = bt._sinal(ctx, b, ac, toques, desvio)
+        _fim_do_bloco(ctx, b[4], desvio)
+    ultimo = do_dia[-1]
+    barrado = None
+    if pl is not None and filtro is not None and not filtro(ultimo[0], pl.lado):
+        barrado, pl = pl, None
+    c, w = ultimo[4], ctx.largura
+    if pl is not None:
+        motivo = pl.motivo
+    elif barrado is not None:
+        motivo = (f"{'compra no VAL' if barrado.lado == 1 else 'venda no VAH'} barrada pelo contexto: a multidão "
+                  f"não está presa do outro lado")
+    elif not ctx.valido:
+        motivo = f"sem range: o valor migrou (merge de {ctx.dias} dia(s), mínimo {p.min_dias})"
+    elif ac:
+        motivo = f"aceitação {'acima do VAH' if ac == 1 else 'abaixo do VAL'}: aquela borda não é operada contra"
+    elif ctx.val + 0.45 * w < c < ctx.vah - 0.45 * w:
+        motivo = "no meio do range: não se opera"
+    else:
+        motivo = "perto da borda, sem entrada (toques demais ou risco/retorno abaixo de 2)"
+    return {"plano": pl, "contexto": ctx, "toques": toques, "aceitacao": ac, "barrado": barrado, "motivo": motivo}
 
 
 def resumo(trades: List[Dict]) -> Dict:
