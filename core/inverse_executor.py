@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Dict, Optional
 
 from core.inverse_grade import GradeInversa, Fatia
+from core.inverse_passo import passo_inverse
 from core.inverse_range import propor_range
 from core.inverse_rompimento import MaquinaRompimento, ParametrosRompimento, pesos_inverse
 from models.decisao_bot import DecisaoBot
@@ -207,28 +208,9 @@ class InverseRangeExecutor:
         faixa = (float(self._attr("range_low")), float(self._attr("range_high")))
         if self.grade is None or (self.grade.low, self.grade.high) != faixa:
             self.grade = self._nova_grade(close)
-        banca = self._banca_btc()
-        equity = banca + self.grade.pnl_nao_realizado(close) + self.maquina.pnl_nao_realizado(close)
         guia = leitura.get("guia") or {}
-        alvos = [a for a in (guia.get("alvos") or []) if a] if guia.get("vies") == "bear" else []
-        r = self.maquina.avaliar(ts, hi, lo, close, max(equity, 1e-6), self.grade.low, self.grade.high, alvos,
-                                 fracao_ja_vendida=self.grade.fracao_aberta())
-        execs = list(r["execs"])
-        # o resultado do short de reteste entra no BTC realizado da grade, para o painel mostrar o resultado inteiro
-        self.grade.btc_realizado += sum(e.get("pnl_btc", 0.0) for e in r["execs"] if e["tipo"] == "recompra")
-        if r["fechar_grade"]:
-            for f in self.grade.fatias:
-                if f.contratos > 0:
-                    pnl = f.contratos * (1 / close - 1 / f.preco_venda)
-                    self.grade.btc_realizado += pnl
-                    execs.append({"ts": ts, "tipo": "recompra", "nivel": f.nivel, "preco": close, "contratos": f.contratos, "pnl_btc": pnl})
-                    f.contratos = 0.0
-        else:
-            # só dentro do range a grade vende. Rompendo, esperando o reteste ou vendido no reteste, o range acabou ou
-            # está em xeque — as recompras continuam, porque recompra é lucro. O estado vale DEPOIS do fechamento:
-            # um pavio acima do topo que fecha de volta dentro vende o pavio, que é o que se quer num falso
-            execs += self.grade.processar_candle(ts, hi, lo, close, max(equity, 1e-6), guia or None,
-                                                 vender=self.maquina.no_range)
+        r = passo_inverse(self.grade, self.maquina, ts, hi, lo, close, self._banca_btc(), guia)
+        execs = r["execs"]
         self._executar(execs, close)
         if r["fechar_grade"] or r["concluido"]:
             realizado = self.grade.btc_realizado

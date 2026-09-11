@@ -140,9 +140,8 @@ def dial(par: str = "BTCUSDT"):
 
 
 @router.post("/backtest")
-def backtest(desde: str = "2022-01-01", exigir_corretivo: bool = True, bloquear_ciclo_bull: bool = True, saida_estrutural: bool = False,
-             subfatias: int = 3):
-    """Backtest da grade inversa (sem stop) em BTC, no histórico 4h da Bitstamp."""
+def backtest(desde: str = "2022-01-01", exigir_corretivo: bool = True, bloquear_ciclo_bull: bool = True, subfatias: int = 3):
+    """Backtest da grade inversa em BTC, no histórico 4h da Bitstamp, com a lógica do robô (grade + rompimento)."""
     import os
     from datetime import datetime, timezone
     import pandas as pd
@@ -154,7 +153,7 @@ def backtest(desde: str = "2022-01-01", exigir_corretivo: bool = True, bloquear_
     h4 = df[["timestamp", "open", "high", "low", "close", "volume"]].values.tolist()
     desde_ms = int(datetime.fromisoformat(desde).replace(tzinfo=timezone.utc).timestamp() * 1000)
     bt = BacktestGrade(h4, desde_ms=desde_ms, exigir_corretivo=exigir_corretivo, bloquear_ciclo_bull=bloquear_ciclo_bull,
-                       saida_estrutural=saida_estrutural, subfatias=subfatias)
+                       subfatias=subfatias)
     r = bt.executar()
     r["eventos"] = [e for e in r["eventos"] if e.get("evento")][-50:]
     r["por_ano"] = bt.por_ano().reset_index().to_dict("records")
