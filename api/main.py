@@ -31,6 +31,10 @@ from api.routes import (  # noqa: E402
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("api")
 
+from core.console_servidor import preparar_console_servidor  # noqa: E402
+
+preparar_console_servidor(logger)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

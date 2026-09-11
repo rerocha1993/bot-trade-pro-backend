@@ -11,6 +11,7 @@ echo  Bot Trade Pro
 echo  -------------
 echo  Painel:  http://localhost:8000/painel/
 echo  API:     http://localhost:8000/docs
+echo  Log:     logs\servidor.log
 echo.
 echo  Deixe esta janela aberta. Ctrl+C para parar tudo.
 echo.
