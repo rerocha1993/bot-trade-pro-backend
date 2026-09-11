@@ -22,7 +22,7 @@ Tudo com blocos de 30 min fechados; o contexto de cada dia usa só os dias ANTER
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -273,11 +273,12 @@ def _fechar(pos: Posicao, saida: float, taxa: float, motivo: str) -> Dict:
 # ------------------------------------------------------------------ backtest
 class BacktestRange:
     def __init__(self, blocos: Sequence[Tuple], jogada: str = "borda", gestao: str = "tradeiros",
-                 p: ParametrosRange = ParametrosRange()):
+                 p: ParametrosRange = ParametrosRange(), filtro: Optional[Callable[[int, int], bool]] = None):
         self.blocos = list(blocos)
         self.jogada = jogada
         self.gestao = gestao
         self.p = p
+        self.filtro = filtro          # contexto de order flow: filtro(ts do bloco, lado) -> pode entrar?
 
     def executar(self, inicio_ms: int = 0, fim_ms: Optional[int] = None) -> Dict:
         p = self.p
@@ -340,7 +341,7 @@ class BacktestRange:
                 # 3) sinal, só sem posição
                 if pos is None and ctx is not None:
                     pl = self._sinal(ctx, b, ac, toques, desvio)
-                    if pl is not None:
+                    if pl is not None and (self.filtro is None or self.filtro(ts, pl.lado)):
                         pos = abrir(pl)
                         armado = (pl, 0)
                 # o desvio vale até o preço fechar de volta dentro do valor (usado ou não)
