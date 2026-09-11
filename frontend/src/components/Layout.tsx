@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
-import { NavLink } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import { api } from '../api/client'
 import type { StatusGeral } from '../api/types'
 import { fmt, pctSigned } from '../lib/format'
 
 const NAV = [
-  ['/', 'Dashboard'], ['/trader', 'Mesa do trader'], ['/mercado', 'Mercado'], ['/pontos', 'Pontos institucionais'],
-  ['/sentimento', 'Sentimento'], ['/historico', 'Histórico'], ['/bots/novo', 'Novo robô'],
+  ['/', 'Visão geral'], ['/trader', 'Mesa do trader'], ['/mercado', 'Mercado'], ['/pontos', 'Pontos'],
+  ['/sentimento', 'Sentimento'], ['/historico', 'Histórico'], ['/bots/novo', 'Configurar'],
 ] as const
 
 interface DiagBybit { modo: string; publico?: string; privado?: string; saldo_usdt?: unknown; [k: string]: unknown }
@@ -29,7 +29,17 @@ export function usePreco(par = 'BTCUSDT') {
   })
 }
 
-export function Sidebar() {
+function useRelogio() {
+  const [hora, setHora] = useState('')
+  useEffect(() => {
+    const t = () => { const d = new Date(), p = (n: number) => String(n).padStart(2, '0'); setHora(`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`) }
+    t(); const id = setInterval(t, 1000); return () => clearInterval(id)
+  }, [])
+  return hora
+}
+
+/** Saúde das conexões: vira o ponto do topo (detalhe ao passar o mouse) e a faixa de alerta quando algo falha. */
+function useSaude() {
   const status = useStatusGeral()
   const bybit = useQuery({ queryKey: ['bybit', 'simulador'], queryFn: () => api.get<DiagBybit>('/status/bybit', { modo: 'simulador' }), refetchInterval: 60_000, retry: 0 })
   // as chaves são do Demo Trading da conta oficial, não do testnet (registro separado, sem o KYC dele)
@@ -39,58 +49,88 @@ export function Sidebar() {
   const okExch = totExch !== undefined ? totExch - Object.keys(md?.falhas ?? {}).length : undefined
   const dados = bybit.isError ? 'falha' : bybit.data ? (bybit.data.publico === 'ok' ? 'ok' : 'falha') : '…'
   const contaTxt = conta.isError ? 'falha' : conta.data ? (conta.data.privado === 'ok' ? 'ok' : String(conta.data.privado || '').startsWith('erro') ? 'chave inválida' : 'sem chave') : '…'
-  const cor = (v: string) => (v === 'ok' ? 'var(--green)' : v === '…' || v === '—' ? 'var(--muted)' : v === 'sem chave' ? 'var(--muted)' : 'var(--amber)')
+  const cesta = okExch !== undefined && totExch ? `${okExch}/${totExch}` : '—'
+  const linhas: [string, string][] = [['Bybit dados', dados], ['Bybit conta (demo)', contaTxt], ['Cesta de exchanges', cesta],
+    ['Telegram', status.data ? (status.data.servicos.telegram ? 'ok' : 'off') : '…']]
+  const problemas: string[] = []
+  if (dados === 'falha') problemas.push('dados públicos da Bybit indisponíveis')
+  if (contaTxt === 'chave inválida' || contaTxt === 'falha') problemas.push('chave da Bybit (demo) inválida · ordens suspensas')
+  if (okExch !== undefined && totExch && okExch < totExch) problemas.push(`cesta ${cesta} exchanges`)
+  if (status.isError) problemas.push('API do robô sem resposta')
+  return { linhas, problemas }
+}
+
+const corSaude = (v: string) => (v === 'ok' ? 'var(--acc)' : v === '…' || v === '—' || v === 'sem chave' || v === 'off' ? 'var(--muted)' : 'var(--amber)')
+
+export function TopBar() {
+  const hora = useRelogio()
+  const preco = usePreco('BTCUSDT')
+  const { linhas, problemas } = useSaude()
+  const fuso = -new Date().getTimezoneOffset() / 60
+  const corDot = problemas.length ? 'var(--amber)' : 'var(--acc)'
   return (
-    <aside className="sidebar">
-      <div className="brand">
-        <span className="brand-arc" />
-        <span>
-          <span className="brand-name">Bot Trade</span>
-          <span className="brand-sub">PRO</span>
-        </span>
-      </div>
-      <nav className="nav">
-        {NAV.map(([to, label]) => (
-          <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => (isActive ? 'on' : '')}>{label}</NavLink>
-        ))}
-      </nav>
-      <div className="saude">
-        <span className="eyebrow" style={{ fontSize: 10, letterSpacing: '0.16em' }}>Saúde</span>
-        {[['Bybit dados', dados], ['Bybit conta (demo)', contaTxt], ['Cesta exchanges', okExch !== undefined && totExch ? `${okExch}/${totExch}` : '—'],
-          ['Telegram', status.data ? (status.data.servicos.telegram ? 'ok' : 'off') : '…']].map(([l, v]) => (
-          <div className="saude-row" key={l}>
-            <span className="dot" style={{ background: cor(v) }} />
-            <span className="lab">{l}</span>
-            <span className="val" style={{ color: cor(v) }}>{v}</span>
+    <>
+      <header className="topbar">
+        <Link to="/" className="logo">
+          <span className="logo-txt">Bot<span>Trade</span></span>
+          <span className="logo-ring" />
+        </Link>
+        <nav className="navpill">
+          {NAV.map(([to, label]) => (
+            <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => (isActive ? 'on' : '')}>{label}</NavLink>
+          ))}
+        </nav>
+        <div className="topbar-right">
+          <div className="topbar-preco">
+            <div className="p">BTCUSDT <span style={{ color: (preco.data?.var24h ?? 0) >= 0 ? 'var(--acc)' : 'var(--red)' }}>{preco.data ? fmt(preco.data.preco) : '…'}</span></div>
+            <div className="h">{hora} · UTC{fuso >= 0 ? '+' : '−'}{Math.abs(fuso)}</div>
           </div>
-        ))}
-      </div>
-    </aside>
+          <div className="saude">
+            <span className="saude-dot" style={{ background: corDot, boxShadow: `0 0 12px ${corDot}` }} aria-label="saúde das conexões" />
+            <div className="saude-pop">
+              <span className="eyebrow">Saúde das conexões</span>
+              {linhas.map(([l, v]) => (
+                <div className="saude-row" key={l}>
+                  <span className="dot" style={{ width: 6, height: 6, flex: '0 0 6px', background: corSaude(v) }} />
+                  <span className="lab">{l}</span>
+                  <span className="val" style={{ color: corSaude(v) }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </header>
+      {problemas.length > 0 && (
+        <div className="alerta-wrap"><div className="alerta-pill">{problemas.join(' · ')}</div></div>
+      )}
+    </>
   )
 }
 
-export function Header({ titulo, subtitulo, actions, par = 'BTCUSDT' }: { titulo: ReactNode; subtitulo?: ReactNode; actions?: ReactNode; par?: string }) {
-  const [hora, setHora] = useState('')
-  useEffect(() => {
-    const t = () => { const d = new Date(), p = (n: number) => String(n).padStart(2, '0'); setHora(`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`) }
-    t(); const id = setInterval(t, 1000); return () => clearInterval(id)
-  }, [])
-  const preco = usePreco(par)
+/**
+ * Topo da página: sobrelinha (contexto curto, em maiúsculas), título grande e ações.
+ * `subtitulo` vira a linha de apoio embaixo do título; a sobrelinha é `eyebrow` ou o par.
+ */
+export function Header({ titulo, subtitulo, actions, par, eyebrow }: {
+  titulo: ReactNode; subtitulo?: ReactNode; actions?: ReactNode; par?: string; eyebrow?: ReactNode
+}) {
+  const preco = usePreco(par || 'BTCUSDT')
+  const outroPar = par && par !== 'BTCUSDT'
   return (
-    <header className="header">
+    <div className="pagehead">
       <div style={{ minWidth: 0 }}>
+        <div className="eb">{eyebrow ?? par ?? 'BTCUSDT'}</div>
         <h1>{titulo}</h1>
-        {subtitulo && <p>{subtitulo}</p>}
+        {subtitulo && <p className="sub">{subtitulo}</p>}
       </div>
-      <div className="header-right">
+      <div className="acoes">
+        {outroPar && preco.data && (
+          <span className="mono" style={{ fontSize: 13 }}>{par} <span style={{ color: preco.data.var24h >= 0 ? 'var(--acc)' : 'var(--red)' }}>{fmt(preco.data.preco)}</span>
+            <span className="muted" style={{ fontSize: 11 }}> {pctSigned(preco.data.var24h)}</span></span>
+        )}
         {actions}
-        <div className="mono" style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 13 }}>{par} · <span style={{ color: (preco.data?.var24h ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>{preco.data ? fmt(preco.data.preco) : '…'}</span>
-            {preco.data && <span className="muted" style={{ fontSize: 11 }}> {pctSigned(preco.data.var24h)}</span>}</div>
-          <div className="muted" style={{ fontSize: 11 }}>{hora}</div>
-        </div>
       </div>
-    </header>
+    </div>
   )
 }
 

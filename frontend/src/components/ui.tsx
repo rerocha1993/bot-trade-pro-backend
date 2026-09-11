@@ -18,17 +18,19 @@ export function Card({ title, sub, right, children, style, pad = true }: {
   )
 }
 
-export function KPI({ v, l, color }: { v: ReactNode; l: ReactNode; color?: string }) {
+export function KPI({ v, l, color, sub }: { v: ReactNode; l: ReactNode; color?: string; sub?: ReactNode }) {
   return (
     <div className="kpi">
-      <div className="v" style={{ color: color || 'var(--text)' }}>{v}</div>
       <div className="l">{l}</div>
+      <div className="v" style={{ color: color || 'var(--text)' }}>{v}</div>
+      {sub && <div className="s">{sub}</div>}
     </div>
   )
 }
 
 export function Tag({ children, color }: { children: ReactNode; color?: string }) {
-  const st = color ? { borderColor: color + '55', background: color + '1a', color } : undefined
+  // cor em var(--x) não aceita sufixo de alfa: a borda usa color-mix
+  const st = color ? { borderColor: `color-mix(in srgb, ${color} 40%, transparent)`, color } : undefined
   return <span className="tag" style={st}>{children}</span>
 }
 
@@ -84,14 +86,15 @@ export function ProbBar({ bull, bear }: { bull: number; bear: number }) {
   const und = Math.max(0, 1 - bull - bear)
   return (
     <>
-      <div className="probbar" style={{ margin: '12px 0 6px' }}>
-        <span style={{ width: `${bull * 100}%`, background: 'var(--green)' }} />
-        <span style={{ width: `${bear * 100}%`, background: 'var(--red)' }} />
-        <span style={{ width: `${und * 100}%`, background: 'var(--dim)' }} />
+      <div className="probbar" style={{ margin: '14px 0 8px' }}>
+        <span style={{ width: `${bull * 100}%`, background: 'var(--acc)' }} />
+        <span style={{ width: `${bear * 100}%`, background: 'var(--indigo)' }} />
+        <span style={{ width: `${und * 100}%`, background: '#2a3242' }} />
       </div>
-      <div className="mono muted" style={{ fontSize: 11 }}>
-        <span className="green">Bull {Math.round(bull * 100)}%</span> · <span className="red">Bear {Math.round(bear * 100)}%</span>
-        {und > 0.005 && <> · Indefinido {Math.round(und * 100)}%</>}
+      <div className="muted" style={{ fontSize: 12, display: 'flex', gap: 14 }}>
+        <span><span className="acc">{Math.round(bull * 100)}%</span> alta</span>
+        <span><span className="red">{Math.round(bear * 100)}%</span> baixa</span>
+        {und > 0.005 && <span>{Math.round(und * 100)}% indefinido</span>}
       </div>
     </>
   )

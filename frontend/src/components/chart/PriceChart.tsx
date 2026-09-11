@@ -83,7 +83,7 @@ class Overlay implements ISeriesPrimitive<Time> {
           const mid = (r.lo + r.hi) / 2
           const isPoc = p.poc !== undefined && Math.abs(mid - p.poc) <= (r.hi - r.lo)
           const inVa = p.vah !== undefined && p.val !== undefined && mid >= p.val && mid <= p.vah
-          ctx.fillStyle = isPoc ? (p.color || '#22d3ee') + 'cc' : inVa ? 'rgba(122,141,163,0.45)' : 'rgba(90,105,124,0.22)'
+          ctx.fillStyle = isPoc ? (p.color || '#7fd8de') + '99' : inVa ? 'rgba(232,236,242,0.14)' : 'rgba(232,236,242,0.06)'
           ctx.fillRect(W - w, Math.min(y1, y2), w, Math.max(Math.abs(y2 - y1) - 1, 1))
         }
       }
@@ -94,7 +94,7 @@ class Overlay implements ISeriesPrimitive<Time> {
         if (x === null || y === null) continue
         const w = ctx.measureText(l.text).width + 6
         const yy = y - 12
-        ctx.fillStyle = 'rgba(11,15,20,0.85)'
+        ctx.fillStyle = 'rgba(5,7,12,0.85)'
         ctx.fillRect(x - w / 2, yy - 8, w, 16)
         ctx.fillStyle = l.color
         ctx.fillText(l.text, x, yy)
@@ -141,16 +141,16 @@ export default function PriceChart({ candles, paths = [], labels = [], levels = 
     if (!el.current) return
     const c = createChart(el.current, {
       height,
-      layout: { background: { type: ColorType.Solid, color: '#111820' }, textColor: '#8a98a8', fontFamily: "'IBM Plex Mono', monospace", fontSize: 10 },
-      grid: { vertLines: { color: '#151e28' }, horzLines: { color: '#151e28' } },
-      rightPriceScale: { borderColor: '#233040', scaleMargins: { top: 0.08, bottom: 0.08 } },
-      timeScale: { borderColor: '#233040', timeVisible: true, secondsVisible: false, rightOffset: 6 },
-      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#35465a', labelBackgroundColor: '#233040' }, horzLine: { color: '#35465a', labelBackgroundColor: '#233040' } },
+      layout: { background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' }, textColor: '#4d5766', fontFamily: "'DM Mono', monospace", fontSize: 11 },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)', scaleMargins: { top: 0.08, bottom: 0.08 } },
+      timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: true, secondsVisible: false, rightOffset: 6 },
+      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(232,236,242,0.25)', labelBackgroundColor: '#1a2130' }, horzLine: { color: 'rgba(232,236,242,0.25)', labelBackgroundColor: '#1a2130' } },
       handleScroll: true, handleScale: true,
     })
     const s = c.addCandlestickSeries({
-      upColor: '#34d399', downColor: '#f87171', borderVisible: false, wickUpColor: '#34d399', wickDownColor: '#f87171',
-      priceLineColor: '#e6edf3', priceLineStyle: LineStyle.Dotted,
+      upColor: '#7fd8de', downColor: '#4b63d6', borderVisible: false, wickUpColor: 'rgba(127,216,222,0.7)', wickDownColor: 'rgba(75,99,214,0.8)',
+      priceLineColor: '#e8ecf2', priceLineStyle: LineStyle.Dotted,
     })
     const ov = new Overlay()
     s.attachPrimitive(ov)
@@ -206,7 +206,7 @@ export default function PriceChart({ candles, paths = [], labels = [], levels = 
     const ms: SeriesMarker<Time>[] = ordenar(markers).map((m) => ({
       time: m.time as UTCTimestamp,
       position: m.side === 'buy' ? 'belowBar' : 'aboveBar',
-      color: m.side === 'buy' ? '#34d399' : m.side === 'sell' ? '#f87171' : m.side === 'exit' ? '#fbbf24' : '#8a98a8',
+      color: m.side === 'buy' ? '#7fd8de' : m.side === 'sell' ? '#8fa1ee' : m.side === 'exit' ? '#e0b45a' : '#6b7685',
       shape: m.side === 'buy' ? 'arrowUp' : m.side === 'sell' ? 'arrowDown' : 'circle',
       text: m.text,
     }))

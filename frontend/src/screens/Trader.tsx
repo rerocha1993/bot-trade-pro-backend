@@ -42,7 +42,7 @@ function SupercicloCard({ sc, direcao }: { sc: Superciclo; direcao: string }) {
             <KV k="Retração log" v={`${fmt(sc.retracao_log_minimo, 2)} (mín) · ${fmt(sc.retracao_log_preco, 2)} (agora)`} src="zona 0,382 – 0,5" />
             <KV k="Recuperação" v={fmt(sc.recuperacao_log, 2)} src="≥ 0,382 = correção terminada" />
             {crit && <div style={{ display: 'flex', gap: 5, marginTop: 8, flexWrap: 'wrap' }}>
-              {Object.entries(crit).map(([k, v]) => <span key={k} className="tag mono" style={{ textTransform: 'none', letterSpacing: 0, color: v ? 'var(--green)' : 'var(--muted)', borderColor: v ? 'rgba(52,211,153,0.5)' : undefined }}>{k} {v ? '✓' : '✗'}</span>)}
+              {Object.entries(crit).map(([k, v]) => <span key={k} className="tag mono" style={{ textTransform: 'none', letterSpacing: 0, color: v ? 'var(--green)' : 'var(--muted)', borderColor: v ? 'rgba(127,216,222,0.5)' : undefined }}>{k} {v ? '✓' : '✗'}</span>)}
             </div>}
           </>
         )}
@@ -125,7 +125,7 @@ function GraficoMestre({ par, grau, g }: { par: string; grau: Grau; g: GrauMestr
   const ell = useMemo(() => overlaysElliott(g, ultimo?.close, ultimo?.time), [g, ultimo?.close, ultimo?.time])
   const labels = useMemo(() => {
     const l = [...ell.labels]
-    for (const p of g?.pivots ?? []) if (p.confirmado) l.push({ time: Math.floor(p.ts / 1000), price: p.preco, text: `${p.tipo === 'H' ? '▽' : '△'} ${preco(p.preco)}`, color: p.tipo === 'H' ? '#f87171' : '#34d399' })
+    for (const p of g?.pivots ?? []) if (p.confirmado) l.push({ time: Math.floor(p.ts / 1000), price: p.preco, text: `${p.tipo === 'H' ? '▽' : '△'} ${preco(p.preco)}`, color: p.tipo === 'H' ? '#8fa1ee' : '#7fd8de' })
     return l
   }, [ell.labels, g?.pivots])
   if (q.isPending) return <Loading />

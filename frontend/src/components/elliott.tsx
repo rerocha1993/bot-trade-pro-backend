@@ -45,7 +45,7 @@ export function CenarioCard({ c, prim, compact }: { c: Cenario; prim: boolean; c
           </div>
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
             <span className="tag mono" style={{ textTransform: 'none', letterSpacing: 0 }}>{c.fase}</span>
-            <span className="tag mono" style={{ textTransform: 'none', letterSpacing: 0, borderColor: prim ? 'rgba(34,211,238,0.5)' : undefined, color: prim ? 'var(--acc)' : undefined }}>
+            <span className="tag mono" style={{ textTransform: 'none', letterSpacing: 0, borderColor: prim ? 'rgba(127,216,222,0.5)' : undefined, color: prim ? 'var(--acc)' : undefined }}>
               {prim ? 'primário' : c.completo ? 'completo' : 'em andamento'}
             </span>
             {c.prob_sucesso !== undefined && c.prob_sucesso !== null && (

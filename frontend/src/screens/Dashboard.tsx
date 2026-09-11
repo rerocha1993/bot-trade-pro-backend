@@ -4,7 +4,7 @@ import { ApiError } from '../api/client'
 import { useBots, useControleBot, useDetalhes, useFechadas, useLogs } from '../api/hooks'
 import type { LogExecucao, Posicao, StatusBot } from '../api/types'
 import { Header, Page, usePreco } from '../components/Layout'
-import { Btn, Card, Empty, Err, KPI, Loading, ModoTag, Tag } from '../components/ui'
+import { Btn, Card, Empty, Err, KPI, Loading, ModoTag } from '../components/ui'
 import { corAcao, corPnl, fmt, fmtSigned, hora, pct, preco, rotuloAcao } from '../lib/format'
 
 function pnlAberto(p: Posicao | null, precoAtual: number | undefined): number | null {
@@ -16,6 +16,25 @@ function drawdown(pnls: number[]): number {
   let acc = 0, pico = 0, dd = 0
   for (const p of pnls) { acc += p; pico = Math.max(pico, acc); dd = Math.max(dd, pico - acc) }
   return dd
+}
+
+/** Pontos da curva do resultado acumulado de um robô (posições fechadas), já na escala 0–100 do SVG. */
+function curva(pnls: number[]): string | null {
+  if (pnls.length < 2) return null
+  const acc: number[] = [0]
+  for (const p of pnls) acc.push(acc[acc.length - 1] + p)
+  const mn = Math.min(...acc), mx = Math.max(...acc), faixa = mx - mn || 1
+  return acc.map((v, i) => `${((i / (acc.length - 1)) * 100).toFixed(1)},${(92 - ((v - mn) / faixa) * 84).toFixed(1)}`).join(' ')
+}
+
+function Stat({ rotulo, valor, cor, linha, mono }: { rotulo: string; valor: string; cor: string; linha: string; mono?: boolean }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div className="muted" style={{ fontSize: 11 }}>{rotulo}</div>
+      <div className={mono ? 'mono' : undefined} style={{ fontSize: 15, fontWeight: 500, color: cor }}>{valor}</div>
+      <div className="mono" style={{ fontSize: 12, color: 'var(--muted-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={linha}>{linha}</div>
+    </div>
+  )
 }
 
 export default function Dashboard() {
@@ -33,16 +52,24 @@ export default function Dashboard() {
     const l = (fechadas.data ?? []).flatMap((r) => r.posicoes).filter((p) => p.status === 'fechada' && p.pnl !== null)
     return l.sort((a, b) => (a.fechado_em || '').localeCompare(b.fechado_em || ''))
   }, [fechadas.data])
+  const curvaPorBot = useMemo(() => {
+    const m = new Map<number, number[]>()
+    for (const p of todasFechadas) m.set(p.bot_id, [...(m.get(p.bot_id) ?? []), p.pnl || 0])
+    return m
+  }, [todasFechadas])
   const hoje = new Date().toISOString().slice(0, 10)
   const kpi = useMemo(() => {
     const pnlDia = todasFechadas.filter((p) => (p.fechado_em || '').startsWith(hoje)).reduce((a, p) => a + (p.pnl || 0), 0)
     const pnlTotal = todasFechadas.reduce((a, p) => a + (p.pnl || 0), 0)
-    const ganhos = todasFechadas.filter((p) => (p.pnl || 0) > 0).length
+    const ganhos = todasFechadas.filter((p) => (p.pnl || 0) > 0)
+    const perdas = todasFechadas.filter((p) => (p.pnl || 0) <= 0)
+    const somaPerdas = Math.abs(perdas.reduce((a, p) => a + (p.pnl || 0), 0))
+    const fl = somaPerdas ? ganhos.reduce((a, p) => a + (p.pnl || 0), 0) / somaPerdas : null
     const tradesHoje = todasFechadas.filter((p) => (p.aberto_em || '').startsWith(hoje)).length
     const limite = (detalhes.data ?? []).reduce((a, d) => a + (d.bot.max_trades_dia || 0), 0)
     const banca = (detalhes.data ?? []).reduce((a, d) => a + Number(d.bot.banca || 0), 0)
     const dd = drawdown(todasFechadas.map((p) => p.pnl || 0))
-    return { pnlDia, pnlTotal, taxa: todasFechadas.length ? ganhos / todasFechadas.length : null, n: todasFechadas.length, tradesHoje, limite, dd, ddPct: banca ? dd / banca : null }
+    return { pnlDia, pnlTotal, taxa: todasFechadas.length ? ganhos.length / todasFechadas.length : null, fl, n: todasFechadas.length, tradesHoje, limite, dd, ddPct: banca ? dd / banca : null }
   }, [todasFechadas, detalhes.data, hoje])
   const rodando = (bots.data ?? []).filter((b) => b.rodando).length
 
@@ -66,74 +93,71 @@ export default function Dashboard() {
 
   return (
     <>
-      <Header titulo="Dashboard" subtitulo="visão geral dos robôs, risco e resultado" />
+      <Header eyebrow="Visão geral" titulo="Robôs em operação" actions={<Link to="/bots/novo" className="btn primary">Novo robô</Link>} />
       <Page>
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' }}>
-          <KPI v={fmtSigned(kpi.pnlDia)} l="P&L do dia (USDT)" color={corPnl(kpi.pnlDia)} />
-          <KPI v={fmtSigned(kpi.pnlTotal)} l="P&L acumulado (USDT)" color={corPnl(kpi.pnlTotal)} />
-          <KPI v={`${kpi.tradesHoje} / ${kpi.limite || '—'}`} l="trades hoje · limite diário" />
-          <KPI v={kpi.taxa === null ? '—' : pct(kpi.taxa, 1)} l={`taxa de acerto (${kpi.n} trades)`} />
-          <KPI v={kpi.ddPct === null ? fmt(-kpi.dd, 0) : `−${pct(kpi.ddPct, 1)}`} l="drawdown máximo" color="var(--red)" />
-          <KPI v={`${rodando} / ${bots.data?.length ?? 0}`} l="robôs rodando" color="var(--acc)" />
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+          <KPI l="P&L do dia" v={fmtSigned(kpi.pnlDia)} color={corPnl(kpi.pnlDia)} sub={`USDT · ${kpi.tradesHoje} de ${kpi.limite || '—'} trades`} />
+          <KPI l="P&L acumulado" v={fmtSigned(kpi.pnlTotal)} color={kpi.pnlTotal < 0 ? 'var(--red)' : 'var(--text)'} sub={`USDT · ${kpi.n} trades`} />
+          <KPI l="Taxa de acerto" v={kpi.taxa === null ? '—' : pct(kpi.taxa, 1)} sub={kpi.fl === null ? 'sem perdas registradas' : `fator de lucro ${fmt(kpi.fl, 2)}`} />
+          <KPI l="Drawdown máximo" v={kpi.ddPct === null ? fmt(-kpi.dd, 0) : `−${pct(kpi.ddPct, 1)}`} color="var(--red)" sub={`${rodando} de ${bots.data?.length ?? 0} robôs rodando`} />
         </div>
 
         {bots.isPending && <Loading />}
         {bots.isError && <Err e={bots.error} />}
         {bots.data && !bots.data.length && <Card><Empty>Nenhum robô cadastrado. <Link to="/bots/novo">Criar o primeiro</Link>.</Empty></Card>}
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
           {(bots.data ?? []).map((b) => {
             const d = porId.get(b.id)
             const pos = d?.posicao ?? null
             const dec = d?.ultima_decisao ?? null
             const aberto = pnlAberto(pos, precoQ.data?.preco)
             const ligado = b.rodando || b.ativo
+            const pnls = curvaPorBot.get(b.id) ?? []
+            const pts = curva(pnls)
+            const resultado = pnls.reduce((a, p) => a + p, 0)
+            const pendente = d?.estado?.ordem_pendente as { preco?: number } | undefined
+            const protecao = pos
+              ? `SL ${preco(pos.sl)} · TP ${preco(pos.tp)}${pos.trailing_ativo ? ' · trailing' : ''}`
+              : pendente ? `ordem limitada pendente a ${preco(Number(pendente.preco))}`
+                : b.rodando ? `ciclo ${d?.estado?.ciclos ?? 0} · ${d?.estado?.ultimo_ciclo ? hora(d.estado.ultimo_ciclo) : '—'}`
+                  : `parado${b.ultima_execucao ? ' · ' + hora(b.ultima_execucao, true) : ''}`
             return (
-              <div className="card" key={b.id} style={{ padding: '13px 14px', opacity: ligado ? 1 : 0.6 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <span className={'dot' + (b.rodando ? ' pulse' : '')} style={{ width: 8, height: 8, marginTop: 5, background: b.rodando ? 'var(--green)' : 'var(--dim)' }} />
-                  <div style={{ minWidth: 0, flex: '1 1 auto' }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{b.nome}</div>
-                    <div className="mono muted" style={{ fontSize: 11, marginTop: 2 }}>{b.estilo_trade} · {b.timeframe} · {b.ativo_nome}</div>
+              <div className="card" key={b.id} style={{ padding: 24, opacity: ligado ? 1 : 0.55 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span className={'dot' + (b.rodando ? ' pulse' : '')} style={{ width: 8, height: 8, flex: '0 0 8px', background: b.rodando ? 'var(--acc)' : 'var(--dim)' }} />
+                  <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                    <div style={{ fontSize: 17, fontWeight: 500 }}>{b.nome}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>{b.estilo_trade} · {b.timeframe} · {b.confluencia_tipo} · {b.ativo_nome}</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    <Tag>{b.confluencia_tipo}</Tag>
-                    <ModoTag modo={b.modo_execucao} />
-                  </div>
+                  <ModoTag modo={b.modo_execucao} />
                 </div>
-                <div className="mono" style={{ marginTop: 12, padding: '10px 12px', border: '1px solid var(--border-2)', background: 'var(--panel-2)' }}>
-                  {pos ? (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                        <span style={{ fontSize: 12.5, color: corAcao(pos.direcao) }}>{rotuloAcao(pos.direcao)}</span>
-                        <span className="muted" style={{ fontSize: 11.5 }}>entrada {preco(pos.preco_entrada)} · {fmt(pos.quantidade, 4)}</span>
-                        <span style={{ marginLeft: 'auto', fontSize: 13, color: corPnl(aberto) }}>{aberto === null ? '—' : fmtSigned(aberto)}</span>
-                      </div>
-                      <div className="muted" style={{ fontSize: 11.5, marginTop: 5 }}>SL {preco(pos.sl)} · TP {preco(pos.tp)}{pos.trailing_ativo ? ' · trailing' : ''}</div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                        <span className="muted" style={{ fontSize: 12.5 }}>SEM POSIÇÃO</span>
-                        <span style={{ marginLeft: 'auto', fontSize: 13, color: corPnl(b.pnl_dia) }}>{b.pnl_dia === null ? '' : `dia ${fmtSigned(b.pnl_dia)}`}</span>
-                      </div>
-                      <div className="muted" style={{ fontSize: 11.5, marginTop: 5 }}>
-                        {d?.estado?.ordem_pendente ? `ordem limitada pendente a ${preco(Number((d.estado.ordem_pendente as { preco?: number }).preco))}` : b.rodando ? `ciclo ${d?.estado?.ciclos ?? 0} · ${d?.estado?.ultimo_ciclo ? hora(d.estado.ultimo_ciclo) : '—'}` : `parado${b.ultima_execucao ? ' · ' + hora(b.ultima_execucao, true) : ''}`}
-                      </div>
-                    </>
-                  )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginTop: 22 }}>
+                  <Stat rotulo="Posição" valor={pos ? rotuloAcao(pos.direcao) : 'Sem posição'} cor={pos ? corAcao(pos.direcao) : 'var(--muted)'}
+                    linha={pos ? `entrada ${preco(pos.preco_entrada)} · ${fmt(pos.quantidade, 4)}` : '—'} />
+                  <Stat mono rotulo={pos ? 'P&L aberto' : 'P&L do dia'} valor={pos ? (aberto === null ? '—' : fmtSigned(aberto)) : fmtSigned(b.pnl_dia ?? 0)}
+                    cor={corPnl(pos ? aberto : b.pnl_dia ?? 0)} linha={`USDT · total ${fmtSigned(resultado)}`} />
+                  <Stat rotulo="Última decisão" valor={dec ? rotuloAcao(dec.acao) : '—'} cor={corAcao(dec?.acao)}
+                    linha={dec ? `${dec.fase_onda ?? '—'} · ${dec.probabilidade !== null ? pct(dec.probabilidade) : '—'}` : 'sem decisões'} />
                 </div>
-                <div className="muted" style={{ marginTop: 10, fontSize: 11.5 }}>
-                  Última decisão · <span className="mono" style={{ color: corAcao(dec?.acao) }}>{dec ? rotuloAcao(dec.acao) : '—'}</span>
-                  {dec && <span className="mono"> {dec.fase_onda} · {dec.probabilidade !== null ? pct(dec.probabilidade) : ''} · {hora(dec.criado_em)}</span>}
+
+                <div className="spark" title={pnls.length ? `resultado acumulado de ${pnls.length} trades fechados` : 'sem trades fechados'}>
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                    {pts
+                      ? <polyline points={pts} fill="none" stroke={resultado < 0 ? 'var(--indigo)' : 'var(--acc)'} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                      : <line x1={0} y1={50} x2={100} y2={50} stroke="var(--track)" strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="4 4" />}
+                  </svg>
                 </div>
+
                 {erroCtl?.id === b.id && (
-                  <div className="err" style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div className="err" style={{ marginTop: 14, display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span style={{ flex: 1 }}>{erroCtl.msg}</span>
                     {erroCtl.gate && <Btn small kind="danger" onClick={() => acionar(d, b.id, false, true)}>Forçar</Btn>}
                   </div>
                 )}
-                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-                  <Link to={`/bots/${b.id}`} className="btn primary" style={{ flex: '1 1 auto', textAlign: 'center' }}>Detalhes</Link>
+                <div style={{ display: 'flex', gap: 10, marginTop: 18, alignItems: 'center' }}>
+                  <span className="muted" style={{ fontSize: 12, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{protecao}</span>
+                  <Link to={`/bots/${b.id}`} className="btn primary" style={{ padding: '8px 16px', fontSize: 12 }}>Abrir →</Link>
                   <Btn kind={ligado ? 'ghost' : 'ok'} onClick={() => acionar(d, b.id, ligado)} disabled={ctl.ativar.isPending || ctl.parar.isPending}>{ligado ? 'Parar' : 'Ativar'}</Btn>
                 </div>
               </div>
@@ -141,20 +165,24 @@ export default function Dashboard() {
           })}
         </div>
 
-        <Card title="Alertas recentes" sub="últimos eventos dos robôs" pad={false}>
-          {!alertas.length && <Empty>sem eventos</Empty>}
-          {alertas.map((a) => {
-            const cor = a.erro ? 'var(--red)' : a.acao === 'buy' || a.tipo_operacao === 'entrada' ? 'var(--green)' : a.acao === 'sell' ? 'var(--red)' : a.acao === 'hold' ? 'var(--amber)' : 'var(--text-2)'
-            return (
-              <div key={a.id} style={{ display: 'flex', gap: 14, padding: '8px 14px', borderBottom: '1px solid var(--border-3)', alignItems: 'baseline' }}>
-                <span className="mono muted" style={{ width: 92, flex: '0 0 92px' }}>{hora(a.data_execucao, true)}</span>
-                <span style={{ width: 130, flex: '0 0 130px' }}>{a.nome}</span>
-                <span style={{ color: cor, fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {a.erro ? `erro: ${a.erro}` : `${rotuloAcao(a.acao)}${a.preco ? ' a ' + preco(a.preco) : ''}${a.motivo ? ' · ' + a.motivo : ''}${a.resultado ? ' · P&L ' + fmtSigned(a.resultado) : ''}`}
-                </span>
-              </div>
-            )
-          })}
+        <Card title="Alertas" sub="últimos eventos dos robôs" pad={false}>
+          <div style={{ padding: '0 24px 10px' }}>
+            {!alertas.length && <Empty>sem eventos</Empty>}
+            {alertas.map((a) => {
+              const cor = a.erro ? 'var(--red)' : a.acao === 'buy' || a.tipo_operacao === 'entrada' ? 'var(--acc)' : a.acao === 'sell' ? 'var(--red)' : a.acao === 'hold' ? 'var(--amber)' : 'var(--muted-2)'
+              return (
+                <div key={a.id} style={{ display: 'flex', gap: 18, padding: '11px 0', borderTop: '1px solid var(--border-3)', alignItems: 'center' }}>
+                  <span className="mono muted" style={{ fontSize: 12, width: 88, flex: '0 0 88px' }}>{hora(a.data_execucao, true)}</span>
+                  <span className="dot" style={{ width: 6, height: 6, flex: '0 0 6px', background: cor }} />
+                  <span style={{ width: 140, flex: '0 0 140px' }}>{a.nome}</span>
+                  <span style={{ color: a.erro ? 'var(--red)' : 'var(--muted-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={a.motivo ?? a.erro ?? ''}>
+                    {a.erro ? `erro: ${a.erro}` : `${rotuloAcao(a.acao)}${a.preco ? ' a ' + preco(a.preco) : ''}${a.motivo ? ' · ' + a.motivo : ''}${a.resultado ? ' · P&L ' + fmtSigned(a.resultado) : ''}`}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
         </Card>
       </Page>
     </>

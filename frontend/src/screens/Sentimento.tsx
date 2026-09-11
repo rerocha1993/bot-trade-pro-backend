@@ -65,7 +65,7 @@ export default function Sentimento() {
                     <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{legenda(k)}</div>
                     <div className="bar" style={{ margin: '12px 0 6px', position: 'relative' }}>
                       <span style={{ position: 'absolute', top: 0, height: 3, ...(v >= 0 ? { left: '50%', width: `${v * 50}%`, background: 'var(--green)' } : { right: '50%', width: `${-v * 50}%`, background: 'var(--red)' }) }} />
-                      <span style={{ position: 'absolute', left: '50%', top: -3, bottom: -3, width: 1, background: '#35465a' }} />
+                      <span style={{ position: 'absolute', left: '50%', top: -3, bottom: -3, width: 1, background: 'rgba(255,255,255,0.15)' }} />
                     </div>
                     <div className="mono" style={{ fontSize: 11, color: contrib >= 0 ? 'var(--green)' : 'var(--red)' }}>contribuição {fmtSigned(contrib, 2)}</div>
                   </div>

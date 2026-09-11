@@ -76,7 +76,7 @@ export default function Historico() {
           <div style={{ position: 'relative', height: 210, borderLeft: '1px solid var(--border-2)', borderBottom: '1px solid var(--border-2)' }}>
             {pontos ? (
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-                <polyline points={`0,100 ${pontos} 100,100`} fill="rgba(34,211,238,0.10)" stroke="none" />
+                <polyline points={`0,100 ${pontos} 100,100`} fill="rgba(127,216,222,0.10)" stroke="none" />
                 <polyline points={pontos} fill="none" stroke="var(--acc)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
               </svg>
             ) : <Empty>{fechadas.isPending ? 'carregando…' : 'ainda não há posições fechadas'}</Empty>}

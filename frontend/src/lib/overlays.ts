@@ -3,7 +3,8 @@ import type { Candle, Cenario, NiveisResp, Pivot, Posicao } from '../api/types'
 import type { ChartLabel, ChartLevel, ChartMarker, ChartPath, ChartProfile, ChartRect } from './chart-tipos'
 import { preco } from './format'
 
-export const GR = '#34d399', RD = '#f87171', AM = '#fbbf24', CY = '#22d3ee', MU = '#8a98a8', MU2 = '#9aa8b8', DIM = '#3b4b60'
+// cores do design v2: azul-petróleo = alta/compra, índigo = baixa/venda, âmbar = níveis institucionais
+export const GR = '#7fd8de', RD = '#8fa1ee', AM = '#e0b45a', CY = '#7fd8de', MU = '#6b7685', MU2 = '#9aa4b2', DIM = '#3a4353'
 
 /** ZigZag (pivôs) + rótulos de onda do cenário primário. */
 export function overlaysElliott(g: { pivots?: Pivot[]; primario?: Cenario | null } | undefined, precoAtual: number | undefined, tsAtual: number | undefined): { paths: ChartPath[]; labels: ChartLabel[]; levels: ChartLevel[] } {

@@ -44,11 +44,18 @@ export function data(ts: number | string | null | undefined): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
-export const corAcao = (a: string | null | undefined) =>
-  a === 'buy' || a === 'COMPRA' ? 'var(--green)' : a === 'sell' || a === 'VENDA' ? 'var(--red)' : 'var(--muted)'
+export const corAcao = (a: string | null | undefined) => {
+  const x = (a || '').toLowerCase()
+  return x === 'buy' || x === 'compra' ? 'var(--green)' : x === 'sell' || x === 'venda' ? 'var(--red)' : 'var(--muted)'
+}
 
-export const rotuloAcao = (a: string | null | undefined) =>
-  a === 'buy' ? 'COMPRA' : a === 'sell' ? 'VENDA' : a === 'hold' ? 'AGUARDAR' : (a || '—').toUpperCase()
+export const rotuloAcao = (a: string | null | undefined) => {
+  if (a === 'buy') return 'Compra'
+  if (a === 'sell') return 'Venda'
+  if (a === 'hold') return 'Aguardar'
+  const s = a || '—'
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
 
 export const corVies = (v: string | null | undefined) =>
   v === 'bull' || v === 'buy' || v === 'alta' ? 'var(--green)' : v === 'bear' || v === 'sell' || v === 'baixa' ? 'var(--red)' : 'var(--muted)'

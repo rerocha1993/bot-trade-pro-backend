@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { Sidebar } from './components/Layout'
+import { TopBar } from './components/Layout'
 import BotDetail from './screens/BotDetail'
 import BotForm from './screens/BotForm'
 import Dashboard from './screens/Dashboard'
@@ -12,7 +12,7 @@ import Trader from './screens/Trader'
 export default function App() {
   return (
     <div className="app">
-      <Sidebar />
+      <TopBar />
       <main className="main">
         <Routes>
           <Route path="/" element={<Dashboard />} />

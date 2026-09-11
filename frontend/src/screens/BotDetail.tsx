@@ -54,11 +54,11 @@ export default function BotDetail() {
 
   return (
     <>
-      <Header titulo={bot.nome} subtitulo="detalhe do robô · decisão, cenários e risco" par={bot.ativo} actions={
+      <Header titulo={bot.nome} eyebrow={`${bot.estilo_trade} · ${bot.timeframe} · ${bot.confluencia_tipo}`} par={bot.ativo} actions={
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn onClick={() => ctl.trailing.mutate({ id, on: !bot.trailing_manual })}>{bot.trailing_manual ? 'Desativar trailing' : 'Ativar trailing'}</Btn>
           <Link to={`/bots/${id}/editar`} className="btn">Editar</Link>
-          <Btn kind={ligado ? 'danger' : 'ok'} onClick={() => acionar()}>{ligado ? 'Parar' : 'Ativar'}</Btn>
+          <Btn kind={ligado ? 'danger' : 'primary'} onClick={() => acionar()}>{ligado ? 'Parar robô' : 'Ativar robô'}</Btn>
         </div>
       } />
       <Page>
@@ -74,69 +74,77 @@ export default function BotDetail() {
         </div>
         {erro && <div className="err row"><span style={{ flex: 1 }}>{erro.msg}</span>{erro.gate && <Btn small kind="danger" onClick={() => acionar(true)}>Forçar (ignorar backtest)</Btn>}</div>}
 
-        <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 60fr) minmax(230px, 25fr) minmax(190px, 15fr)', alignItems: 'start' }}>
-          <div className="card">
+        <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) 360px', alignItems: 'start' }}>
+          <div className="card" style={{ overflow: 'hidden' }}>
             <div className="tabs">
-              {GRAUS.map((k) => <button key={k} className={grau === k ? 'on' : ''} onClick={() => setGrau(k)}>{tfs[k]} {k}</button>)}
-              {mg.isFetching && <span className="mono muted" style={{ marginLeft: 'auto', fontSize: 10, paddingRight: 8 }}>analisando…</span>}
+              {GRAUS.map((k) => <button key={k} className={grau === k ? 'on' : ''} onClick={() => setGrau(k)}>{tfs[k]} · {k}</button>)}
+              {mg.isFetching && <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>analisando…</span>}
+              <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
+                {OV_CHIPS.map(([k, l]) => <Chip key={k} on={ov[k]} onClick={() => setOv({ ...ov, [k]: !ov[k] })}>{l}</Chip>)}
+              </div>
             </div>
-            <div style={{ padding: '10px 10px 0' }}>
+            <div style={{ padding: '14px 14px 16px' }}>
               <GrafPainel par={bot.ativo} tf={tfs[grau]} grau={g} ov={ov} posicoes={posicoes.data?.posicoes} />
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '12px 14px 14px' }}>
-              {OV_CHIPS.map(([k, l]) => <Chip key={k} on={ov[k]} onClick={() => setOv({ ...ov, [k]: !ov[k] })}>{l}</Chip>)}
             </div>
           </div>
 
-          <Card title="Cenários de Elliott" sub={g ? `${tfs[grau]} · ${g.cenarios.length} cenários` : ''}>
-            {mg.isPending && <Loading />}
-            {mg.isError && <Err e={mg.error} />}
-            {g && (
-              <>
-                <ProbBar bull={g.prob_bull} bear={g.prob_bear} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
-                  {g.cenarios.slice(0, 5).map((c, i) => <CenarioCard key={c.id} c={c} prim={i === 0} />)}
-                  {!g.cenarios.length && <Empty>{g.erro || 'sem cenários neste grau'}</Empty>}
-                </div>
-              </>
-            )}
-            {mg.data && (
-              <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Alinhamento multi-grau</div>
-                <AlinhamentoBox mg={mg.data} />
-              </div>
-            )}
-          </Card>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-            <Card>
-              <div className="eyebrow">Decisão</div>
-              <div className="mono" style={{ fontSize: 22, marginTop: 6, letterSpacing: '0.02em', color: corAcao(dec?.acao) }}>{dec ? rotuloAcao(dec.acao) : '—'}</div>
-              <div className="mono muted" style={{ fontSize: 11, marginTop: 2 }}>{dec ? `${dec.fase_onda ?? '—'} · ${dec.probabilidade !== null ? pct(dec.probabilidade) : '—'} · ${hora(dec.criado_em)}` : 'sem decisões ainda'}</div>
-              {dec?.motivo && <p style={{ margin: '9px 0 0', fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.4 }}>{dec.motivo}</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+            <div className={'card card-destaque' + (dec?.acao === 'sell' ? ' venda' : '')} style={{ padding: '22px 24px' }}>
+              <div className="eyebrow">Decisão atual</div>
+              <div style={{ fontSize: 34, fontWeight: 600, letterSpacing: '-0.02em', marginTop: 4, color: dec?.acao === 'hold' ? 'var(--text)' : corAcao(dec?.acao) }}>{dec ? rotuloAcao(dec.acao) : '—'}</div>
+              <div className="mono" style={{ fontSize: 12, color: 'var(--muted-2)' }}>{dec ? `${dec.fase_onda ?? '—'} · probabilidade ${dec.probabilidade !== null ? pct(dec.probabilidade) : '—'} · ${hora(dec.criado_em)}` : 'sem decisões ainda'}</div>
+              {dec?.motivo && <p style={{ margin: '14px 0 0', fontSize: 13, color: 'var(--text-2)', lineHeight: 1.55 }}>{dec.motivo}</p>}
               {!!votos.length && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 11 }}>
-                  {votos.map((v) => <span key={v} className="tag mono" style={{ textTransform: 'none', letterSpacing: 0, borderColor: 'rgba(52,211,153,0.4)', color: 'var(--green)' }}>{v} ✓</span>)}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 16 }}>
+                  {votos.map((v) => <span key={v} className="tag" style={{ borderColor: 'rgba(127,216,222,0.4)', color: 'var(--green)', fontWeight: 400 }}>{v}</span>)}
+                </div>
+              )}
+            </div>
+
+            <div className="card" style={{ padding: '20px 24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+                {[['Take profit', preco(tp), 'var(--green)', pos ? 'posição' : 'decisão'],
+                  ['Stop loss', preco(sl), 'var(--red)', pos?.trailing_ativo ? 'trailing' : pos ? 'posição' : 'decisão'],
+                  ['Risco/retorno', rr === null ? '—' : fmt(rr, 1), 'var(--text)', bot.rr_minimo ? `mínimo ${fmt(bot.rr_minimo, 1)}` : 'padrão do perfil']].map(([k, v, c, src]) => (
+                  <div key={k}>
+                    <div className="muted" style={{ fontSize: 11 }}>{k}</div>
+                    <div className="mono" style={{ fontSize: 20, fontWeight: 300, color: c }}>{v}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{src}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ borderTop: '1px solid var(--border-2)', marginTop: 18, paddingTop: 10 }}>
+                {pos && <KV k="P&L aberto" v={aberto === null ? '—' : fmtSigned(aberto)} color={corPnl(aberto)} src={`${rotuloAcao(pos.direcao)} ${preco(pos.preco_entrada)}`} />}
+                {pos && parciais.length > 0 && <KV k="Realizado" v={fmtSigned(pos.pnl_parcial ?? 0)} color={corPnl(pos.pnl_parcial ?? 0)} src={`${parciais.length} parcial${parciais.length > 1 ? 'is' : ''} · ${parciais.map((a) => pct(a, 0)).join(', ')} do caminho`} />}
+                <KV k="Risco por trade" v={`${fmt(banca * bot.risco_pct, 2)} USDT · ${pct(bot.risco_pct, 1)}`} />
+                <KV k="Quantidade" v={pos ? fmt(pos.quantidade, 4) : `${bot.min_quantidade ?? '—'} – ${bot.max_quantidade ?? '—'}`}
+                    src={pos && parciais.length > 0 ? `de ${fmt(pos.quantidade_inicial ?? pos.quantidade, 4)} na entrada` : undefined} />
+                <KV k="Trades do dia" v={`${estado?.trades_dia ?? 0} / ${bot.max_trades_dia}`} />
+                <KV k="P&L do dia" v={fmtSigned(estado?.pnl_dia ?? 0)} color={corPnl(estado?.pnl_dia ?? 0)} src={`limite −${pct(bot.max_perda_dia_pct, 1)}`} />
+              </div>
+            </div>
+
+            {bot.estrategia === 'inverse_range' && <InverseRangeCard id={id} />}
+
+            <Card title="Cenários de Elliott" sub={g ? `grau ${tfs[grau]} · ${g.cenarios.length} cenários` : ''}>
+              {mg.isPending && <Loading />}
+              {mg.isError && <Err e={mg.error} />}
+              {g && (
+                <>
+                  <ProbBar bull={g.prob_bull} bear={g.prob_bear} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
+                    {g.cenarios.slice(0, 5).map((c, i) => <CenarioCard key={c.id} c={c} prim={i === 0} />)}
+                    {!g.cenarios.length && <Empty>{g.erro || 'sem cenários neste grau'}</Empty>}
+                  </div>
+                </>
+              )}
+              {mg.data && (
+                <div style={{ marginTop: 18, borderTop: '1px solid var(--border-2)', paddingTop: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>Alinhamento multi-grau</div>
+                  <AlinhamentoBox mg={mg.data} />
                 </div>
               )}
             </Card>
-            <Card>
-              <div className="eyebrow" style={{ marginBottom: 9 }}>Alvo e proteção</div>
-              <KV k="TP" v={preco(tp)} color="var(--green)" src={pos ? 'posição' : 'decisão'} />
-              <KV k="SL" v={preco(sl)} color="var(--red)" src={pos?.trailing_ativo ? 'trailing' : pos ? 'posição' : 'decisão'} />
-              <KV k="R:R" v={rr === null ? '—' : fmt(rr, 1)} color="var(--acc)" src={bot.rr_minimo ? `mínimo ${fmt(bot.rr_minimo, 1)}` : 'padrão do perfil'} />
-              {pos && <KV k="Aberto" v={aberto === null ? '—' : fmtSigned(aberto)} color={corPnl(aberto)} src={`${rotuloAcao(pos.direcao)} ${preco(pos.preco_entrada)}`} />}
-              {pos && parciais.length > 0 && <KV k="Realizado" v={fmtSigned(pos.pnl_parcial ?? 0)} color={corPnl(pos.pnl_parcial ?? 0)} src={`${parciais.length} parcial${parciais.length > 1 ? 'is' : ''} · ${parciais.map((a) => pct(a, 0)).join(', ')} do caminho`} />}
-            </Card>
-            <Card>
-              <div className="eyebrow" style={{ marginBottom: 9 }}>Tamanho e limites</div>
-              <KV k="Risco" v={`${fmt(banca * bot.risco_pct, 2)} USDT · ${pct(bot.risco_pct, 1)}`} />
-              <KV k="Quantidade" v={pos ? fmt(pos.quantidade, 4) : `${bot.min_quantidade ?? '—'} – ${bot.max_quantidade ?? '—'}`}
-                  src={pos && parciais.length > 0 ? `de ${fmt(pos.quantidade_inicial ?? pos.quantidade, 4)} na entrada` : undefined} />
-              <KV k="Trades do dia" v={`${estado?.trades_dia ?? 0} / ${bot.max_trades_dia}`} />
-              <KV k="P&L do dia" v={fmtSigned(estado?.pnl_dia ?? 0)} color={corPnl(estado?.pnl_dia ?? 0)} src={`limite −${pct(bot.max_perda_dia_pct, 1)}`} />
-            </Card>
-            {bot.estrategia === 'inverse_range' && <InverseRangeCard id={id} />}
             {fluxo && (
               <Card>
                 <div className="eyebrow" style={{ marginBottom: 9 }}>Motor de fluxo</div>
