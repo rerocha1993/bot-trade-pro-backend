@@ -73,3 +73,25 @@ def test_usa_o_mesmo_passo_do_robo(range_fixo, monkeypatch):
     monkeypatch.setattr(bg, "passo_inverse", lambda *a, **k: chamadas.append(1) or original(*a, **k))
     BacktestGrade(_velas([76000.0] * 5), banca_btc=1.0).executar()
     assert len(chamadas) == 5
+
+
+def test_funding_entra_no_resultado_de_quem_esta_vendido(range_fixo):
+    """
+    No perpétuo inverse quem está VENDIDO recebe o funding na maioria das vezes (80–92% dos pagamentos por ano,
+    dados da Bybit). O backtest ignorava isso e subestimava a grade.
+    """
+    precos = [70000.0 + 500 * i for i in range(20)]        # sobe dentro do range: a grade vende em escada
+    velas = _velas(precos)
+    # o funding é cobrado no fim de um candle de 4h; taxa alta de propósito para o efeito aparecer
+    fund = {v[0] + 4 * 3_600_000: 0.001 for v in velas}
+    sem = BacktestGrade(velas, banca_btc=1.0).executar()
+    com = BacktestGrade(velas, banca_btc=1.0, funding=fund).executar()
+    assert com["funding_btc"] > 0 and sem["funding_btc"] == 0
+    assert com["btc_realizado"] > sem["btc_realizado"]
+
+
+def test_funding_negativo_tira_de_quem_esta_vendido(range_fixo):
+    velas = _velas([70000.0 + 500 * i for i in range(20)])
+    fund = {v[0] + 4 * 3_600_000: -0.001 for v in velas}
+    r = BacktestGrade(velas, banca_btc=1.0, funding=fund).executar()
+    assert r["funding_btc"] < 0

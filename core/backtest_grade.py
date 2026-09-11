@@ -33,7 +33,7 @@ class BacktestGrade:
     def __init__(self, ohlcv_4h: Sequence, banca_btc: float = 1.0, pct_primario: float = 0.22, recalculo_dias: int = 7,
                  desde_ms: Optional[int] = None, bloquear_ciclo_bull: bool = False, exigir_corretivo: bool = True,
                  subfatias: int = 3, pesos: Optional[Dict[float, float]] = None, verbose: bool = False,
-                 parametros: Optional[ParametrosRompimento] = None):
+                 parametros: Optional[ParametrosRompimento] = None, funding: Optional[Dict[int, float]] = None):
         dados = [list(map(float, c[:6])) for c in ohlcv_4h]
         for c in dados:
             c[0] = int(c[0])
@@ -50,6 +50,10 @@ class BacktestGrade:
         self.pesos = pesos
         self.verbose = verbose
         self.parametros = parametros or ParametrosRompimento()
+        # funding do perpétuo inverse (timestamp ms -> taxa). Positivo: quem está VENDIDO recebe. Sem ele o
+        # backtest ignorava a principal fonte de ganho de um short de BTC: em 2019-2025 o vendido recebeu em
+        # 80-92% dos pagamentos na maioria dos anos (dados da Bybit)
+        self.funding = funding or {}
         self.eventos: List[Dict] = []
         self.curva: List[Dict] = []
 
@@ -77,6 +81,7 @@ class BacktestGrade:
         ultima = 0
         pico, dd_max = banca, 0.0
         fracao_acum, n_candles = 0.0, 0
+        funding_btc = 0.0
         for c in self.h4:
             ts, h, l, close = c[0], c[2], c[3], c[4]
             if ts < self.desde:
@@ -103,6 +108,15 @@ class BacktestGrade:
                                   (leitura.get("primario") or None) if leitura else None)
                 banca += sum(e.get("pnl_btc", 0.0) for e in r["execs"] if e["tipo"] == "recompra")
                 self.eventos.extend(r["execs"])
+                # pagamentos de funding dentro deste candle, sobre o short que ficou aberto nele (contratos em USD)
+                if self.funding:
+                    # o funding é cobrado às 00h, 08h e 16h UTC: cai sempre no FIM de um candle de 4h
+                    taxa = self.funding.get(ts + 4 * 3_600_000)
+                    vendido = grade.contratos_abertos() + ((maquina.reteste or {}).get("contratos") or 0.0)
+                    if taxa and vendido > 0:
+                        f_btc = vendido * taxa / close
+                        banca += f_btc
+                        funding_btc += f_btc
                 if r["fechar_grade"] or r["concluido"]:
                     self.eventos.append({"ts": ts, "evento": "range_encerrado" if r["fechar_grade"] else "range_concluido",
                                          "preco": close, "motivo": r["motivo"], "btc_realizado": round(banca, 6)})
@@ -134,6 +148,7 @@ class BacktestGrade:
             "vendas": sum(1 for e in self.eventos if e.get("tipo") == "venda"),
             "recompras": sum(1 for e in self.eventos if e.get("tipo") == "recompra"),
             "hold_usd_final": round(self.banca0 * preco_fim, 2), "usd_marcado_final": round((banca + aberto - taxas) * preco_fim, 2),
+            "funding_btc": round(funding_btc, 6),
             "tempo_s": round(time.time() - t0, 1), "eventos": self.eventos,
         }
 
