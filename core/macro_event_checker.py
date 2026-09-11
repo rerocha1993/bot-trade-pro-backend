@@ -19,8 +19,10 @@ try:
     from bs4 import BeautifulSoup
 except ImportError:  # opcional
     BeautifulSoup = None
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
+import threading
+import time
 
 INVESTING_URL = "https://www.investing.com/economic-calendar/"
 
@@ -42,6 +44,29 @@ PAISES = {
 
 _DERIV = None
 
+# Os fallbacks (TradingEconomics e scraping) são uma chamada de rede de até 10 s. Sem cache, quando o Forex
+# Factory falha eles rodavam a CADA decisão de CADA robô — no scalp de 1m, uma vez por minuto, travando o ciclo.
+# A resposta vale por CACHE_FALLBACK_S; a janela do evento (±5 min) é maior que isso.
+CACHE_FALLBACK_S = 120
+_cache_fallback: dict = {}
+_trava_fallback = threading.Lock()
+
+
+def _agora_utc() -> datetime:
+    """UTC sem fuso (os horários do calendário são comparados assim)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _fallback_com_cache(chave, fn):
+    with _trava_fallback:
+        item = _cache_fallback.get(chave)
+        if item and time.monotonic() - item[0] < CACHE_FALLBACK_S:
+            return item[1]
+    valor = bool(fn())
+    with _trava_fallback:
+        _cache_fallback[chave] = (time.monotonic(), valor)
+    return valor
+
 
 def evento_importante_agora(pais="united states", relevancia="alta", usar_api=False, minutos=30):
     """Fonte principal: calendário Forex Factory (gratuito). Fallbacks: TradingEconomics (chave) e scraping."""
@@ -56,8 +81,8 @@ def evento_importante_agora(pais="united states", relevancia="alta", usar_api=Fa
     except Exception:
         pass
     if usar_api:
-        return evento_via_api(pais=pais, relevancia=relevancia)
-    return evento_via_scraping(pais=pais, relevancia=relevancia)
+        return _fallback_com_cache(("api", pais, relevancia), lambda: evento_via_api(pais=pais, relevancia=relevancia))
+    return _fallback_com_cache(("scraping", pais, relevancia), lambda: evento_via_scraping(pais=pais, relevancia=relevancia))
 
 def evento_via_scraping(pais="united states", relevancia="alta"):
     if BeautifulSoup is None:
@@ -66,7 +91,7 @@ def evento_via_scraping(pais="united states", relevancia="alta"):
         response = requests.get(INVESTING_URL, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         linhas = soup.select("tr.js-event-item")
-        agora = datetime.utcnow()
+        agora = _agora_utc()
 
         for linha in linhas:
             pais_elem = linha.select_one(".flagCur.noCur")
@@ -107,7 +132,7 @@ def evento_via_api(pais="united states", relevancia="alta"):
         url = f"https://api.tradingeconomics.com/calendar/country/{pais.replace(' ', '%20')}?c={API_KEY}"
         response = requests.get(url, timeout=10)
         data = response.json()
-        agora = datetime.utcnow()
+        agora = _agora_utc()
 
         for evento in data:
             if evento.get("Importance") != 3:

@@ -94,3 +94,29 @@ def test_status_nao_toca_no_orm():
     ex.bot = Proibido()
     s = ex.status()
     assert s["bot_id"] == 7 and s["nome"] == "Scalp Fluxo" and s["ciclos"] == 3
+
+
+def test_decisao_gravada_leva_plano_trader_e_trava():
+    """Sem o plano na decisão gravada não dá para responder 'por que o robô não operou?'."""
+    import json
+
+    class _Anota(_Sessao):
+        def __init__(self):
+            super().__init__()
+            self.itens = []
+
+        def add(self, obj):
+            self.itens.append(obj)
+
+    ex = BotExecutor.__new__(BotExecutor)
+    ex.bot = type("B", (), {"id": 4})()
+    ex.par, ex.timeframe, ex.db = "BTCUSDT", "1m", _Anota()
+    plano = {"modo": "aguardar", "estado": "impulso_maduro", "pode_comprar": False, "aguardando_barreira": True,
+             "escopo": "só vetos do ciclo"}
+    ex._persistir_decisao({"acao": "hold", "motivo": "teste", "plano": plano,
+                           "trader": {"direcao": "sell", "superciclo": "impulso_maduro"},
+                           "trava_mestre": {"vies": "bear"}}, candle_ts=1, preco=76000.0)
+    detalhes = json.loads(ex.db.itens[0].detalhes)
+    assert detalhes["plano"] == plano
+    assert detalhes["trader"]["superciclo"] == "impulso_maduro"
+    assert detalhes["trava_mestre"] == {"vies": "bear"}

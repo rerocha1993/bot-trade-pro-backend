@@ -373,7 +373,7 @@ class StrategyEngine:
                             "leitura": (self._trader.get("superciclo") or {}).get("leitura")} if getattr(self, "_trader", None) else None),
                 "plano": ({k: (self._plano or {}).get(k) for k in
                            ("modo", "estado", "direcao_grau_maior", "risco_permitido", "teto_hedge",
-                            "pode_comprar", "pode_vender", "motivo")} if self._plano else None),
+                            "pode_comprar", "pode_vender", "aguardando_barreira", "motivo")} if self._plano else None),
                 "cenarios": cenarios[:6], "alinhamento": alin, "elliott": {
                     "operacional": {k: op.get(k) for k in ("timeframe", "prob_bull", "prob_bear", "consenso", "n_cenarios")},
                     "contexto": {k: elliott["graus"]["contexto"].get(k) for k in ("timeframe", "fase", "prob_bull", "prob_bear")},

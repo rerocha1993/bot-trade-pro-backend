@@ -530,8 +530,10 @@ class BotExecutor:
     def _persistir_decisao(self, d: Dict, candle_ts: int, preco: float):
         try:
             sent = d.get("sentimento") or {}
+            # plano, trader e trava entram para a auditoria responder "por que o robô não operou?": sem eles a
+            # decisão gravada não mostrava qual estado do ciclo, qual escopo do plano nem qual trilho valia
             detalhes = {k: d.get(k) for k in ("cenarios", "alinhamento", "elliott", "validadores", "niveis",
-                                              "zonas_institucionais", "votos_contra",
+                                              "zonas_institucionais", "votos_contra", "plano", "trader", "trava_mestre",
                                               "motor", "contexto_fluxo", "fluxo", "barras")}
             self.db.add(DecisaoBot(
                 bot_id=self._attr("id"), par=self.par, timeframe=self.timeframe, candle_ts=candle_ts, preco=preco, acao=d["acao"],
