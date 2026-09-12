@@ -120,3 +120,13 @@ def test_decisao_gravada_leva_plano_trader_e_trava():
     assert detalhes["plano"] == plano
     assert detalhes["trader"]["superciclo"] == "impulso_maduro"
     assert detalhes["trava_mestre"] == {"vies": "bear"}
+
+
+def test_erro_do_ciclo_guarda_o_nome_da_excecao():
+    """A ccxt usa a URL como mensagem: sem o nome da classe, timeout e rate limit ficam idênticos no painel."""
+    import inspect
+
+    from core.bot_executor import BotExecutor
+
+    fonte = inspect.getsource(BotExecutor.executar)
+    assert 'f"{type(e).__name__}: {e}"' in fonte

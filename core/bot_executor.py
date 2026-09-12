@@ -999,7 +999,9 @@ class BotExecutor:
                     self.db.rollback()
                 except Exception:
                     pass
-                self._log(acao="erro", tipo_operacao="info", erro=str(e)[:500], motivo="erro no ciclo")
+                # a ccxt usa a URL como mensagem: sem o NOME da exceção, o log não diz se foi timeout,
+                # corretora fora do ar ou rate limit — e todos viram "erro: bybit GET https://..."
+                self._log(acao="erro", tipo_operacao="info", erro=f"{type(e).__name__}: {e}"[:500], motivo="erro no ciclo")
                 if self.estado["erros"] % 10 == 1:
                     self.alertas.erro(self._attr("nome"), e)
                 time.sleep(5)

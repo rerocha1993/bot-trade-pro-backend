@@ -316,7 +316,7 @@ class BybitConnector:
                     raise
                 pausa = espera * n * (5.0 if "10006" in str(e) else 1.0)
                 logger.warning("%s falhou (%d/%d), repetindo em %.1fs: %s",
-                               descricao, n, tentativas, pausa, str(e)[:120])
+                               descricao, n, tentativas, pausa, f"{type(e).__name__}: {e}"[:140])
                 time.sleep(pausa)
         raise ultimo
 
