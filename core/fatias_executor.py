@@ -60,7 +60,8 @@ class FatiasExecutor:
         t = self.trade
         return {"lado": t["lado"], "stop": t["stop"], "alvo": t["alvo"], "candles": t["candles"],
                 "horizonte": self.cfg.horizonte, "fatias_executadas": len(t["executadas"]),
-                "fatias_pendentes": len(t["pendentes"]), "de": self.cfg.n_entradas}
+                "fatias_pendentes": len(t["pendentes"]),
+                "precos_pendentes": [x["preco"] for x in t["pendentes"]], "de": self.cfg.n_entradas}
 
     def _cancelar_pendentes(self, motivo: str):
         if not self.trade or not self.trade.get("pendentes"):

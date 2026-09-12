@@ -109,6 +109,22 @@ export interface EstadoExecutor {
   thread_viva: boolean
   ordem_pendente: Record<string, unknown> | null
   fluxo?: EstadoFluxo | null
+  /** robôs de escada (votação + fatias, jogo do range): o que ainda está no livro */
+  fatias?: EstadoEscada | null
+  range?: EstadoEscada | null
+}
+
+export interface EstadoEscada {
+  lado?: number
+  stop?: number
+  alvo?: number
+  alvo1?: number
+  alvo2?: number
+  fatias_executadas?: number
+  fatias_pendentes?: number
+  precos_pendentes?: number[]
+  de?: number
+  parcial_feita?: boolean
 }
 
 /** Motor de fluxo do scalp: a regua da barra, o ritmo que ela esta rendendo e o que segurou a ultima leitura. */
@@ -601,5 +617,5 @@ export interface PosicaoAberta {
   motivo_entrada: string | null
   cenario: string | null
   rodando: boolean
-  escada: { pendentes: number; executadas?: number | null; de?: number | null; preco?: number } | null
+  escada: { pendentes: number; executadas?: number | null; de?: number | null; preco?: number; precos?: number[] } | null
 }

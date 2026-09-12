@@ -6,6 +6,7 @@ MESA DE POSIÇÕES: tudo que está aberto agora, em todos os robôs, e a interve
     POST /posicoes/{bot_id}/fechar            fecha a mercado (e cancela a escada que sobrou)
     POST /posicoes/{bot_id}/parcial?fracao    realiza uma fração da mão (padrão metade)
     POST /posicoes/{bot_id}/zero-a-zero       leva o stop para o preço de entrada
+    POST /posicoes/{bot_id}/stop-alvo?sl&tp   stop e/ou alvo novos, escolhidos pelo usuário
     POST /posicoes/{bot_id}/cancelar-escada   cancela só as ordens de ENTRADA ainda no livro
 
 Quem manda a ordem é sempre a thread do robô: o painel deixa o pedido e acorda o robô (a sessão do banco é dela).
@@ -46,7 +47,8 @@ def _escada(st: Dict) -> Optional[Dict]:
     for chave in ("fatias", "range"):
         d = (st or {}).get(chave)
         if isinstance(d, dict) and d.get("fatias_pendentes"):
-            return {"pendentes": d["fatias_pendentes"], "executadas": d.get("fatias_executadas"), "de": d.get("de")}
+            return {"pendentes": d["fatias_pendentes"], "executadas": d.get("fatias_executadas"), "de": d.get("de"),
+                    "precos": d.get("precos_pendentes") or []}
     ped = (st or {}).get("ordem_pendente")
     if ped:
         return {"pendentes": 1, "executadas": 0, "de": 1, "preco": ped.get("preco")}
@@ -85,9 +87,10 @@ def abertas(db: Session = Depends(get_db)) -> List[Dict]:
     return linhas
 
 
-def _pedir(bot_id: int, acao: str, fracao: Optional[float] = None, motivo: Optional[str] = None) -> Dict:
+def _pedir(bot_id: int, acao: str, fracao: Optional[float] = None, motivo: Optional[str] = None,
+           dados: Optional[Dict] = None) -> Dict:
     ex = _executor(bot_id)
-    token = ex.pedir_intervencao(acao, fracao, motivo)
+    token = ex.pedir_intervencao(acao, fracao, motivo, dados)
     limite = time.time() + ESPERA_S
     while time.time() < limite:
         r = ex.resultado_intervencao(token) or {}
@@ -113,6 +116,14 @@ def parcial(bot_id: int, fracao: float = Query(0.5, gt=0, le=1), motivo: str = Q
 @router.post("/{bot_id}/zero-a-zero")
 def zero_a_zero(bot_id: int, motivo: str = Query("Zero a zero manual")):
     return _pedir(bot_id, "zero_a_zero", motivo=motivo)
+
+
+@router.post("/{bot_id}/stop-alvo")
+def stop_alvo(bot_id: int, sl: Optional[float] = Query(None, gt=0), tp: Optional[float] = Query(None, gt=0),
+              motivo: str = Query("Stop/alvo ajustados no painel")):
+    if sl is None and tp is None:
+        raise HTTPException(400, "informe pelo menos o stop (sl) ou o alvo (tp)")
+    return _pedir(bot_id, "stop_alvo", motivo=motivo, dados={"sl": sl, "tp": tp})
 
 
 @router.post("/{bot_id}/cancelar-escada")

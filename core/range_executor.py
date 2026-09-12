@@ -86,7 +86,8 @@ class RangeExecutor:
         t = self.trade
         return {**base, "lado": t["lado"], "stop": t["stop"], "alvo1": t["alvo1"], "alvo2": t["alvo2"],
                 "parcial_feita": t["parcial_feita"], "blocos": t["blocos"], "fatias_executadas": len(t["executadas"]),
-                "fatias_pendentes": len(t["pendentes"]), "de": self.cfg.p.n_fatias}
+                "fatias_pendentes": len(t["pendentes"]),
+                "precos_pendentes": [x["preco"] for x in t["pendentes"]], "de": self.cfg.p.n_fatias}
 
     def _cancelar_pendentes(self, motivo: str):
         if not self.trade or not self.trade.get("pendentes"):

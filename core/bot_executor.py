@@ -1022,13 +1022,15 @@ class BotExecutor:
                 pass
 
     # ---------------------------------------------------- intervenção manual
-    def pedir_intervencao(self, acao: str, fracao: Optional[float] = None, motivo: Optional[str] = None) -> str:
+    def pedir_intervencao(self, acao: str, fracao: Optional[float] = None, motivo: Optional[str] = None,
+                          dados: Optional[Dict] = None) -> str:
         """
         Chamado pela thread da API. Só enfileira e acorda o robô — nada de ORM nem de ordem aqui.
-        `acao`: 'fechar' | 'parcial' | 'zero_a_zero' | 'cancelar_escada'.
+        `acao`: 'fechar' | 'parcial' | 'zero_a_zero' | 'cancelar_escada' | 'stop_alvo' (com dados sl/tp).
         """
         token = f"{self.bot_id}-{int(time.time() * 1000)}"
-        pedido = {"token": token, "acao": acao, "fracao": fracao, "motivo": motivo or "Intervenção manual pelo painel"}
+        pedido = {"token": token, "acao": acao, "fracao": fracao, "dados": dados or {},
+                  "motivo": motivo or "Intervenção manual pelo painel"}
         with self._trava_pedidos:
             self._pedidos.append(pedido)
             self.intervencoes[token] = {**pedido, "status": "pendente"}
@@ -1072,6 +1074,10 @@ class BotExecutor:
             self.db.commit()
             self._log(acao="ajuste_sl", tipo_operacao="info", preco=preco, sl=alvo, motivo=f"{motivo}: stop no zero a zero")
             return {"stop": alvo, "preco": preco}
+        if acao == "stop_alvo":
+            if not self.posicao:
+                raise RuntimeError("Sem posição aberta")
+            return {**self._mover_stop_alvo(p.get("dados") or {}, preco, motivo), "preco": preco}
         if acao == "parcial":
             if not self.posicao:
                 raise RuntimeError("Sem posição aberta")
@@ -1090,6 +1096,37 @@ class BotExecutor:
             return {"fechada": True, "preco": preco, "resultado": round(float(pos.pnl or 0), 4),
                     "preco_saida": pos.preco_saida}
         raise RuntimeError(f"Ação desconhecida: {acao}")
+
+    def _mover_stop_alvo(self, dados: Dict, preco: float, motivo: str) -> Dict:
+        """
+        Stop e alvo novos, escolhidos pelo usuário. O lado é conferido contra o PREÇO ATUAL: stop do lado errado
+        vira ordem a mercado disfarçada, e alvo do lado errado executa na hora — os dois fechariam a posição sem
+        o usuário entender por quê.
+        """
+        pos = self.posicao
+        s = 1 if pos.direcao == "buy" else -1
+        sl = dados.get("sl")
+        tp = dados.get("tp")
+        novo_sl = self.con.arredondar_preco(self.par, float(sl)) if sl not in (None, "") else pos.sl
+        novo_tp = self.con.arredondar_preco(self.par, float(tp)) if tp not in (None, "") else pos.tp
+        if sl not in (None, "") and (novo_sl >= preco if s == 1 else novo_sl <= preco):
+            raise RuntimeError(f"Stop {novo_sl:,.1f} está do lado errado do preço {preco:,.1f}")
+        if tp not in (None, "") and (novo_tp <= preco if s == 1 else novo_tp >= preco):
+            raise RuntimeError(f"Alvo {novo_tp:,.1f} está do lado errado do preço {preco:,.1f}")
+        if not self.ordens.atualizar_stop(self.par, novo_sl, novo_tp, self._attr("position_mode", "one-way"), pos.direcao):
+            raise RuntimeError("A corretora não aceitou o stop/alvo novos")
+        pos.sl, pos.tp = novo_sl, novo_tp
+        # a estratégia gerencia pelo estado dela: sem isto, o robô voltaria a usar o stop antigo no ciclo seguinte
+        for mod, chaves in ((self.fatias, ("stop", "alvo")), (self.range, ("stop", "alvo2"))):
+            if mod is not None and getattr(mod, "trade", None) is not None:
+                mod.trade[chaves[0]] = novo_sl
+                if novo_tp:
+                    mod.trade[chaves[1]] = novo_tp
+                mod._salvar()
+        self.db.commit()
+        self._log(acao="ajuste_sl", tipo_operacao="info", preco=preco, sl=novo_sl, tp=novo_tp,
+                  motivo=f"{motivo}: stop {novo_sl:,.1f}" + (f", alvo {novo_tp:,.1f}" if novo_tp else ""))
+        return {"sl": novo_sl, "tp": novo_tp}
 
     def _cancelar_escada(self, motivo: str) -> int:
         """Cancela as ordens de ENTRADA ainda no livro (fatias do robô 9/10 ou ordem limitada pendente)."""

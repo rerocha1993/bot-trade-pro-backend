@@ -8,6 +8,7 @@
 import { useMemo } from 'react'
 import { useCandles, useNiveis } from '../api/hooks'
 import type { AnaliseGrau, Cenario, MultiGrau, Posicao } from '../api/types'
+import type { ChartLevel } from '../lib/chart-tipos'
 import { corPnl, corVies, fmtSigned, pct, preco, rotuloAcao, rotuloVies } from '../lib/format'
 import { marcadoresPosicoes, overlaysElliott, overlaysNiveis } from '../lib/overlays'
 import PriceChart from './chart/PriceChart'
@@ -89,12 +90,14 @@ export function AlinhamentoBox({ mg }: { mg: MultiGrau }) {
   )
 }
 
-export function GrafPainel({ par, tf, grau, ov, posicoes, height = 430, logScale }: {
+export function GrafPainel({ par, tf, grau, ov, posicoes, ordens, height = 430, logScale }: {
   par: string
   tf: string
   grau: AnaliseGrau | undefined
   ov: Partial<Overlays>
   posicoes?: Posicao[]
+  /** linhas da operação ABERTA: entrada, stop, alvo e as fatias que ainda estão no livro */
+  ordens?: ChartLevel[]
   height?: number
   logScale?: boolean
 }) {
@@ -105,10 +108,11 @@ export function GrafPainel({ par, tf, grau, ov, posicoes, height = 430, logScale
   const ell = useMemo(() => overlaysElliott(grau, ultimo?.close, ultimo?.time), [grau, ultimo?.close, ultimo?.time])
   const niv = useMemo(() => overlaysNiveis(niveis.data, ultimo?.time), [niveis.data, ultimo?.time])
   const levels = useMemo(() => [
+    ...(ov.trd ? ordens ?? [] : []),
     ...(ov.zig ? ell.levels : []),
     ...(ov.inst ? niv.levels.filter((l) => ['POC', 'VAH', 'VAL'].includes(l.label)) : []),
     ...(ov.vwap ? niv.levels.filter((l) => l.label.includes('VWAP') || l.label.includes('σ')) : []),
-  ], [ov.zig, ov.inst, ov.vwap, ell.levels, niv.levels])
+  ], [ov.trd, ordens, ov.zig, ov.inst, ov.vwap, ell.levels, niv.levels])
   const markers = useMemo(() => (ov.trd ? marcadoresPosicoes(posicoes, dados) : []), [ov.trd, posicoes, dados])
   const var24 = useMemo(() => {
     if (dados.length < 2) return null

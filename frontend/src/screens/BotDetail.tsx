@@ -8,6 +8,7 @@ import { Header, Page, usePreco } from '../components/Layout'
 import { Btn, Card, Chip, Empty, Err, KV, Loading, ModoTag, ProbBar, Tag } from '../components/ui'
 import { InverseRangeCard } from '../components/InverseRange'
 import { corAcao, corPnl, fmt, fmtSigned, hora, pct, preco, rotuloAcao } from '../lib/format'
+import { GR, RD } from '../lib/overlays'
 
 export default function BotDetail() {
   const id = Number(useParams().id)
@@ -44,6 +45,15 @@ export default function BotDetail() {
   const votos = (dec?.votos || '').split(',').map((v) => v.trim()).filter(Boolean)
   const det = (dec?.detalhes && typeof dec.detalhes === 'object' ? dec.detalhes : {}) as Record<string, unknown>
   const trader = det.trader as { direcao?: string; superciclo?: string; leitura?: string } | null | undefined
+  // linhas da operação ABERTA no gráfico: entrada, stop, alvo e as fatias que ainda estão no livro
+  const escada = estado?.fatias ?? estado?.range ?? null
+  // o gráfico (lightweight-charts) NÃO entende var(--cor) do CSS: só cor literal, senão ele estoura e some
+  const ordens = [
+    pos && { price: pos.preco_entrada, label: `entrada ${pos.direcao === 'buy' ? 'comprada' : 'vendida'}`, color: '#e8ecf2' },
+    pos?.sl && { price: pos.sl, label: 'stop', color: RD, dashed: true },
+    pos?.tp && { price: pos.tp, label: 'alvo', color: GR, dashed: true },
+    ...(escada?.precos_pendentes ?? []).map((p, i) => ({ price: p, label: `fatia ${i + 2} no livro`, color: '#4b63d6', dashed: true })),
+  ].filter(Boolean) as { price: number; label: string; color: string; dashed?: boolean }[]
 
   const acionar = async (forcar = false) => {
     setErro(null)
@@ -84,7 +94,7 @@ export default function BotDetail() {
               </div>
             </div>
             <div style={{ padding: '14px 14px 16px' }}>
-              <GrafPainel par={bot.ativo} tf={tfs[grau]} grau={g} ov={ov} posicoes={posicoes.data?.posicoes} />
+              <GrafPainel par={bot.ativo} tf={tfs[grau]} grau={g} ov={ov} posicoes={posicoes.data?.posicoes} ordens={ordens} />
             </div>
           </div>
 

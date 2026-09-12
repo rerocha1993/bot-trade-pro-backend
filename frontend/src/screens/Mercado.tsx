@@ -14,6 +14,16 @@ export default function Mercado() {
   const [form, setForm] = useState({ par: 'BTCUSDT', timeframe: '15m', estilo: 'daytrade', perfil: 'conservador' })
   const [sel, setSel] = useState(form)
   const [grau, setGrau] = useState<GrauKey>('operacional')
+  // timeframe, estilo e perfil valem na hora: antes só o botão "Analisar" aplicava, e clicar no timeframe
+  // parecia não fazer nada. O botão continua para o PAR, que é digitado.
+  const aplicar = (mudanca: Partial<typeof form>) => {
+    const novo = { ...form, ...mudanca }
+    setForm(novo)
+    if (!('par' in mudanca)) {
+      setSel(novo)
+      if (mudanca.timeframe) setGrau('operacional')      // o timeframe escolhido é o grau operacional
+    }
+  }
   const [ov, setOv] = useState<Overlays>({ zig: true, tpo: true, vp: false, ob: true, vwap: true, inst: true, trd: false })
   const mg = useMultigrau(sel.par, sel.estilo, sel.timeframe, sel.perfil)
   const tfs = mg.data?.timeframes ?? { operacional: sel.timeframe, contexto: '—', macro: '—' }
@@ -44,11 +54,12 @@ export default function Mercado() {
       <Header titulo="Mercado" subtitulo="estudo do par antes de criar um robô" par={sel.par} />
       <Page>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
-          <Field label="Par"><input value={form.par} onChange={(e) => setForm({ ...form, par: e.target.value.toUpperCase() })} style={{ width: 132 }} /></Field>
-          <Field label="Timeframe"><select value={form.timeframe} onChange={(e) => setForm({ ...form, timeframe: e.target.value })} style={{ width: 110 }}>{TFS.map((t) => <option key={t}>{t}</option>)}</select></Field>
-          <div><span className="label">Estilo</span><div style={{ width: 280 }}><Seg value={form.estilo} options={['scalping', 'daytrade', 'swing'] as const} onChange={(v) => setForm({ ...form, estilo: v })} /></div></div>
-          <div><span className="label">Perfil</span><div style={{ width: 200 }}><Seg value={form.perfil} options={['conservador', 'turbo'] as const} onChange={(v) => setForm({ ...form, perfil: v })} /></div></div>
-          <Btn kind="primary" onClick={() => setSel(form)}>Analisar</Btn>
+          <Field label="Par"><input value={form.par} onChange={(e) => aplicar({ par: e.target.value.toUpperCase() })}
+            onKeyDown={(e) => { if (e.key === 'Enter') setSel(form) }} style={{ width: 132 }} /></Field>
+          <Field label="Timeframe"><select value={form.timeframe} onChange={(e) => aplicar({ timeframe: e.target.value })} style={{ width: 110 }}>{TFS.map((t) => <option key={t}>{t}</option>)}</select></Field>
+          <div><span className="label">Estilo</span><div style={{ width: 280 }}><Seg value={form.estilo} options={['scalping', 'daytrade', 'swing'] as const} onChange={(v) => aplicar({ estilo: v })} /></div></div>
+          <div><span className="label">Perfil</span><div style={{ width: 200 }}><Seg value={form.perfil} options={['conservador', 'turbo'] as const} onChange={(v) => aplicar({ perfil: v })} /></div></div>
+          <Btn kind="primary" onClick={() => setSel(form)} disabled={form.par === sel.par}>Analisar par</Btn>
           {mg.isFetching && <span className="mono muted" style={{ fontSize: 11 }}>analisando…</span>}
         </div>
 

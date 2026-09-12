@@ -148,3 +148,33 @@ def test_hedge_inverso_nao_aceita_intervencao_por_aqui(monkeypatch):
     token = ex.pedir_intervencao("fechar")
     ex._processar_pedidos()
     assert ex.resultado_intervencao(token)["status"] == "erro"
+
+
+def test_stop_e_alvo_novos_valem_para_a_corretora_e_para_a_estrategia(monkeypatch):
+    ex = _com_posicao(monkeypatch)
+    enviados = []
+    ex.ordens.atualizar_stop = lambda par, sl=None, tp=None, pm="one-way", direcao="buy": enviados.append((sl, tp)) or True
+    token = ex.pedir_intervencao("stop_alvo", dados={"sl": 97.0, "tp": 130.0})
+    ex._processar_pedidos()
+    r = ex.resultado_intervencao(token)
+    assert r["status"] == "feita" and r["sl"] == 97.0 and r["tp"] == 130.0
+    assert float(ex.posicao.sl) == 97.0 and float(ex.posicao.tp) == 130.0
+    assert enviados[-1] == (97.0, 130.0), "o stop e o alvo novos foram para a corretora"
+    assert ex.range.trade["stop"] == 97.0 and ex.range.trade["alvo2"] == 130.0, "a estratégia passa a gerir pelo novo"
+
+
+def test_stop_do_lado_errado_e_recusado(monkeypatch):
+    """Preço em 104: um stop acima dele fecharia a compra na hora, como se fosse ordem a mercado."""
+    ex = _com_posicao(monkeypatch)
+    token = ex.pedir_intervencao("stop_alvo", dados={"sl": 110.0})
+    ex._processar_pedidos()
+    r = ex.resultado_intervencao(token)
+    assert r["status"] == "erro" and "lado errado" in r["erro"]
+    assert float(ex.posicao.sl) != 110.0
+
+
+def test_alvo_do_lado_errado_e_recusado(monkeypatch):
+    ex = _com_posicao(monkeypatch)
+    token = ex.pedir_intervencao("stop_alvo", dados={"tp": 100.0})
+    ex._processar_pedidos()
+    assert ex.resultado_intervencao(token)["status"] == "erro"
