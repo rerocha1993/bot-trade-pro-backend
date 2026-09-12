@@ -7,10 +7,10 @@ import { Header, Page, usePreco } from '../components/Layout'
 import { Btn, Card, Chip, Empty, Err, Loading } from '../components/ui'
 import { fmt, hora, preco } from '../lib/format'
 
-const CORES: Record<string, string> = { POC: '#e0b45a', VAH: '#e0b45a', VAL: '#e0b45a', VWAP: '#e8ecf2', OB: '#7fd8de', OB_DEMANDA: '#7fd8de', OB_OFERTA: '#8fa1ee', HVN: '#e0b45a', LVN: '#6b7685' }
+const CORES: Record<string, string> = { POC: '#e0b45a', VAH: '#e0b45a', VAL: '#e0b45a', VWAP: '#e8ecf2', OB: '#2ecc84', OB_DEMANDA: '#2ecc84', OB_OFERTA: '#f0544f', HVN: '#e0b45a', LVN: '#6b7685' }
 function corTipo(t: string): string {
   const k = t.toUpperCase()
-  for (const [pref, c] of Object.entries(CORES)) if (k.includes(pref)) return k.includes('OFERTA') || k.includes('BEAR') ? '#8fa1ee' : c
+  for (const [pref, c] of Object.entries(CORES)) if (k.includes(pref)) return k.includes('OFERTA') || k.includes('BEAR') ? '#f0544f' : c
   return '#9aa4b2'
 }
 const statusDe = (p: PontoInstitucional) => (p.rompido ? 'rompido' : p.testado ? 'testado' : 'ativo')

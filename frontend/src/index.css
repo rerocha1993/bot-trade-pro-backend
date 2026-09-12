@@ -19,8 +19,9 @@
   --track: #1a2130;
   --acc: #7fd8de;
   --acc-2: #b3ecef;
-  --green: #7fd8de;
-  --red: #8fa1ee;
+  /* direcional: verde e compra, vermelho e venda. O teal (--acc) e so destaque, nunca lado. */
+  --green: #2ecc84;
+  --red: #f0544f;
   --indigo: #4b63d6;
   --amber: #e0b45a;
   --fs: 13px;

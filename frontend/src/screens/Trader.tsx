@@ -125,7 +125,7 @@ function GraficoMestre({ par, grau, g }: { par: string; grau: Grau; g: GrauMestr
   const ell = useMemo(() => overlaysElliott(g, ultimo?.close, ultimo?.time), [g, ultimo?.close, ultimo?.time])
   const labels = useMemo(() => {
     const l = [...ell.labels]
-    for (const p of g?.pivots ?? []) if (p.confirmado) l.push({ time: Math.floor(p.ts / 1000), price: p.preco, text: `${p.tipo === 'H' ? '▽' : '△'} ${preco(p.preco)}`, color: p.tipo === 'H' ? '#8fa1ee' : '#7fd8de' })
+    for (const p of g?.pivots ?? []) if (p.confirmado) l.push({ time: Math.floor(p.ts / 1000), price: p.preco, text: `${p.tipo === 'H' ? '▽' : '△'} ${preco(p.preco)}`, color: p.tipo === 'H' ? '#f0544f' : '#2ecc84' })
     return l
   }, [ell.labels, g?.pivots])
   if (q.isPending) return <Loading />

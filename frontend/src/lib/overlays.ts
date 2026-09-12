@@ -4,7 +4,8 @@ import type { ChartLabel, ChartLevel, ChartMarker, ChartPath, ChartProfile, Char
 import { preco } from './format'
 
 // cores do design v2: azul-petróleo = alta/compra, índigo = baixa/venda, âmbar = níveis institucionais
-export const GR = '#7fd8de', RD = '#8fa1ee', AM = '#e0b45a', CY = '#7fd8de', MU = '#6b7685', MU2 = '#9aa4b2', DIM = '#3a4353'
+// GR/RD sao DIRECIONAIS (compra/alta em verde, venda/baixa em vermelho); CY e destaque neutro.
+export const GR = '#2ecc84', RD = '#f0544f', AM = '#e0b45a', CY = '#7fd8de', MU = '#6b7685', MU2 = '#9aa4b2', DIM = '#3a4353'
 
 /** ZigZag (pivôs) + rótulos de onda do cenário primário. */
 export function overlaysElliott(g: { pivots?: Pivot[]; primario?: Cenario | null } | undefined, precoAtual: number | undefined, tsAtual: number | undefined): { paths: ChartPath[]; labels: ChartLabel[]; levels: ChartLevel[] } {

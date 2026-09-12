@@ -149,7 +149,7 @@ export default function PriceChart({ candles, paths = [], labels = [], levels = 
       handleScroll: true, handleScale: true,
     })
     const s = c.addCandlestickSeries({
-      upColor: '#7fd8de', downColor: '#4b63d6', borderVisible: false, wickUpColor: 'rgba(127,216,222,0.7)', wickDownColor: 'rgba(75,99,214,0.8)',
+      upColor: '#2ecc84', downColor: '#f0544f', borderVisible: false, wickUpColor: 'rgba(46,204,132,0.7)', wickDownColor: 'rgba(240,84,79,0.75)',
       priceLineColor: '#e8ecf2', priceLineStyle: LineStyle.Dotted,
     })
     const ov = new Overlay()
@@ -206,7 +206,7 @@ export default function PriceChart({ candles, paths = [], labels = [], levels = 
     const ms: SeriesMarker<Time>[] = ordenar(markers).map((m) => ({
       time: m.time as UTCTimestamp,
       position: m.side === 'buy' ? 'belowBar' : 'aboveBar',
-      color: m.side === 'buy' ? '#7fd8de' : m.side === 'sell' ? '#8fa1ee' : m.side === 'exit' ? '#e0b45a' : '#6b7685',
+      color: m.side === 'buy' ? '#2ecc84' : m.side === 'sell' ? '#f0544f' : m.side === 'exit' ? '#e0b45a' : '#6b7685',
       shape: m.side === 'buy' ? 'arrowUp' : m.side === 'sell' ? 'arrowDown' : 'circle',
       text: m.text,
     }))

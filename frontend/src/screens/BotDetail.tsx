@@ -47,12 +47,16 @@ export default function BotDetail() {
   const trader = det.trader as { direcao?: string; superciclo?: string; leitura?: string } | null | undefined
   // linhas da operação ABERTA no gráfico: entrada, stop, alvo e as fatias que ainda estão no livro
   const escada = estado?.fatias ?? estado?.range ?? null
-  // o gráfico (lightweight-charts) NÃO entende var(--cor) do CSS: só cor literal, senão ele estoura e some
+  // o gráfico (lightweight-charts) NÃO entende var(--cor) do CSS: só cor literal, senão ele estoura e some.
+  // Compra é verde, venda é vermelha — inclusive nas ordens que ainda esperam no livro.
+  const corLado = pos?.direcao === 'sell' ? RD : GR
   const ordens = [
-    pos && { price: pos.preco_entrada, label: `entrada ${pos.direcao === 'buy' ? 'comprada' : 'vendida'}`, color: '#e8ecf2' },
+    pos && { price: pos.preco_entrada, label: pos.direcao === 'buy' ? 'comprado' : 'vendido', color: corLado },
     pos?.sl && { price: pos.sl, label: 'stop', color: RD, dashed: true },
     pos?.tp && { price: pos.tp, label: 'alvo', color: GR, dashed: true },
-    ...(escada?.precos_pendentes ?? []).map((p, i) => ({ price: p, label: `fatia ${i + 2} no livro`, color: '#4b63d6', dashed: true })),
+    ...(escada?.precos_pendentes ?? []).map((p) => ({
+      price: p, label: pos?.direcao === 'sell' ? 'venda esperando' : 'compra esperando', color: corLado, dashed: true,
+    })),
   ].filter(Boolean) as { price: number; label: string; color: string; dashed?: boolean }[]
 
   const acionar = async (forcar = false) => {
