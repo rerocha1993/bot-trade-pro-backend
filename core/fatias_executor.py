@@ -190,12 +190,28 @@ class FatiasExecutor:
                      quantidade=q_ex, motivo=f"{len(feitas)} fatia(s) executada(s): {len(self.trade['executadas'])} de "
                                              f"{self.cfg.n_entradas}, preço médio {pos.preco_entrada:,.1f}")
 
+    def _executar_fatia_simulada(self, f: Dict):
+        """Uma fatia limitada executada no simulador: soma à posição, recalcula o preço médio e a taxa."""
+        t, pos = self.trade, self.ex.posicao
+        q0, p0 = float(pos.quantidade), float(pos.preco_entrada)
+        pos.quantidade = q0 + f["q"]
+        pos.quantidade_inicial = pos.quantidade
+        pos.preco_entrada = (q0 * p0 + f["q"] * f["preco"]) / pos.quantidade
+        pos.taxas = float(pos.taxas or 0) + f["preco"] * f["q"] * TAXA_MAKER
+        t["executadas"].append(f)
+        t["pendentes"].remove(f)
+
     def _gerir_simulado(self, c):
         """Simulador: a mesma ordem do backtest — stop, alvo, fatias novas, tempo."""
         t, pos = self.trade, self.ex.posicao
         hi, lo, close = float(c[2]), float(c[3]), float(c[4])
         s = t["lado"]
         t["candles"] += 1
+        # numa ida até o stop, as fatias no meio do caminho são tomadas ANTES dele, como na corretora. Antes o stop
+        # vinha primeiro e o simulador perdia só a 1ª fatia (o mesmo defeito do motor de backtest, commit 35413cad).
+        if (lo <= t["stop"]) if s == 1 else (hi >= t["stop"]):
+            for f in list(t["pendentes"]):
+                self._executar_fatia_simulada(f)
         if (lo <= t["stop"]) if s == 1 else (hi >= t["stop"]):
             self._cancelar_pendentes("stop")
             self.ex._registrar_saida(t["stop"], "Stop loss (simulado)")
@@ -208,13 +224,7 @@ class FatiasExecutor:
             return
         for f in list(t["pendentes"]):
             if (lo <= f["preco"]) if s == 1 else (hi >= f["preco"]):
-                q0, p0 = float(pos.quantidade), float(pos.preco_entrada)
-                pos.quantidade = q0 + f["q"]
-                pos.quantidade_inicial = pos.quantidade
-                pos.preco_entrada = (q0 * p0 + f["q"] * f["preco"]) / pos.quantidade
-                pos.taxas = float(pos.taxas or 0) + f["preco"] * f["q"] * TAXA_MAKER
-                t["executadas"].append(f)
-                t["pendentes"].remove(f)
+                self._executar_fatia_simulada(f)
         if t["candles"] >= self.cfg.horizonte:
             self._cancelar_pendentes("saída por tempo")
             self.ex._registrar_saida(close, f"Saída por tempo ({self.cfg.horizonte} candles, simulado)")

@@ -330,11 +330,37 @@ class RangeExecutor:
         self._salvar()
         self.ex._log(acao="ajuste_sl", tipo_operacao="info", preco=preco_ref, sl=stop, motivo="Stop no zero a zero depois de tirar o risco")
 
+    def _executar_fatia_simulada(self, f: Dict):
+        """Uma fatia limitada executada no simulador: abre a posição na primeira, soma nas seguintes."""
+        t = self.trade
+        s = t["lado"]
+        t["pendentes"].remove(f)
+        t["executadas"].append(f)
+        if self.ex.posicao is None:
+            exec_ = {"ordem_id": f["ordem_id"], "preco_exec": f["preco"], "quantidade": f["q"], "simulado": True,
+                     "taxa": f["preco"] * f["q"] * TAXA_MAKER}
+            d = {"acao": "buy" if s == 1 else "sell", "cenario": "range tradeiros",
+                 "motivo": f"[fatia limitada executada] {t['motivo']}"}
+            self.ex._registrar_entrada(d, exec_, f["preco"], t["stop"], t["alvo2"])
+            return
+        p0 = self.ex.posicao
+        q0, m0 = float(p0.quantidade), float(p0.preco_entrada)
+        p0.quantidade = q0 + f["q"]
+        p0.quantidade_inicial = p0.quantidade
+        p0.preco_entrada = (q0 * m0 + f["q"] * f["preco"]) / p0.quantidade
+        p0.taxas = float(p0.taxas or 0) + f["preco"] * f["q"] * TAXA_MAKER
+
     def _gerir_simulado(self, c):
         """Simulador: a ordem do backtest (passo_posicao) — stop, tirar o risco, alvo, tempo, fatias novas."""
         t, pos = self.trade, self.ex.posicao
         hi, lo, close = float(c[2]), float(c[3]), float(c[4])
         s = t["lado"]
+        # numa ida até o stop, as fatias no meio do caminho são tomadas ANTES dele (como em passo_posicao). Antes, sem
+        # posição, um bloco que atravessava a escada até o stop deixava a posição ABERTA até o bloco seguinte.
+        if t["pendentes"] and ((lo <= t["stop"]) if s == 1 else (hi >= t["stop"])):
+            for f in list(t["pendentes"]):
+                self._executar_fatia_simulada(f)
+            pos = self.ex.posicao
         if pos is not None:
             t["blocos"] += 1
             if (lo <= t["stop"]) if s == 1 else (hi >= t["stop"]):
@@ -359,22 +385,8 @@ class RangeExecutor:
         executou = False
         for f in list(t["pendentes"]):
             if (lo <= f["preco"]) if s == 1 else (hi >= f["preco"]):
-                t["pendentes"].remove(f)
-                t["executadas"].append(f)
+                self._executar_fatia_simulada(f)
                 executou = True
-                if self.ex.posicao is None:
-                    exec_ = {"ordem_id": f["ordem_id"], "preco_exec": f["preco"], "quantidade": f["q"], "simulado": True,
-                             "taxa": f["preco"] * f["q"] * TAXA_MAKER}
-                    d = {"acao": "buy" if s == 1 else "sell", "cenario": "range tradeiros",
-                         "motivo": f"[fatia limitada executada] {t['motivo']}"}
-                    self.ex._registrar_entrada(d, exec_, f["preco"], t["stop"], t["alvo2"])
-                else:
-                    p0 = self.ex.posicao
-                    q0, m0 = float(p0.quantidade), float(p0.preco_entrada)
-                    p0.quantidade = q0 + f["q"]
-                    p0.quantidade_inicial = p0.quantidade
-                    p0.preco_entrada = (q0 * m0 + f["q"] * f["preco"]) / p0.quantidade
-                    p0.taxas = float(p0.taxas or 0) + f["preco"] * f["q"] * TAXA_MAKER
         if self.ex.posicao is None and not executou:
             self._envelhecer_escada(c)
             return

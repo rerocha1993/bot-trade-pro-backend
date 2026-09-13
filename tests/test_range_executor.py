@@ -211,3 +211,14 @@ def test_demo_corretora_fechou_cancela_o_que_sobrou():
     ex._registrar_saida = lambda preco, motivo, **k: saidas.append(motivo)
     ex.range.ciclo([_c(121, 100, 120)], 120.0, candle_novo=False)
     assert ex.con.canceladas == 1 and saidas == ["SL/TP executado pela exchange"] and ex.range.trade is None
+
+
+def test_bloco_que_atravessa_a_escada_ate_o_stop_perde_o_risco_inteiro(monkeypatch):
+    """Sem posição, um bloco de 100,4 até 89 executa as 5 fatias e bate o stop no MESMO bloco."""
+    monkeypatch.setattr(rx.RangeExecutor, "ler", _leitura(COMPRA))
+    ex = _executor()
+    ex.range.ciclo([_c(101, 100.5, 100.5)], 100.5, candle_novo=True)
+    ex.range.ciclo([_c(100.4, 89, 89.5)], 89.5, candle_novo=True)
+    assert ex.posicao is None and ex.range.trade is None, "antes a posição ficava aberta até o bloco seguinte"
+    saida = [x for x in ex.logs if x.get("tipo_operacao") == "saida"]
+    assert len(saida) == 1 and saida[0]["resultado"] == pytest.approx(-100.0, rel=0.1)

@@ -177,3 +177,13 @@ def test_corretora_executou_fatias_atualiza_preco_medio():
     ex.fatias.ciclo([_candle(99, 95, 97)], 97.0, candle_novo=False)
     assert ex.posicao.quantidade == 0.6 and ex.posicao.preco_entrada == 98.0
     assert len(ex.fatias.trade["executadas"]) == 3 and not ex.fatias.trade["pendentes"]
+
+
+def test_queda_ate_o_stop_executa_as_fatias_do_caminho_antes(monkeypatch):
+    """Um candle de 100 até 89 passa por 98, 96, 94 e 92 antes do stop de 90: perde o risco inteiro, não 1/5 dele."""
+    monkeypatch.setattr(fe, "decidir", lambda ohlcv, cfg: dict(COMPRA))
+    ex = _executor()
+    ex.fatias.ciclo([_candle(100, 100, 100)], 100.0, candle_novo=True)
+    pos = ex.posicao
+    ex.fatias.ciclo([_candle(100, 89, 89)], 89.0, candle_novo=True)
+    assert pos.status == "fechada" and pos.pnl == pytest.approx(-100.0, rel=0.1)
