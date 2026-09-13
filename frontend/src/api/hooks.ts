@@ -12,14 +12,26 @@ export const useStatusBot = (id: number | null) => useQuery({
   queryFn: () => api.get<StatusBot>(`/status/bots/${id}`),
 })
 
+/**
+ * Busca de TODOS os robôs sem deixar um com erro esvaziar os outros. Com Promise.all, o 500 do robô 10 rejeitava
+ * a busca inteira e a visão geral mostrava "sem posição" e "ciclo 0" para todos — inclusive o robô que estava
+ * comprado. Só falha se nenhum robô responder.
+ */
+async function porRobo<T>(ids: number[], buscar: (id: number) => Promise<T>): Promise<T[]> {
+  const r = await Promise.allSettled(ids.map(buscar))
+  const ok = r.filter((x): x is PromiseFulfilledResult<Awaited<T>> => x.status === 'fulfilled').map((x) => x.value)
+  if (!ok.length && r.length) throw (r[0] as PromiseRejectedResult).reason
+  return ok
+}
+
 export const useDetalhes = (ids: number[]) => useQuery({
   queryKey: ['bots-detalhe', ids], enabled: ids.length > 0, refetchInterval: 5_000,
-  queryFn: () => Promise.all(ids.map((id) => api.get<StatusBot>(`/status/bots/${id}`))),
+  queryFn: () => porRobo(ids, (id) => api.get<StatusBot>(`/status/bots/${id}`)),
 })
 
 export const useFechadas = (ids: number[], limite = 300) => useQuery({
   queryKey: ['fechadas', ids, limite], enabled: ids.length > 0, refetchInterval: 30_000,
-  queryFn: () => Promise.all(ids.map((id) => api.get<PosicoesResp>(`/status/bots/${id}/posicoes`, { status: 'fechada', limite }))),
+  queryFn: () => porRobo(ids, (id) => api.get<PosicoesResp>(`/status/bots/${id}/posicoes`, { status: 'fechada', limite })),
 })
 
 export const usePosicoes = (id: number | null, limite = 30) => useQuery({
@@ -29,7 +41,7 @@ export const usePosicoes = (id: number | null, limite = 30) => useQuery({
 
 export const useLogs = (ids: number[], limite = 8) => useQuery({
   queryKey: ['logs', ids, limite], enabled: ids.length > 0, refetchInterval: 15_000,
-  queryFn: () => Promise.all(ids.map((id) => api.get<LogExecucao[]>(`/bot-control/${id}/historico`, { limite }))),
+  queryFn: () => porRobo(ids, (id) => api.get<LogExecucao[]>(`/bot-control/${id}/historico`, { limite })),
 })
 
 export const useDecisoes = (id: number | null, limite = 30) => useQuery({

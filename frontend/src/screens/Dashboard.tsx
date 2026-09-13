@@ -7,6 +7,18 @@ import { Header, Page, usePreco } from '../components/Layout'
 import { Btn, Card, Empty, Err, KPI, Loading, ModoTag } from '../components/ui'
 import { corAcao, corPnl, fmt, fmtSigned, hora, pct, preco, rotuloAcao } from '../lib/format'
 
+type QuedaRede = { kind: 'rede'; id: string; inicio: string; fim: string; inicioMs: number; ciclos: number; robos: Set<string>; timeouts: number }
+type Alerta = QuedaRede | (LogExecucao & { nome: string; kind: 'log' })
+
+/**
+ * Erro de REDE, não do robô. A ccxt usa a URL como mensagem ("bybit GET https://..."), com ou sem o nome da
+ * exceção na frente (NetworkError, RequestTimeout, ExchangeNotAvailable).
+ */
+export function ehErroDeRede(erro: string | null | undefined): boolean {
+  if (!erro) return false
+  return /^(NetworkError|RequestTimeout|ExchangeNotAvailable|DDoSProtection)\b/.test(erro) || /^bybit (GET|POST) https?:\/\//.test(erro)
+}
+
 function pnlAberto(p: Posicao | null, precoAtual: number | undefined): number | null {
   if (!p || !precoAtual) return null
   return (p.direcao === 'buy' ? precoAtual - p.preco_entrada : p.preco_entrada - precoAtual) * p.quantidade
@@ -42,7 +54,7 @@ export default function Dashboard() {
   const ids = useMemo(() => (bots.data ?? []).map((b) => b.id), [bots.data])
   const detalhes = useDetalhes(ids)
   const fechadas = useFechadas(ids)
-  const logs = useLogs(ids)
+  const logs = useLogs(ids, 40)
   const precoQ = usePreco()
   const ctl = useControleBot()
   const [erroCtl, setErroCtl] = useState<{ id: number; msg: string; gate: boolean } | null>(null)
@@ -76,7 +88,23 @@ export default function Dashboard() {
   const alertas = useMemo(() => {
     const nomes = new Map((bots.data ?? []).map((b) => [b.id, b.nome]))
     const l: (LogExecucao & { nome: string })[] = (logs.data ?? []).flat().map((x) => ({ ...x, nome: nomes.get(x.bot_id) || `bot ${x.bot_id}` }))
-    return l.sort((a, b) => (b.data_execucao || '').localeCompare(a.data_execucao || '')).slice(0, 12)
+    l.sort((a, b) => (b.data_execucao || '').localeCompare(a.data_execucao || ''))
+    // uma queda de rede derruba TODOS os robôs no mesmo minuto: vira UM evento em âmbar, com duração e ciclos
+    // perdidos, em vez de uma parede vermelha que esconde o que de fato aconteceu
+    const out: Alerta[] = []
+    for (const a of l) {
+      if (!ehErroDeRede(a.erro)) { out.push({ kind: 'log', ...a }); continue }
+      const t = Date.parse(a.data_execucao)
+      const grupo = out.find((x): x is QuedaRede => x.kind === 'rede' && x.inicioMs - t <= 5 * 60_000)
+      if (grupo) {
+        grupo.inicioMs = t; grupo.inicio = a.data_execucao; grupo.ciclos += 1; grupo.robos.add(a.nome)
+        if (/RequestTimeout/.test(a.erro ?? '')) grupo.timeouts += 1
+        continue
+      }
+      out.push({ kind: 'rede', id: `rede-${a.id}`, fim: a.data_execucao, inicio: a.data_execucao, inicioMs: t, ciclos: 1,
+                 robos: new Set([a.nome]), timeouts: /RequestTimeout/.test(a.erro ?? '') ? 1 : 0 })
+    }
+    return out.slice(0, 12)
   }, [logs.data, bots.data])
 
   const acionar = async (b: StatusBot | undefined, id: number, ligado: boolean, forcar = false) => {
@@ -169,7 +197,23 @@ export default function Dashboard() {
           <div style={{ padding: '0 24px 10px' }}>
             {!alertas.length && <Empty>sem eventos</Empty>}
             {alertas.map((a) => {
-              const cor = a.erro ? 'var(--red)' : a.acao === 'buy' || a.tipo_operacao === 'entrada' ? 'var(--acc)' : a.acao === 'sell' ? 'var(--red)' : a.acao === 'hold' ? 'var(--amber)' : 'var(--muted-2)'
+              if (a.kind === 'rede') {
+                const soTimeout = a.timeouts === a.ciclos
+                return (
+                  <div key={a.id} style={{ display: 'flex', gap: 18, padding: '11px 0', borderTop: '1px solid var(--border-3)', alignItems: 'center' }}>
+                    <span className="mono muted" style={{ fontSize: 12, width: 88, flex: '0 0 88px' }}>{hora(a.fim, true)}</span>
+                    <span className="dot" style={{ width: 6, height: 6, flex: '0 0 6px', background: 'var(--amber)' }} />
+                    <span style={{ width: 140, flex: '0 0 140px' }}>{a.robos.size} robô{a.robos.size > 1 ? 's' : ''}</span>
+                    <span style={{ color: 'var(--amber)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={[...a.robos].join(', ')}>
+                      {soTimeout ? 'Bybit demorou a responder' : 'Sem conexão com a Bybit (internet/DNS)'}
+                      {' · '}{a.ciclos} ciclo{a.ciclos > 1 ? 's' : ''} perdido{a.ciclos > 1 ? 's' : ''}
+                      {a.inicio !== a.fim ? ` · desde ${hora(a.inicio)}` : ''}
+                    </span>
+                  </div>
+                )
+              }
+              const cor = a.erro ? 'var(--red)' : a.acao === 'buy' || a.tipo_operacao === 'entrada' ? 'var(--green)' : a.acao === 'sell' ? 'var(--red)' : a.acao === 'hold' ? 'var(--amber)' : 'var(--muted-2)'
               return (
                 <div key={a.id} style={{ display: 'flex', gap: 18, padding: '11px 0', borderTop: '1px solid var(--border-3)', alignItems: 'center' }}>
                   <span className="mono muted" style={{ fontSize: 12, width: 88, flex: '0 0 88px' }}>{hora(a.data_execucao, true)}</span>

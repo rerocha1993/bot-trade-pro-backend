@@ -40,6 +40,20 @@ from services.telegram_alert_service import TelegramAlertService
 logger = logging.getLogger(__name__)
 
 
+def _json_puro(x):
+    """
+    Tipos do numpy não serializam na API. O /status/ junta o estado de TODOS os robôs: um numpy.bool_ na leitura
+    do range do robô 10 derrubava a resposta inteira com 500, e a bolinha de saúde do painel parava para todos.
+    """
+    if isinstance(x, dict):
+        return {k: _json_puro(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_json_puro(v) for v in x]
+    if type(x).__module__ == "numpy" and hasattr(x, "item"):
+        return x.item()
+    return x
+
+
 def _agora_utc() -> datetime:
     """UTC sem fuso, como o banco guarda (o mesmo valor do antigo datetime.utcnow(), sem o aviso)."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1176,4 +1190,4 @@ class BotExecutor:
         s["bot_id"] = self.bot_id
         s["nome"] = self.nome
         s["ordem_pendente"] = {k: v for k, v in (self.ordem_pendente or {}).items() if k != "decisao"} or None
-        return s
+        return _json_puro(s)

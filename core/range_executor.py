@@ -155,8 +155,9 @@ class RangeExecutor:
         pl, ctx = leitura["plano"], leitura["contexto"]
         lsr = self.lsr.contexto() if self.cfg.usar_presos else None
         agora = int(time.time() * 1000)
-        faixa = {"val": round(ctx.val, 1), "poc": round(ctx.poc, 1), "vah": round(ctx.vah, 1), "minima": round(ctx.minima, 1),
-                 "maxima": round(ctx.maxima, 1), "dias": ctx.dias, "valido": ctx.valido} if ctx else None
+        faixa = {"val": round(float(ctx.val), 1), "poc": round(float(ctx.poc), 1), "vah": round(float(ctx.vah), 1),
+                 "minima": round(float(ctx.minima), 1), "maxima": round(float(ctx.maxima), 1), "dias": int(ctx.dias),
+                 "valido": bool(ctx.valido)} if ctx else None
         fluxo = {"long_short": lsr.atual(agora), "mediana_30d": lsr.mediana(agora)} if lsr else None
         self.ultima_leitura = {"range": faixa, "toques": leitura.get("toques"), "aceitacao": leitura.get("aceitacao"),
                                "long_short": fluxo, "motivo": leitura["motivo"]}
