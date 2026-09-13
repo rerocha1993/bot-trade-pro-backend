@@ -74,3 +74,13 @@ O usuário estudou 2 anos no grupo privado do Tradeiros (Shaka e Maroja; YouTube
 - Rode com `./.venv/Scripts/python.exe`; testes com `-m pytest -q`.
 
 Ao terminar, entregue: o que foi testado, a regra exata, os números por período (e compra/venda), o veredito pelo critério, e o que ainda falta testar.
+
+## Perfil do Tradeiros por regime (compilado de 25 lives, 2022–2026)
+
+Documento completo: `docs/tradeiros/perfil_por_regime.md` (fichas de cada live em `docs/tradeiros/fichas/`). Leia antes de propor ou revisar estratégia. Pontos centrais:
+- A unidade é a CARTEIRA em BTC: exposição comprada + hedge vendido no inverse (coin-M, sem alavancagem). O short é proteção/realização, não aposta; o stop do short é "pedágio" pago pelo long protegido.
+- Hedge variável por regime: ~20–40% em preço descontado/pós-topo, alto (até ~65%, em topo esticado mais) perto da máxima; sobe em escada nas resistências, é realizado nos suportes; no pânico realiza metade do short e compra a reação.
+- Meio do range não abre posição (só realiza/ajusta hedge); suporte/VAL só compra, resistência/VAH só vende; rompimento só com aceitação e reteste.
+- Risco até 1% por trade, alvo >= 3R aceitando acerto de 20–40%; entrada em 5–9 limitadas; em 1R realiza 25–50% e stop no médio.
+- Em evento (ETF, halving, FTX, dado macro) não aumentam mão; mantêm hedge.
+- O método evoluiu: em 2022 order flow era quase gatilho e risco em dólar; hoje fluxo é contexto (Coinbase spot) e risco em %.
