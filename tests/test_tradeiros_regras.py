@@ -8,11 +8,12 @@ RANGE = {"val": 76000.0, "poc": 78000.0, "vah": 80000.0, "minima": 75000.0, "max
          "valido": True, "dias_de_lateral": 8}
 
 
-def _lt(preco, estado="intermediario", do_topo=-0.20, estrutura=None, sentimento=50, derivativos=None, range_=RANGE):
+def _lt(preco, estado="intermediario", do_topo=-0.20, estrutura=None, sentimento=50, derivativos=None, range_=RANGE,
+        semanal=None):
     p = posicao_no_range(preco, range_["val"], range_["vah"]) if range_ else None
     return Leitura(ts=0, preco=preco, range=range_, p=p, zona=zona_do_range(p), ciclo={"estado": estado, "do_topo": do_topo},
                    estrutura=estrutura or {"tendencia": "lateral", "quebra": None}, sentimento=sentimento,
-                   derivativos=derivativos or {})
+                   derivativos=derivativos or {}, estrutura_semanal=semanal or {})
 
 
 MAPA_NEUTRO = {"prob_bull": 0.4, "prob_bear": 0.4, "inclinacao": 0.0, "veto_onda_4": False}
@@ -89,8 +90,37 @@ def test_medo_extremo_descontado_derruba_o_hedge_e_bear_declarado_sobe_para_90()
     assert h == pytest.approx(0.25, abs=0.011) and "P11" in regras
     assert "R30" not in regras, "com o cenário baixista neutro não re-hedgeia"
     assert hedge_alvo(medo, {"prob_bear": 0.6, "inclinacao": 0.0}, contexto_fluxo(medo), MAROJA)[0] == 0.40
-    bear = _lt(70000, estado="descontado", do_topo=-0.40, estrutura=BAIXA)
+    bear = _lt(70000, estado="descontado", do_topo=-0.40, estrutura=BAIXA, semanal=BAIXA)
     assert hedge_alvo(bear, {"inclinacao": -0.6, "prob_bear": 0.8}, contexto_fluxo(bear), MAROJA)[0] == 0.90
+    assert hedge_alvo(bear, MAPA_NEUTRO, contexto_fluxo(bear), MAROJA)[0] < 0.90, "o Maroja pede o mapa de baixa"
+
+
+def test_bear_de_2022_o_shaka_fica_90_por_cento_vendido_sem_depender_de_elliott():
+    bear = _lt(75500, estado="descontado", do_topo=-0.75, estrutura=BAIXA, semanal=BAIXA)
+    assert hedge_alvo(bear, MAPA_NEUTRO, contexto_fluxo(bear), SHAKA)[0] == 0.90
+    # 2023: ainda ~57% abaixo do topo, mas a estrutura semanal já era de alta — correção, não bear
+    correcao = _lt(75500, estado="descontado", do_topo=-0.57, estrutura=BAIXA, semanal={"tendencia": "alta", "quebra": None})
+    assert hedge_alvo(correcao, MAPA_NEUTRO, contexto_fluxo(correcao), SHAKA)[0] < 0.5
+
+
+def test_quebra_da_estrutura_semanal_para_cima_leva_o_hedge_ao_minimo():
+    lt = _lt(79800, semanal={"tendencia": "lateral", "quebra": "alta"})
+    assert hedge_alvo(lt, MAPA_NEUTRO, contexto_fluxo(lt), MAROJA)[0] == pytest.approx(MAROJA.hedge_min)
+
+
+def test_stop_da_escada_do_hedge_tem_a_folga_de_pedagio_deles():
+    esc = _uma(planejar(_lt(79800), MAPA_NEUTRO, MAROJA, hedge_atual=0.20), "hedge_aumentar")
+    assert esc.stop == pytest.approx(max(esc.zona[1], RANGE["maxima"]) * 1.02)
+
+
+def test_sem_hedge_informado_parte_do_hedge_do_poc_e_sobe_na_vah():
+    plano = planejar(_lt(79800), MAPA_NEUTRO, SHAKA)
+    assert "hedge_aumentar" in _tipos(plano)
+
+
+def test_na_alta_a_compra_do_reteste_mira_alem_do_topo():
+    c = _uma(planejar(_lt(79800, estrutura={"tendencia": "alta", "quebra": None}), MAPA_NEUTRO, MAROJA), "compra")
+    assert c.alvo == RANGE["maxima"] + 4000 and "P8" in c.regras
 
 
 def test_veto_de_onda_4_trava_o_maroja_e_nao_o_shaka():

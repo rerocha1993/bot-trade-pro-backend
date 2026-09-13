@@ -41,6 +41,7 @@ class Perfil:
     venda_direcional: bool          # além do hedge, abre short direcional na resistência
     fatias: int                     # limitadas escalonadas (R20)
     folga_stop: float               # além da invalidação (fração do preço)
+    folga_pedagio: float = 0.015    # stop da escada do hedge acima da última ordem (83,8–85,7k → ~87k em qvboV9frI94)
     rr_minimo: float = 3.0          # R19
     realizar_em_1r: float = 0.25    # R22: fração realizada em 1:1, stop vai ao preço médio
     preenchimento_minimo: float = 0.4  # R24: abaixo disso e o preço saiu da zona → fecha o que preencheu
@@ -51,7 +52,7 @@ SHAKA = Perfil(nome="shaka", risco_extremo=0.02, risco_meio=0.01, risco_teto=0.0
                venda_direcional=True, fatias=5, folga_stop=0.003, realizar_em_1r=0.5)
 MAROJA = Perfil(nome="maroja", risco_extremo=0.01, risco_meio=0.006, risco_teto=0.01, exige_reacao_fora_do_valor=True,
                 peso_elliott=1.0, peso_fluxo=0.5, hedge_min=0.24, hedge_max=0.60, hedge_extra=0.10,
-                venda_direcional=False, fatias=9, folga_stop=0.006, realizar_em_1r=0.25)
+                venda_direcional=False, fatias=9, folga_stop=0.006, folga_pedagio=0.02, realizar_em_1r=0.25)
 PERFIS = {"shaka": SHAKA, "maroja": MAROJA}
 
 HEDGE_BEAR = 0.90                   # bear declarado de 2022 (I_zjWuQqn_s): 90–100%
@@ -145,9 +146,12 @@ def hedge_alvo(lt: Leitura, mapa: Dict, fluxo: Dict, perfil: Perfil) -> Tuple[fl
     est = lt.estrutura or {}
     inclinacao = float(mapa.get("inclinacao") or 0.0)
 
-    # bear declarado: perdeu o valor, estrutura de baixa e o mapa de baixa (2022)
-    if (lt.zona == "abaixo_do_valor" and est.get("tendencia") == "baixa" and do_topo <= -0.20
-            and inclinacao * perfil.peso_elliott <= -0.15):
+    # bear declarado (2022, "depois de perder o range"): estrutura SEMANAL de baixa, longe do topo e fora do valor por
+    # baixo. O Maroja ainda pede o mapa de baixa; o Shaka não depende de Elliott. Em 2023 o preço seguia ~57% abaixo
+    # do topo, mas a estrutura semanal já era de alta — correção, não bear.
+    sem = lt.estrutura_semanal or {}
+    if (lt.zona in ("abaixo_do_valor", "fundo") and sem.get("tendencia") == "baixa" and do_topo <= -0.20
+            and (perfil.peso_elliott < 1.0 or inclinacao <= -0.15)):
         return HEDGE_BEAR, ["R31", "bear"]
 
     h = {"esticado": 0.50, "intermediario": 0.35, "descontado": 0.25}.get(estado, 0.35) + perfil.hedge_extra
@@ -169,6 +173,9 @@ def hedge_alvo(lt: Leitura, mapa: Dict, fluxo: Dict, perfil: Perfil) -> Tuple[fl
         regras.append("P13")
     if est.get("quebra") == "alta" and lt.zona == "acima_do_valor":
         h -= 0.10
+        regras.append("R12")
+    if sem.get("quebra") == "alta":
+        h = perfil.hedge_min                                      # quebra da estrutura semanal: "pode até fechar o hedge" (R12)
         regras.append("R12")
     h -= 0.10 * inclinacao * perfil.peso_elliott                  # contagens mudam a % de exposição, não o lado (R15)
     if perfil.peso_elliott and inclinacao:
@@ -232,6 +239,9 @@ def _compra(lt, mapa, fluxo, perfil, pesos) -> Optional[Decisao]:
         lo, hi, alvo = lt.preco * 0.97, lt.preco * 0.995, poc
     else:                                                           # zona passiva: limitadas na VAL esperando o preço
         lo, hi, alvo = val - 0.15 * w, min(val + 0.20 * w, lt.preco * 0.999), vah
+        if est.get("tendencia") == "alta":
+            alvo = r["maxima"] + w                                  # na alta a compra do reteste mira além do topo
+            regras.append("P8")
     if hi <= lo:
         return None
     setup2 = mapa.get("setup_onda_2") or {}
@@ -276,7 +286,7 @@ def _zona_de_venda(lt: Leitura) -> Tuple[float, float]:
 
 def planejar(lt: Leitura, mapa: Dict, perfil: Perfil, hedge_atual: Optional[float] = None,
              evento: bool = False) -> Plano:
-    """`hedge_atual` None = a carteira já está no hedge do preço de agora (útil para comparar com as lives)."""
+    """`hedge_atual` None = a carteira está no hedge do meio do range (POC): o ponto neutro para comparar com as lives."""
     fluxo = contexto_fluxo(lt)
     h_agora, h_regras = hedge_alvo(lt, mapa, fluxo, perfil)
     plano = Plano(perfil.nome, lt.ts, lt.preco, h_agora, h_regras, fluxo, [])
@@ -285,7 +295,8 @@ def planejar(lt: Leitura, mapa: Dict, perfil: Perfil, hedge_atual: Optional[floa
     if r is None or lt.p is None:
         dec.append(Decisao("ficar_fora", ["R1"], "sem range montado"))
         return plano
-    hedge_atual = h_agora if hedge_atual is None else hedge_atual
+    if hedge_atual is None:
+        hedge_atual = hedge_alvo(na_borda(lt, r["poc"]), mapa, fluxo, perfil)[0]
     val, poc, vah = r["val"], r["poc"], r["vah"]
     w = vah - val
     est = lt.estrutura or {}
@@ -313,7 +324,8 @@ def planejar(lt: Leitura, mapa: Dict, perfil: Perfil, hedge_atual: Optional[floa
     zv = _zona_de_venda(lt)
     h_topo = h_agora if lt.zona == "acima_do_valor" else hedge_alvo(na_borda(lt, vah), mapa, fluxo, perfil)[0]
     if h_topo - hedge_atual >= PASSO_HEDGE:
-        stop, _ = _invalidacao_venda(lt, mapa, perfil, zv[1])
+        # pedágio: acima da última ordem da escada e do topo do range, com a folga que eles usam (~1,5–2%)
+        stop = max(zv[1], r["maxima"]) * (1 + perfil.folga_pedagio)
         dec.append(Decisao("hedge_aumentar", ["R27", "R28"] + (["R32"] if hedge_atual > 0 else []),
                            f"escada de venda no inverse até {h_topo:.0%} (stop é pedágio acima do topo)",
                            zona=zv, pesos_fatias=pesos, stop=stop, fracao_hedge=round(h_topo - hedge_atual, 3)))

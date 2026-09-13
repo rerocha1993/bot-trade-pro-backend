@@ -28,6 +28,7 @@ from core.elliott_pro.pivots import Pivot, zigzag_atr
 from core.fibonacci import Fibonacci
 from core.range_tradeiros import ParametrosRange, contexto, contexto_adaptativo
 from core.tpo_sessao import BLOCO_MS, DIA_MS, Perfil, blocos_30m, naked_pocs
+from tradeiros.elliott_mapa import semanais_ate
 
 H4_MS = 4 * 3_600_000
 RETRACOES = (0.382, 0.5, 0.618, 0.666, 0.786)
@@ -41,6 +42,7 @@ class ParametrosLeitura:
     meio_largura: float = 0.15          # |p − 0,5| < 0,15 → meio do range: não abrir posição (R1)
     quartil: float = 0.25               # p ≤ 0,25 → fundo; p ≥ 0,75 → topo (R3)
     fator_zigzag_4h: float = 2.5
+    fator_zigzag_semanal: float = 2.0
     quebra_barras: int = 6              # quebra de estrutura nos últimos 6 candles de 4h (24 h)
     esticado_do_topo: float = -0.10     # até 10% abaixo do ATH = esticado
     descontado_do_topo: float = -0.30   # mais de 30% abaixo do ATH = descontado
@@ -58,6 +60,7 @@ class Leitura:
     aberturas: Dict[str, Optional[float]] = field(default_factory=dict)
     pivo_virgem: Dict[str, Optional[float]] = field(default_factory=dict)
     estrutura: Dict = field(default_factory=dict)
+    estrutura_semanal: Dict = field(default_factory=dict)
     fib: Dict = field(default_factory=dict)
     ciclo: Dict = field(default_factory=dict)
     sentimento: Optional[int] = None
@@ -284,6 +287,12 @@ class LeituraDiaria:
             closes = [float(x[4]) for x in h4[-prm.quebra_barras:]]
             lt.estrutura = estrutura_dos_pivos(pivos, closes)
             lt.fib = fib_do_ultimo_movimento(pivos)
+
+        # estrutura semanal no histórico longo: separa o bear declarado (2022) da correção dentro da alta (R12, R31)
+        semanas = semanais_ate(d.diarios_longos_ate(ts), ts)
+        if len(semanas) >= 30:
+            piv_w, _ = zigzag_atr(semanas[-300:], fator_atr=prm.fator_zigzag_semanal)
+            lt.estrutura_semanal = estrutura_dos_pivos(piv_w, [float(x[4]) for x in semanas[-2:]])
 
         # sentimento e derivativos
         fg = d.ultimo(d.fear, ts)
