@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type {
   Backtest, BacktestsBot, BotStatusItem, Decisao, Dial, LogExecucao, Mestre, MultiGrau, NiveisResp, PontoInstitucional,
-  OpcoesAlavancagem, Plano, PosicoesResp, PosicaoAberta, RangeContexto, Sentimento, StatusBot, Trader, InverseEstado, PropostaRange } from './types'
+  OpcoesAlavancagem, Plano, PosicoesResp, PosicaoAberta, RangeContexto, Sentimento, StatusBot, Trader, InverseEstado, PropostaRange,
+  TradeirosBacktestResp, TradeirosPlanoResp } from './types'
 import { candlesDaApi } from './adapters'
 
 export const useBots = () => useQuery({ queryKey: ['bots'], queryFn: () => api.get<BotStatusItem[]>('/bot-control/'), refetchInterval: 5_000 })
@@ -149,6 +150,17 @@ export function useRangeInverse() {
   })
   return { aprovar, cancelar }
 }
+
+/** Portal Tradeiros: sem data = ao vivo (o backend refaz a cada 5 min); com data = replay daquele dia. */
+export const useTradeirosPlano = (data: string | null) => useQuery({
+  queryKey: ['tradeiros-plano', data], refetchInterval: data ? false : 60_000,
+  queryFn: () => api.get<TradeirosPlanoResp>('/api/tradeiros/plano', data ? { data } : {}),
+})
+
+export const useTradeirosBacktest = () => useQuery({
+  queryKey: ['tradeiros-backtest'], refetchInterval: 300_000,
+  queryFn: () => api.get<TradeirosBacktestResp>('/api/tradeiros/backtest'),
+})
 
 export const useRangeContexto = (par = 'BTCUSDT') => useQuery({
   queryKey: ['range-contexto', par], refetchInterval: 60_000,

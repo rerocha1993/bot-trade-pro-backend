@@ -6,7 +6,7 @@ import type { StatusGeral } from '../api/types'
 import { fmt, pctSigned } from '../lib/format'
 
 const NAV = [
-  ['/', 'Visão geral'], ['/posicoes', 'Posições'], ['/trader', 'Mesa do trader'], ['/mercado', 'Mercado'], ['/range', 'Range'], ['/pontos', 'Pontos'],
+  ['/', 'Visão geral'], ['/posicoes', 'Posições'], ['/trader', 'Mesa do trader'], ['/mercado', 'Mercado'], ['/range', 'Range'], ['/tradeiros', 'Tradeiros'], ['/pontos', 'Pontos'],
   ['/sentimento', 'Sentimento'], ['/historico', 'Histórico'], ['/bots/novo', 'Configurar'],
 ] as const
 

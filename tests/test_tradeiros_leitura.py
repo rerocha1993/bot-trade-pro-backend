@@ -81,6 +81,16 @@ def test_leitura_monta_range_zona_e_sentimento():
     assert lt.ciclo["estado"] in ("esticado", "intermediario", "descontado")
 
 
+def test_juntar_candles_poe_os_recentes_por_cima_do_historico():
+    from tradeiros.leitura import juntar_candles
+    cols = ["timestamp", "open", "high", "low", "close", "volume"]
+    base = pd.DataFrame([[1, 1, 1, 1, 1, 1], [2, 2, 2, 2, 2, 2]], columns=cols)
+    rec = pd.DataFrame([[2, 9, 9, 9, 9, 9], [3, 3, 3, 3, 3, 3]], columns=cols)
+    j = juntar_candles(base, rec)
+    assert j["timestamp"].tolist() == [1, 2, 3] and j.loc[j.timestamp == 2, "close"].item() == 9
+    assert juntar_candles(base, None) is base and juntar_candles(None, rec)["timestamp"].tolist() == [2, 3]
+
+
 def test_historico_longo_tambem_so_entrega_o_que_fechou():
     dados = _mercado(30)
     longo = pd.DataFrame({"timestamp": [T0 - 400 * DIA_MS + i * DIA_MS for i in range(430)], "open": 1.0, "high": 2.0,

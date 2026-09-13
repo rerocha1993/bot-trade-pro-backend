@@ -144,6 +144,17 @@ def _serie_ts(d: Dict) -> Tuple[List[int], List[float]]:
     return [p[0] for p in pares], [p[1] for p in pares]
 
 
+def juntar_candles(base: Optional[pd.DataFrame], recentes: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """Candles recentes por cima do histórico: no mesmo timestamp vale o recente."""
+    if recentes is None or recentes.empty:
+        return base
+    if base is None or base.empty:
+        return recentes.sort_values("timestamp").reset_index(drop=True)
+    cols = ["timestamp", "open", "high", "low", "close", "volume"]
+    juntos = pd.concat([base.loc[~base["timestamp"].isin(recentes["timestamp"]), cols], recentes[cols]])
+    return juntos.sort_values("timestamp").reset_index(drop=True)
+
+
 class Dados:
     """Históricos carregados uma vez; toda consulta é 'até ts'."""
 
@@ -171,7 +182,10 @@ class Dados:
         self._perfis: Dict[int, Perfil] = {}
 
     @classmethod
-    def do_projeto(cls, raiz: str = ".") -> "Dados":
+    def do_projeto(cls, raiz: str = ".", recentes: Optional[Dict[str, pd.DataFrame]] = None,
+                   intraday_dias: Optional[int] = None) -> "Dados":
+        """CSVs do projeto. `recentes` {'1d', '4h', '30m'}: candles da exchange somados por cima (painel ao vivo; no
+        mesmo timestamp vale o recente). `intraday_dias` corta o 15m aos últimos N dias (o range só usa ~20)."""
         h = os.path.join(raiz, "data", "historico")
 
         def csv(nome):
@@ -185,9 +199,23 @@ class Dados:
             d = json.load(open(caminho, encoding="utf-8"))
             return d.get(chave) if chave else d
 
-        return cls(csv("BTCUSDT_binance_1d.csv"), csv("BTCUSDT_binance_4h.csv"), csv("BTCUSDT_binance_15m.csv"),
-                   js("funding_bybit.json", "inverse"), js("oi_bybit_1h.json"), js("lsr_bybit_1h.json"),
-                   csv("fear_greed.csv"), csv("BTCUSD_bitstamp_1d.csv"))
+        d1, h4, m15, longo = (csv("BTCUSDT_binance_1d.csv"), csv("BTCUSDT_binance_4h.csv"),
+                              csv("BTCUSDT_binance_15m.csv"), csv("BTCUSD_bitstamp_1d.csv"))
+        if intraday_dias and m15 is not None and not m15.empty:
+            m15 = m15[m15["timestamp"] >= m15["timestamp"].max() - intraday_dias * DIA_MS]
+        rec = recentes or {}
+        if rec.get("1d") is not None:
+            d1 = juntar_candles(d1, rec["1d"])
+            if longo is not None:                                   # o histórico longo continua pelos diários recentes
+                longo = juntar_candles(longo, rec["1d"][rec["1d"]["timestamp"] > longo["timestamp"].max()])
+        if rec.get("4h") is not None:
+            h4 = juntar_candles(h4, rec["4h"])
+        if rec.get("30m") is not None and not rec["30m"].empty:
+            # 15m dos CSVs só até onde começam os 30m recentes: no mesmo bloco os dois somariam volume duas vezes
+            antigos = m15[m15["timestamp"] < rec["30m"]["timestamp"].min()] if m15 is not None else None
+            m15 = juntar_candles(antigos, rec["30m"])
+        return cls(d1, h4, m15, js("funding_bybit.json", "inverse"), js("oi_bybit_1h.json"), js("lsr_bybit_1h.json"),
+                   csv("fear_greed.csv"), longo)
 
     # --- recortes "até ts" (candle só conta depois de FECHADO)
     def diarios_ate(self, ts: int) -> List[list]:

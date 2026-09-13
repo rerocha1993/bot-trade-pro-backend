@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from api.routes import (  # noqa: E402
     bot_control_controller, bot_controller, coins_routes, elliott_routes, indicador_controller,
     institucional_routes, log_chart_routes, log_routes, nuvens_endpoint, order_blocks_routes,
-    ponto_institucional_routes, posicoes_routes, range_routes, status_routes, backtest_routes, inverse_routes,
+    ponto_institucional_routes, posicoes_routes, range_routes, tradeiros_routes, status_routes, backtest_routes, inverse_routes,
 )
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -100,6 +100,7 @@ app.include_router(order_blocks_routes.router, tags=["Order Blocks"])
 app.include_router(institucional_routes.router, tags=["Institucional"])
 app.include_router(elliott_routes.router, prefix="/api/elliott", tags=["Elliott"])
 app.include_router(range_routes.router, prefix="/api/range", tags=["Range"])
+app.include_router(tradeiros_routes.router, prefix="/api/tradeiros", tags=["Portal Tradeiros"])
 app.include_router(posicoes_routes.router, prefix="/posicoes", tags=["Posições"])
 
 # painel (React + Lightweight Charts): `cd frontend && npm run build` gera frontend/dist, servido em /painel

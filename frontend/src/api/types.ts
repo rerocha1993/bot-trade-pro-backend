@@ -591,6 +591,58 @@ export interface RangeContexto {
   motivo: string
 }
 
+/** Portal Tradeiros (GET /api/tradeiros/plano e /api/tradeiros/backtest) */
+export interface DecisaoTradeiros {
+  tipo: string; regras: string[]; motivo: string; zona: [number, number] | null; pesos_fatias: number[]
+  stop: number | null; alvo: number | null; risco: number; fracao_hedge: number; exige_reacao: boolean; rr: number | null
+}
+export interface PlanoTradeiros {
+  operador: string; ts: number; preco: number; hedge_alvo: number; hedge_regras: string[]
+  fluxo: Record<string, boolean>; decisoes: DecisaoTradeiros[]
+}
+export interface ContagemTradeiros {
+  grau: string; nome: string; vies: string; fase: string; probabilidade: number; invalidacao: number | null; alvos: number[] | null
+}
+export interface EstruturaTradeiros { tendencia?: string; ultimo_topo?: number | null; ultimo_fundo?: number | null; quebra?: string | null }
+export interface TradeirosPlanoResp {
+  ts: number
+  fonte: string
+  preco: number
+  dados_ate: { candles: number | null; derivativos: number | null }
+  leitura: {
+    range: { val: number; poc: number; vah: number; minima: number; maxima: number; dias: number; valido: boolean; dias_de_lateral: number | null } | null
+    p: number | null
+    zona: string
+    naked_pocs: number[]
+    aberturas: { dia?: number | null; semana?: number | null; mes?: number | null; fechamento_ontem?: number | null }
+    pivo_virgem: { acima?: number | null; abaixo?: number | null }
+    estrutura: EstruturaTradeiros
+    estrutura_semanal: EstruturaTradeiros
+    fib: { de?: number; ate?: number; direcao?: string; niveis?: Record<string, number> }
+    ciclo: { ath?: number; do_topo?: number; estado?: string }
+    sentimento: number | null
+    derivativos: { funding?: number | null; funding_media_30d?: number | null; oi_vs_max_30d?: number | null; long_short?: number | null; long_short_mediana_30d?: number | null }
+  }
+  mapa: {
+    prob_bull: number; prob_bear: number; inclinacao: number; grau_operacional?: string | null
+    veto_onda_4?: boolean; setup_onda_2?: { vies: string; invalidacao: number | null; alvos: number[] | null } | null
+    invalidacao_compra?: number | null; invalidacao_venda?: number | null; contagens: ContagemTradeiros[]; erro?: string
+  }
+  planos: { shaka: PlanoTradeiros; maroja: PlanoTradeiros }
+}
+export interface TradeirosPeriodo { anos: number[]; btc: number; fixo: number; p95_sorteio: number; percentil: number; vantagem: boolean }
+export interface TradeirosAno {
+  ano: number; btc_final: number; ganho_btc_pct: number; retorno_usd_pct: number; hodl_usd_pct: number
+  dd_btc_pct: number; dd_usd_pct: number; dd_hodl_pct: number; hedge_medio_pct: number; trades: number; r_total: number
+  stops_hedge: number; funding_btc: number; taxas_btc: number
+  fixo_btc: number | null; sorteio_mediana: number | null; sorteio_p95: number | null; percentil: number | null
+}
+export interface TradeirosBacktestResp {
+  disponivel: boolean; gerado_em: number | null
+  periodos: Record<string, Record<string, TradeirosPeriodo>>
+  anos: Record<string, TradeirosAno[]>
+}
+
 /** Mesa de posições (GET /posicoes/abertas) */
 export interface PosicaoAberta {
   id: number

@@ -10,6 +10,7 @@ import Posicoes from './screens/Posicoes'
 import Range from './screens/Range'
 import Sentimento from './screens/Sentimento'
 import Trader from './screens/Trader'
+import Tradeiros from './screens/Tradeiros'
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/pontos" element={<Pontos />} />
           <Route path="/posicoes" element={<Posicoes />} />
           <Route path="/range" element={<Range />} />
+          <Route path="/tradeiros" element={<Tradeiros />} />
           <Route path="/sentimento" element={<Sentimento />} />
           <Route path="/historico" element={<Historico />} />
           <Route path="*" element={<Navigate to="/" replace />} />
