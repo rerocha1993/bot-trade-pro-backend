@@ -83,9 +83,25 @@ def baixar_bitstamp(tf: str, desde_ms: int = None):
     print(f"[bitstamp {tf}] concluído: {total} candles em {caminho}")
 
 
-def baixar_binance(tf: str, desde=(2017, 8)):
+def _linhas_do_zip(conteudo, ultimo):
+    with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
+        with z.open(z.namelist()[0]) as f:
+            df = pd.read_csv(f, header=None)
+    linhas = []
+    for row in df.itertuples(index=False):
+        ts = int(row[0])
+        if ts > 10**14:
+            ts //= 1000
+        if ultimo and ts <= ultimo:
+            continue
+        linhas.append([ts, float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])])
+    return linhas
+
+
+def baixar_binance(tf: str, desde=(2017, 8), forcar_desde: bool = False):
+    """`forcar_desde` recomeça em `desde` mesmo com CSV existente (preenche buracos; duplicados são descartados)."""
     caminho = os.path.join(PASTA, f"BTCUSDT_binance_{tf}.csv")
-    ultimo = _ultimo_ts(caminho)
+    ultimo = None if forcar_desde else _ultimo_ts(caminho)
     ano, mes = desde
     if ultimo:
         d = datetime.utcfromtimestamp(ultimo / 1000)
@@ -99,34 +115,21 @@ def baixar_binance(tf: str, desde=(2017, 8)):
         try:
             r = requests.get(url, timeout=60)
             if r.status_code == 200:
-                with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-                    with z.open(z.namelist()[0]) as f:
-                        df = pd.read_csv(f, header=None)
-                for row in df.itertuples(index=False):
-                    ts = int(row[0])
-                    if ts > 10**14:
-                        ts //= 1000
-                    if ultimo and ts <= ultimo:
-                        continue
-                    buffer.append([ts, float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])])
+                buffer.extend(_linhas_do_zip(r.content, ultimo))
             else:
-                # mês corrente ainda não tem zip mensal: usa os diários
-                if (ano, mes) == (hoje.year, hoje.month):
-                    for dia in range(1, hoje.day):
-                        nd = f"BTCUSDT-{tf}-{ano}-{mes:02d}-{dia:02d}.zip"
-                        rd = requests.get(f"https://data.binance.vision/data/spot/daily/klines/BTCUSDT/{tf}/{nd}", timeout=60)
-                        if rd.status_code != 200:
-                            continue
-                        with zipfile.ZipFile(io.BytesIO(rd.content)) as z:
-                            with z.open(z.namelist()[0]) as f:
-                                df = pd.read_csv(f, header=None)
-                        for row in df.itertuples(index=False):
-                            ts = int(row[0]); ts = ts // 1000 if ts > 10**14 else ts
-                            if ultimo and ts <= ultimo:
-                                continue
-                            buffer.append([ts, float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])])
-                else:
-                    print("  sem arquivo", nome)
+                # sem zip mensal (mês corrente OU mês recém-fechado que a Binance ainda não publicou): usa os diários.
+                # Antes só o mês corrente caía aqui, e agosto/2026 ficou inteiro de fora de todos os CSVs.
+                ultimo_dia = hoje.day - 1 if (ano, mes) == (hoje.year, hoje.month) else pd.Period(f"{ano}-{mes:02d}").days_in_month
+                achados = 0
+                for dia in range(1, ultimo_dia + 1):
+                    nd = f"BTCUSDT-{tf}-{ano}-{mes:02d}-{dia:02d}.zip"
+                    rd = requests.get(f"https://data.binance.vision/data/spot/daily/klines/BTCUSDT/{tf}/{nd}", timeout=60)
+                    if rd.status_code != 200:
+                        continue
+                    achados += 1
+                    buffer.extend(_linhas_do_zip(rd.content, ultimo))
+                if achados < ultimo_dia:
+                    print(f"  {nome}: sem mensal; {achados} de {ultimo_dia} diários")
         except Exception as e:
             print("  erro", nome, str(e)[:80])
         if len(buffer) >= 200000:
@@ -143,15 +146,16 @@ def baixar_binance(tf: str, desde=(2017, 8)):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tf", nargs="*", default=["1h", "4h", "1d", "15m", "5m"])
+    ap.add_argument("--desde", help="AAAA-MM: rebaixa a Binance a partir desse mês (preenche buracos)")
+    ap.add_argument("--so-binance", action="store_true")
     args = ap.parse_args()
     os.makedirs(PASTA, exist_ok=True)
+    desde = tuple(int(x) for x in args.desde.split("-")) if args.desde else (2017, 8)
     for tf in args.tf:
-        if tf in BITSTAMP_TFS:
+        if tf in BITSTAMP_TFS and not args.so_binance:
             baixar_bitstamp(tf)
-        if tf in BINANCE_TFS and tf not in ("4h", "1d", "1h"):
-            baixar_binance(tf)
-        elif tf in ("1h", "4h", "1d"):
-            baixar_binance(tf)   # também da Binance (2017+), útil para comparar/validar
+        if tf in BINANCE_TFS:   # 1h/4h/1d também da Binance (2017+), útil para comparar/validar
+            baixar_binance(tf, desde, forcar_desde=bool(args.desde))
 
 
 if __name__ == "__main__":
