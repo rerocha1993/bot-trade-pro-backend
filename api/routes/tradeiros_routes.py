@@ -89,8 +89,9 @@ def _resposta(fontes: Dict[str, object], ts: int) -> Dict:
     leitura = lt.as_dict()
     return _puro({
         "ts": ts, "fonte": fontes["fonte"], "preco": lt.preco,
+        # "até" do momento pedido (no replay, o fim do arquivo mostraria uma data do futuro)
         "dados_ate": {"candles": (dados.blocos_ate(ts)[-1][0] + BLOCO_MS) if dados.blocos_ate(ts) else None,
-                      "derivativos": dados.oi[0][-1] if dados.oi[0] else None},
+                      "derivativos": next((t for t in reversed(dados.oi[0]) if t <= ts), None) if dados.oi[0] else None},
         "leitura": {k: v for k, v in leitura.items() if k not in ("ts", "preco")},
         "mapa": {**mp, "contagens": (mp.get("contagens") or [])[:12]},
         "planos": {nome: planejar(lt, mp, pf).as_dict() for nome, pf in PERFIS.items()},

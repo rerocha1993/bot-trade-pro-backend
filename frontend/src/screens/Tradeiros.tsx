@@ -77,23 +77,25 @@ function Conteudo({ d, replay }: { d: TradeirosPlanoResp; replay: boolean }) {
         {replay ? 'Replay' : 'Ao vivo'} · {d.fonte} · preço {fmtPreco(d.preco)} · candles fechados até {horaUTC(d.dados_ate.candles)}
         {' '}· derivativos até {horaUTC(d.dados_ate.derivativos)}
       </p>
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-        <KPI l="Range (merge)" v={r ? `${nivel(r.val)} – ${nivel(r.vah)}` : '—'}
-          sub={r ? `${ZONA[lt.zona] ?? lt.zona} · p ${fmt(lt.p ?? 0, 2)} · POC ${nivel(r.poc)} · ${r.dias} dias` : 'sem range montado'} />
+      {/* valores curtos no número grande; o detalhe vai na linha de baixo (valores longos estouravam o cartão) */}
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+        <KPI l="Posição no range" v={ZONA[lt.zona] ?? lt.zona}
+          sub={r ? `VAL ${nivel(r.val)} · POC ${nivel(r.poc)} · VAH ${nivel(r.vah)} · p ${fmt(lt.p ?? 0, 2)} · merge ${r.dias} dias` : 'sem range montado'} />
         <KPI l="Ciclo" v={lt.ciclo.estado ?? '—'}
           sub={`${sinal((lt.ciclo.do_topo ?? 0) * 100)} do topo ${nivel(lt.ciclo.ath)} · semanal ${lt.estrutura_semanal.tendencia ?? '—'} · 4h ${lt.estrutura.tendencia ?? '—'}`} />
-        <KPI l="Elliott (várias contagens)" v={`alta ${pct(mapa.prob_bull, 0)} · baixa ${pct(mapa.prob_bear, 0)}`}
-          color={mapa.inclinacao > 0.1 ? 'var(--green)' : mapa.inclinacao < -0.1 ? 'var(--red)' : undefined} sub={elliott} />
-        <KPI l="Fluxo e sentimento" v={`Fear & Greed ${lt.sentimento ?? '—'}`}
+        <KPI l="Elliott: chance de alta" v={pct(mapa.prob_bull, 0)}
+          color={mapa.inclinacao > 0.1 ? 'var(--green)' : mapa.inclinacao < -0.1 ? 'var(--red)' : undefined}
+          sub={`baixa ${pct(mapa.prob_bear, 0)} · ${elliott}`} />
+        <KPI l="Fear & Greed" v={lt.sentimento ?? '—'}
           sub={`funding ${dv.funding != null ? fmt(dv.funding * 100, 4) + '%' : '—'} · OI ${dv.oi_vs_max_30d != null ? sinal(dv.oi_vs_max_30d * 100, 0) : '—'} da máx. 30d`} />
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', alignItems: 'start' }}>
         <CartaoPlano nome="shaka" p={d.planos.shaka} />
         <CartaoPlano nome="maroja" p={d.planos.maroja} />
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px, 100%), 1fr))', alignItems: 'start' }}>
         <Card title="Níveis" sub="o que eles marcam antes da live">
           <div>
             <KV k="VAH · POC · VAL" v={r ? `${nivel(r.vah)} · ${nivel(r.poc)} · ${nivel(r.val)}` : '—'} />
