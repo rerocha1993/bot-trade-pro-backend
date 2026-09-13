@@ -45,6 +45,7 @@ class ParametrosScalpVol:
     tick_pct: float = 0.0002        # faixa do perfil: 0,02% do preço
     sp_min_pct: float = 0.0015      # single print com pelo menos 0,15% do preço
     folga_stop_pct: float = 0.0005
+    mult_stop: float = 1.0          # distância do stop em múltiplos da original (1 = regra combinada)
     alvo_r: float = 2.0
     realizar: float = 0.5
     maker: float = 0.0002
@@ -122,6 +123,7 @@ def simular(i: int, ts: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
         s = lado_impulso
         entrada = hi if lado_impulso == 1 else lo
         stop = lo * (1 - p.folga_stop_pct) if s == 1 else hi * (1 + p.folga_stop_pct)
+        stop = entrada - s * abs(entrada - stop) * p.mult_stop
         risco = abs(entrada - stop)
         alvo = entrada + s * p.alvo_r * risco
         um_r: Optional[float] = entrada + s * risco
@@ -129,8 +131,8 @@ def simular(i: int, ts: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
         s = -lado_impulso
         entrada = hi if lado_impulso == 1 else lo
         alvo = lo if lado_impulso == 1 else hi
-        risco = abs(entrada - alvo)
-        stop = entrada - s * risco
+        stop = entrada - s * abs(entrada - alvo) * p.mult_stop
+        risco = abs(entrada - stop)
         um_r = None
     if risco <= 0:
         return None
