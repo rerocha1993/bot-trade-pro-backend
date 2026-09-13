@@ -232,6 +232,13 @@ def passo_posicao(pos: Posicao, bloco: Tuple, gestao: str, p: ParametrosRange) -
     """
     _, _, h, l, c, _ = bloco
     s = pos.plano.lado
+    # numa ida até o stop, as fatias no meio do caminho são tomadas ANTES dele. O motor antigo aplicava o stop
+    # primeiro (ou nem via o stop, se nenhuma fatia tinha executado) e perdia menos do que perderia de verdade.
+    if pos.pendentes and ((l <= pos.stop) if s == 1 else (h >= pos.stop)):
+        for nivel in list(pos.pendentes):
+            pos.exec_.append((nivel, pos.q))
+            pos.custo += nivel * pos.q * TAXA_MAKER
+        pos.pendentes = []
     if pos.exec_:
         pos.blocos += 1
         if (l <= pos.stop) if s == 1 else (h >= pos.stop):

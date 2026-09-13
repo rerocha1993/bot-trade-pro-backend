@@ -52,6 +52,16 @@ def trade_gestao(lado: int, i0: int, preco: float, risco: float, close: Sequence
     fim = min(i0 + horizonte, len(close) - 1)
     motivo = "tempo"
     for i in range(i0 + 1, fim + 1):
+        # 0) numa queda (alta, se vendido) até o stop, as fatias no meio do caminho são tomadas ANTES do stop.
+        #    Antes o stop vinha primeiro e a perda saía só com a 1ª fatia (~1/3 de R em vez de 1 R): com direção
+        #    SORTEADA o motor dava +0,07R antes do custo, quando um motor justo dá perto de zero.
+        if pendentes and ((low[i] <= stop) if s == 1 else (high[i] >= stop)):
+            for k in list(pendentes):
+                exec_q.append(q)
+                exec_p.append(niveis[k])
+                qtd += q
+                custo += niveis[k] * q * TAXA_MAKER
+            pendentes = []
         medio = sum(p * x for p, x in zip(exec_p, exec_q)) / sum(exec_q)
         # 1) stop, antes de tudo
         if (low[i] <= stop) if s == 1 else (high[i] >= stop):

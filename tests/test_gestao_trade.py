@@ -38,10 +38,22 @@ def test_stop_direto_com_todas_as_fatias_perde_1r():
     assert r["bruto_r"] == pytest.approx(-1.0, abs=0.03), "o tamanho é calculado para o pior caso perder 1 R"
 
 
-def test_stop_direto_so_com_a_primeira_fatia_perde_menos():
+def test_queda_ate_o_stop_executa_as_fatias_do_caminho_antes():
+    """
+    Uma queda de 98 até 89 num candle passa por 96, 94 e 92 antes do stop de 90: as limitadas são tomadas primeiro.
+    O motor antigo aplicava o stop antes delas e perdia só parte de 1 R; com direção sorteada dava +0,07R.
+    """
     close, high, low = _serie([(100, 100, 100), (100, 97.5, 98), (98, 89, 89)])
     r = trade_gestao(1, 0, 100.0, 10.0, close, high, low, n_entradas=5, espacamento=0.2)
-    assert r["motivo"] == "stop" and -1.0 < r["bruto_r"] < -0.3
+    assert r["motivo"] == "stop" and r["fatias"] == 5
+    assert r["bruto_r"] == pytest.approx(-1.0, abs=0.03)
+
+
+def test_venda_espelhada_tambem_executa_as_fatias_antes_do_stop():
+    close, high, low = _serie([(100, 100, 100), (111, 100, 110)])
+    r = trade_gestao(-1, 0, 100.0, 10.0, close, high, low, n_entradas=5, espacamento=0.2)
+    assert r["motivo"] == "stop" and r["fatias"] == 5
+    assert r["bruto_r"] == pytest.approx(-1.0, abs=0.03)
 
 
 def test_mesmo_candle_com_stop_e_alvo_conta_o_stop():
