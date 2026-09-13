@@ -79,3 +79,17 @@ def test_leitura_monta_range_zona_e_sentimento():
     assert lt.zona != "sem_range" and lt.p is not None
     assert lt.sentimento == 40, "o Fear & Greed do dia é publicado à 00:00 UTC: às 06:00 do dia 20 já vale o do dia 20"
     assert lt.ciclo["estado"] in ("esticado", "intermediario", "descontado")
+
+
+def test_historico_longo_tambem_so_entrega_o_que_fechou():
+    dados = _mercado(30)
+    longo = pd.DataFrame({"timestamp": [T0 - 400 * DIA_MS + i * DIA_MS for i in range(430)], "open": 1.0, "high": 2.0,
+                          "low": 0.5, "close": 1.5, "volume": 1.0})
+    dados_longos = Dados(pd.DataFrame(dados.d1, columns=["timestamp", "open", "high", "low", "close", "volume"]),
+                         pd.DataFrame(dados.h4, columns=["timestamp", "open", "high", "low", "close", "volume"]),
+                         d1_longo=longo)
+    momento = T0 + 10 * DIA_MS + 3_600_000
+    serie = dados_longos.diarios_longos_ate(momento)
+    assert serie[-1][0] == T0 + 9 * DIA_MS, "o dia 10 ainda está aberto às 01:00"
+    assert len(serie) == 410
+    assert dados.diarios_longos_ate(momento) == dados.diarios_ate(momento), "sem histórico longo, usa o diário normal"

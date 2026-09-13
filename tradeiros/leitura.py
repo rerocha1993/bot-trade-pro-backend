@@ -3,7 +3,8 @@
 LEITURA DIÁRIA do Tradeiros, feita como eles abrem a live — e sempre COMO SE FOSSE NAQUELE MOMENTO: só entra o que
 já tinha fechado até `ts`, para o imitador e o backtest nunca enxergarem o futuro.
 
-    range        merge adaptativo dos dias anteriores (~10–12 dias quando lateral): VAL, POC, VAH, fundo e topo
+    range        merge FIXO dos 10 dias anteriores (como eles desenham): VAL, POC, VAH, fundo e topo; o merge
+                 adaptativo só informa há quantos dias o valor anda de lado
     posição      p = (preço − VAL) / (VAH − VAL): 0 = VAL, 1 = VAH; zona fundo / meio / topo (regras R1 e R3)
     níveis       naked POCs diários; abertura do dia, da semana e do mês; pivô diário virgem acima e abaixo
     estrutura    topos e fundos confirmados no 4h (ZigZag em ATR): tendência e quebra de estrutura (R11, R12)
@@ -25,7 +26,7 @@ import pandas as pd
 
 from core.elliott_pro.pivots import Pivot, zigzag_atr
 from core.fibonacci import Fibonacci
-from core.range_tradeiros import ParametrosRange, contexto_adaptativo
+from core.range_tradeiros import ParametrosRange, contexto, contexto_adaptativo
 from core.tpo_sessao import BLOCO_MS, DIA_MS, Perfil, blocos_30m, naked_pocs
 
 H4_MS = 4 * 3_600_000
@@ -34,6 +35,7 @@ RETRACOES = (0.382, 0.5, 0.618, 0.666, 0.786)
 
 @dataclass(frozen=True)
 class ParametrosLeitura:
+    dias_merge: int = 10                # o range DELES: merge fixo de ~10 dias, como aparece nas lives
     dias_merge_min: int = 3
     dias_merge_max: int = 20
     meio_largura: float = 0.15          # |p − 0,5| < 0,15 → meio do range: não abrir posição (R1)
@@ -144,8 +146,11 @@ class Dados:
 
     def __init__(self, d1: pd.DataFrame, h4: pd.DataFrame, m15: Optional[pd.DataFrame] = None,
                  funding: Optional[Dict] = None, oi: Optional[Dict] = None, lsr: Optional[Dict] = None,
-                 fear: Optional[pd.DataFrame] = None):
+                 fear: Optional[pd.DataFrame] = None, d1_longo: Optional[pd.DataFrame] = None):
         cols = ["timestamp", "open", "high", "low", "close", "volume"]
+        # histórico diário LONGO (Bitstamp desde 2011): é nele que os graus maiores de Elliott são contados
+        self.d1_longo = d1_longo[cols].sort_values("timestamp").values.tolist() if d1_longo is not None else None
+        self.d1_longo_ts = [int(x[0]) for x in self.d1_longo] if self.d1_longo else []
         self.d1 = d1[cols].sort_values("timestamp").values.tolist()
         self.h4 = h4[cols].sort_values("timestamp").values.tolist()
         self.d1_ts = [int(x[0]) for x in self.d1]
@@ -179,11 +184,17 @@ class Dados:
 
         return cls(csv("BTCUSDT_binance_1d.csv"), csv("BTCUSDT_binance_4h.csv"), csv("BTCUSDT_binance_15m.csv"),
                    js("funding_bybit.json", "inverse"), js("oi_bybit_1h.json"), js("lsr_bybit_1h.json"),
-                   csv("fear_greed.csv"))
+                   csv("fear_greed.csv"), csv("BTCUSD_bitstamp_1d.csv"))
 
     # --- recortes "até ts" (candle só conta depois de FECHADO)
     def diarios_ate(self, ts: int) -> List[list]:
         return self.d1[:bisect.bisect_right(self.d1_ts, ts - DIA_MS)]
+
+    def diarios_longos_ate(self, ts: int) -> List[list]:
+        """Diário longo fechado até ts; sem histórico longo, o diário normal."""
+        if not self.d1_longo:
+            return self.diarios_ate(ts)
+        return self.d1_longo[:bisect.bisect_right(self.d1_longo_ts, ts - DIA_MS)]
 
     def h4_ate(self, ts: int) -> List[list]:
         return self.h4[:bisect.bisect_right(self.h4_ts, ts - H4_MS)]
@@ -235,11 +246,15 @@ class LeituraDiaria:
         hoje = ts // DIA_MS
         perfis = [pf for pf in (d.perfil_do_dia(x) for x in range(hoje - prm.dias_merge_max, hoje)) if pf is not None]
         if len(perfis) >= prm.dias_merge_min:
-            ctx = contexto_adaptativo(perfis, ParametrosRange(min_dias=prm.dias_merge_min, max_dias=prm.dias_merge_max))
+            # o range é o merge FIXO de ~10 dias (é o que eles desenham); o adaptativo só informa há quantos dias o
+            # valor anda de lado — com ele, num crash o "range" virava 1 dia e a posição do preço saía absurda
+            fixo = contexto(perfis, ParametrosRange(range_adaptativo=False, n_dias=min(prm.dias_merge, len(perfis))))
+            adapt = contexto_adaptativo(perfis, ParametrosRange(min_dias=prm.dias_merge_min, max_dias=prm.dias_merge_max))
+            ctx = fixo or adapt
             if ctx is not None:
                 lt.range = {"val": float(ctx.val), "poc": float(ctx.poc), "vah": float(ctx.vah),
                             "minima": float(ctx.minima), "maxima": float(ctx.maxima), "dias": int(ctx.dias),
-                            "valido": bool(ctx.valido)}
+                            "valido": bool(ctx.valido), "dias_de_lateral": int(adapt.dias) if adapt else None}
                 lt.p = posicao_no_range(preco, lt.range["val"], lt.range["vah"])
                 lt.zona = zona_do_range(lt.p, prm)
             lt.naked_pocs = sorted(float(x["preco"]) for x in naked_pocs(perfis))
