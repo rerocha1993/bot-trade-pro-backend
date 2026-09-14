@@ -91,6 +91,13 @@ def test_nome_das_variaveis_da_subconta():
         "BYBIT_SUB_DAY_TPO_API_KEY_REAL", "BYBIT_SUB_DAY_TPO_SECRET_KEY_REAL")
 
 
+def test_outra_conta_principal_entra_como_grupo():
+    assert nomes_variaveis("tradeiros:principal", "demo") == ("BYBIT_API_KEY_DEMO_TRADEIROS", "BYBIT_SECRET_KEY_DEMO_TRADEIROS")
+    assert nomes_variaveis("tradeiros:scalp", "demo") == ("BYBIT_SUB_SCALP_API_KEY_DEMO_TRADEIROS",
+                                                         "BYBIT_SUB_SCALP_SECRET_KEY_DEMO_TRADEIROS")
+    assert nomes_variaveis("scalp", "demo") == ("BYBIT_SUB_SCALP_API_KEY_DEMO", "BYBIT_SUB_SCALP_SECRET_KEY_DEMO")
+
+
 def test_subconta_sem_chave_falha_em_vez_de_usar_a_principal(monkeypatch):
     """Operar na conta errada é pior que não operar: o conector tem que recusar."""
     from core.conexoes.conexao_bybit import BybitConnector

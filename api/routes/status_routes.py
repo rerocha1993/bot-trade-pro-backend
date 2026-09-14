@@ -167,14 +167,14 @@ def subcontas(modo: str = "demo", verificar_uid: bool = False, db: Session = Dep
     Quais subcontas os robôs usam e quais já têm chave no ambiente. Nunca devolve o valor da chave.
     Com `verificar_uid=true`, pergunta à Bybit de quem é cada chave e usa o UID real para apontar conflitos.
     """
-    from core.conexoes.conexao_bybit import nomes_variaveis, subcontas_configuradas
+    from core.conexoes.conexao_bybit import credenciais, nomes_variaveis, subcontas_configuradas
     configuradas = {c["subconta"]: c for c in subcontas_configuradas(modo)}
     linhas = []
     for bot in db.query(Bot).order_by(Bot.id).all():
         sub = (bot.subconta or "principal").lower()
         k, sec = nomes_variaveis(sub, modo)
         linhas.append({"bot_id": bot.id, "bot": bot.nome, "par": bot.ativo, "modo_execucao": bot.modo_execucao,
-                       "subconta": sub, "configurada": bool(configuradas.get(sub, {}).get("configurada")),
+                       "subconta": sub, "configurada": bool(configuradas.get(sub, {}).get("configurada") or all(credenciais(sub, modo))),
                        "variaveis": [k, sec]})
     # prova de verdade: pergunta à Bybit de quem é cada chave. Dois robôs com o mesmo UID disputam a mesma posição.
     if verificar_uid:

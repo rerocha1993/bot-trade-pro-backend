@@ -26,13 +26,15 @@ COMUM = dict(
     usar_volume_profile=False, usar_orderblock=False, usar_fibonacci=False, usar_orderflow=False, usar_sentimento=False,
     usar_tendencia_macro=False, usar_api_macro=False, usar_filtro_regime=False, usar_trailing_stop=False,
 )
+# as carteiras são a conta TRADEIROS do usuário (chaves *_DEMO_TRADEIROS no .env): principal + subcontas scalp, swing, day
 ROBOS = []
-for op, risco, perda in (("shaka", 0.02, 0.06), ("maroja", 0.01, 0.03)):
+for op, risco, perda, trades, hedge in (("shaka", 0.02, 0.06, "tradeiros:principal", "tradeiros:scalp"),
+                                        ("maroja", 0.01, 0.03, "tradeiros:swing", "tradeiros:day")):
     nome = op.capitalize()
     ROBOS.append(dict(COMUM, nome=f"Tradeiros {nome} · trades", ativo="BTCUSDT", categoria="linear", alavancagem=3,
-                      estrategia=f"tradeiros_{op}", subconta=f"{op}_trades", risco_pct=risco, max_perda_dia_pct=perda))
+                      estrategia=f"tradeiros_{op}", subconta=trades, risco_pct=risco, max_perda_dia_pct=perda))
     ROBOS.append(dict(COMUM, nome=f"Tradeiros {nome} · hedge", ativo="BTCUSD", categoria="inverse", alavancagem=1,
-                      estrategia=f"tradeiros_{op}", subconta=f"{op}_hedge", risco_pct=risco, max_perda_dia_pct=1.0))
+                      estrategia=f"tradeiros_{op}", subconta=hedge, risco_pct=risco, max_perda_dia_pct=1.0))
 
 
 def main():

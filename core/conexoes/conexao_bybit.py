@@ -60,7 +60,16 @@ SUFIXO_POR_MODO = {"real": "REAL", "demo": "DEMO", "testnet": "TESTNET"}
 
 
 def nomes_variaveis(subconta: Optional[str], modo: str) -> tuple:
-    """Nomes das variáveis de ambiente esperadas para essa subconta e modo."""
+    """
+    Nomes das variáveis de ambiente esperadas para essa subconta e modo.
+
+    Uma OUTRA conta principal (com as subcontas dela) entra como grupo: "tradeiros:scalp" -> BYBIT_SUB_SCALP_API_KEY_DEMO_TRADEIROS
+    e "tradeiros:principal" -> BYBIT_API_KEY_DEMO_TRADEIROS (as chaves dos robôs do portal Tradeiros).
+    """
+    if subconta is not None and ":" in str(subconta):
+        grupo, sub = str(subconta).split(":", 1)
+        k, s = nomes_variaveis(sub, modo)
+        return (f"{k}_{_slug(grupo)}", f"{s}_{_slug(grupo)}")
     sufixo = SUFIXO_POR_MODO.get(modo, "TESTNET")
     if subconta is None or str(subconta).strip().lower() in SUBCONTA_PRINCIPAL:
         return (f"BYBIT_API_KEY_{sufixo}", f"BYBIT_SECRET_KEY_{sufixo}")
