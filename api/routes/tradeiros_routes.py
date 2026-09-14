@@ -1,7 +1,8 @@
 # api/routes/tradeiros_routes.py
 """
 PORTAL TRADEIROS no painel (tradeiros/): a leitura do dia, o mapa de Elliott com várias contagens e o plano do Shaka
-e do Maroja — e o resultado do backtest da carteira. Só leitura: nada aqui envia ordem nem mexe nos robôs.
+e do Maroja — e o resultado do backtest da carteira. Só leitura: quem opera são os robôs da demo
+(core/tradeiros_executor.py), com o mesmo plano.
 
     GET /api/tradeiros/plano                    ao vivo: CSVs do projeto + candles recentes da Bybit (refeito a cada 5 min)
     GET /api/tradeiros/plano?data=2025-04-07    replay: o plano daquele dia às 13:00 UTC, só com o que tinha fechado
@@ -16,10 +17,10 @@ import time
 from typing import Dict, Optional
 
 import numpy as np
-import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 
-from core.tpo_sessao import BLOCO_MS, DIA_MS
+from core.tpo_sessao import BLOCO_MS
+from tradeiros.ao_vivo import FONTES
 from tradeiros.elliott_mapa import MapaElliott
 from tradeiros.leitura import Dados, LeituraDiaria
 from tradeiros.regras import PERFIS, planejar
@@ -27,13 +28,10 @@ from tradeiros.regras import PERFIS, planejar
 router = APIRouter()
 
 ESTUDO = os.path.join("data", "estudo_tradeiros.json")
-VALIDADE_VIVO_S = 300
-COLS = ["timestamp", "open", "high", "low", "close", "volume"]
 CAMPOS_ANO = ("btc_final", "ganho_btc_pct", "retorno_usd_pct", "hodl_usd_pct", "dd_btc_pct", "dd_usd_pct", "dd_hodl_pct",
               "hedge_medio_pct", "trades", "r_total", "stops_hedge", "funding_btc", "taxas_btc")
 _trava = threading.Lock()
 _historico: Dict[str, object] = {}
-_vivo: Dict[str, object] = {}
 
 
 def _puro(x):
@@ -62,24 +60,13 @@ def _com_historico() -> Dict[str, object]:
 
 
 def _ao_vivo() -> Dict[str, object]:
-    with _trava:
-        if _vivo.get("t") and time.time() - _vivo["t"] < VALIDADE_VIVO_S:
-            return _vivo
-        agora = int(time.time() * 1000)
-        recentes: Dict[str, pd.DataFrame] = {}
-        fonte = "CSVs do projeto + candles recentes da Bybit"
-        try:
-            from services.bot_manager import get_manager
-            con = get_manager().servicos["connectors"]["simulador"]
-            for tf, dias in (("1d", 400), ("4h", 400), ("30m", 25)):
-                c = con.obter_ohlcv_historico("BTCUSDT", tf, agora - dias * DIA_MS)
-                if c:
-                    recentes[tf] = pd.DataFrame([list(x[:6]) for x in c], columns=COLS)
-        except Exception as e:                                      # sem a Bybit, o portal segue com os CSVs
-            fonte = f"só CSVs do projeto (Bybit indisponível: {type(e).__name__})"
-        d = Dados.do_projeto(".", recentes=recentes, intraday_dias=45)
-        _vivo.update(t=time.time(), dados=d, leitura=LeituraDiaria(d), mapa=MapaElliott(d), fonte=fonte)
-        return _vivo
+    con = None
+    try:
+        from services.bot_manager import get_manager
+        con = get_manager().servicos["connectors"]["simulador"]
+    except Exception:                                               # sem o gerenciador, o portal segue com os CSVs
+        pass
+    return FONTES.obter(con)
 
 
 def _resposta(fontes: Dict[str, object], ts: int) -> Dict:
@@ -87,10 +74,11 @@ def _resposta(fontes: Dict[str, object], ts: int) -> Dict:
     lt = fontes["leitura"].ler(ts)
     mp = fontes["mapa"].ler(ts)
     leitura = lt.as_dict()
+    blocos = dados.blocos_ate(ts)
     return _puro({
         "ts": ts, "fonte": fontes["fonte"], "preco": lt.preco,
         # "até" do momento pedido (no replay, o fim do arquivo mostraria uma data do futuro)
-        "dados_ate": {"candles": (dados.blocos_ate(ts)[-1][0] + BLOCO_MS) if dados.blocos_ate(ts) else None,
+        "dados_ate": {"candles": (blocos[-1][0] + BLOCO_MS) if blocos else None,
                       "derivativos": next((t for t in reversed(dados.oi[0]) if t <= ts), None) if dados.oi[0] else None},
         "leitura": {k: v for k, v in leitura.items() if k not in ("ts", "preco")},
         "mapa": {**mp, "contagens": (mp.get("contagens") or [])[:12]},

@@ -497,6 +497,25 @@ class BybitConnector:
                     self.modo_execucao, symbol, side, qty, stop_loss, take_profit, ordem.get("id"))
         return ordem
 
+    def criar_ordem_stop(self, par: str, side: str, quantidade: float, gatilho: float,
+                         position_idx: int = 0) -> Dict[str, Any]:
+        """
+        Stop CONDICIONAL reduce-only a mercado, independente do SL da posição: vale para uma parte só (a escada de hedge
+        do portal Tradeiros tem um stop por escada) e continua na corretora com o servidor desligado.
+        side 'buy' dispara quando o preço SOBE até o gatilho; 'sell', quando cai.
+        """
+        self._exigir_credenciais("criar_ordem_stop")
+        side = side.lower()
+        qty = self.arredondar_quantidade(par, quantidade)
+        if qty <= 0:
+            raise ValueError(f"quantidade {quantidade} abaixo do mínimo da exchange para {par}")
+        params = {"positionIdx": position_idx, "reduceOnly": True, "triggerPrice": self.arredondar_preco(par, gatilho),
+                  "triggerDirection": 1 if side == "buy" else 2}
+        ordem = self.exchange.create_order(self.simbolo(par), "market", side, qty, None, params)
+        logger.info("Stop condicional %s %s %s qty=%s gatilho=%s id=%s", self.modo_execucao, self.simbolo(par), side, qty,
+                    gatilho, ordem.get("id"))
+        return ordem
+
     def atualizar_stop_posicao(self, par: str, stop_loss: Optional[float] = None,
                                take_profit: Optional[float] = None, position_idx: int = 0) -> Dict[str, Any]:
         """Altera SL/TP da posição aberta (endpoint /v5/position/trading-stop)."""

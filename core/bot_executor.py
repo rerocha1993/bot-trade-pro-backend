@@ -122,6 +122,11 @@ class BotExecutor:
         if self.estrategia == "range_tradeiros":
             from core.range_executor import RangeExecutor
             self.range = RangeExecutor(self)
+        # portal Tradeiros na demo: Shaka ou Maroja, conta de trades (linear) ou de hedge (inverse)
+        self.tradeiros = None
+        if str(self.estrategia).startswith("tradeiros_"):
+            from core.tradeiros_executor import criar_executor_tradeiros
+            self.tradeiros = criar_executor_tradeiros(self)
         self.alavancagem = normalizar_alavancagem(getattr(bot, "alavancagem", 1) or 1)
         self.ordens = OrderExecutor(self.con)
         self.alertas: TelegramAlertService = self.servicos.get("telegram") or TelegramAlertService()
@@ -216,6 +221,12 @@ class BotExecutor:
             except Exception as e:
                 logger.warning("[%s] não foi possível configurar conta: %s", self._attr("nome"), e)
         self._carregar_posicao()
+        if getattr(self, "tradeiros", None) is not None:
+            # a escada no livro é deste robô e está no estado: não é "entrada esquecida"
+            if self.categoria != "inverse":
+                self._reconciliar()
+            self.tradeiros.carregar()
+            return
         if self.inverse is not None:
             self.inverse.carregar()
             return
@@ -910,6 +921,14 @@ class BotExecutor:
             self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
                                posicao=self.posicao.as_dict() if self.posicao else None, range=self.range.status())
             return
+        if getattr(self, "tradeiros", None) is not None:
+            # portal Tradeiros: plano do dia, escada, tirar o risco e hedge próprios
+            self.tradeiros.ciclo(ohlcv, preco, candle_novo)
+            if candle_novo:
+                self.ultimo_candle_ts = int(ultimo[0])
+            self.estado.update(ciclos=self.estado["ciclos"] + 1, ultimo_ciclo=_agora_utc().isoformat(), preco=preco,
+                               posicao=self.posicao.as_dict() if self.posicao else None, tradeiros=self.tradeiros.status())
+            return
         self.manutencao(preco, float(ultimo[4]))
 
         # ordem limitada pendente e gestão da posição (todo ciclo)
@@ -1074,6 +1093,8 @@ class BotExecutor:
         acao, motivo = p["acao"], p["motivo"]
         if self.inverse is not None:
             raise RuntimeError("O hedge inverso tem grade própria: use a tela do inverse")
+        if getattr(self, "tradeiros", None) is not None and self.categoria == "inverse":
+            raise RuntimeError("O hedge do Tradeiros é uma escada com um stop por venda: acompanhe no portal")
         preco = self._con_publico.obter_preco_atual(self.par)
         if acao == "cancelar_escada":
             n = self._cancelar_escada(motivo)
@@ -1103,7 +1124,7 @@ class BotExecutor:
             self._cancelar_escada(motivo)
             pos = self.posicao
             self.fechar_posicao(f"{motivo} (fechada pelo usuário)", preco)
-            for mod in (self.fatias, self.range):
+            for mod in (self.fatias, self.range, getattr(self, "tradeiros", None)):
                 if mod is not None and getattr(mod, "trade", None) is not None:
                     mod._encerrar()
             # o resultado é o da operação inteira: parciais + o resto, líquido de taxas
@@ -1131,7 +1152,8 @@ class BotExecutor:
             raise RuntimeError("A corretora não aceitou o stop/alvo novos")
         pos.sl, pos.tp = novo_sl, novo_tp
         # a estratégia gerencia pelo estado dela: sem isto, o robô voltaria a usar o stop antigo no ciclo seguinte
-        for mod, chaves in ((self.fatias, ("stop", "alvo")), (self.range, ("stop", "alvo2"))):
+        for mod, chaves in ((self.fatias, ("stop", "alvo")), (self.range, ("stop", "alvo2")),
+                            (getattr(self, "tradeiros", None), ("stop", "alvo"))):
             if mod is not None and getattr(mod, "trade", None) is not None:
                 mod.trade[chaves[0]] = novo_sl
                 if novo_tp:
@@ -1145,7 +1167,7 @@ class BotExecutor:
     def _cancelar_escada(self, motivo: str) -> int:
         """Cancela as ordens de ENTRADA ainda no livro (fatias do robô 9/10 ou ordem limitada pendente)."""
         n = 0
-        for mod in (self.fatias, self.range):
+        for mod in (self.fatias, self.range, getattr(self, "tradeiros", None)):
             if mod is not None and getattr(mod, "trade", None) is not None and mod.trade.get("pendentes"):
                 n += len(mod.trade["pendentes"])
                 mod._cancelar_pendentes(motivo)
@@ -1178,7 +1200,7 @@ class BotExecutor:
                   resultado=lucro, motivo=f"{motivo}: {fracao:.0%} da mão realizados")
         if float(pos.quantidade or 0) <= 0:
             self._registrar_saida(pexec, f"{motivo}: posição toda realizada")
-            for mod in (self.fatias, self.range):
+            for mod in (self.fatias, self.range, getattr(self, "tradeiros", None)):
                 if mod is not None and getattr(mod, "trade", None) is not None:
                     mod._encerrar()
         return {"quantidade": feita, "preco_exec": pexec, "resultado": round(lucro, 4), "resta": float(pos.quantidade or 0)}
