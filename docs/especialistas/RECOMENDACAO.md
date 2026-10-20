@@ -56,6 +56,19 @@ Leitura: a regra objetiva que escrevemos para "presos" é rara e não acerta. Is
 funcione: o corte de "volume grande" dele é de olho, e ele combina com lugar e estrutura. Prova que esta tradução em
 regra não tem vantagem nos dados que existem.
 
+### Segunda rodada (passos 3 a 6, mesmo dia)
+
+Tabela única em `data/estudo_passos_3a6_tabela.md`.
+
+| Estratégia | Resultado |
+|---|---|
+| TPO E2, cauda no bloco de 30 min na borda | **Inconclusiva, a única com sinal nos 3 períodos** (+0,23 / +0,06 / +0,41 R). Passa os dois controles no treino, mas validação e holdout têm menos de 30 trades. A cauda sem nível dá zero: o que separa é a borda vinda de longe. Fica para reteste pré-registrado. |
+| TPO E3, América contra a manhã | Negativa e com amostra pequena. Sai da fila. |
+| Fibonacci E1, escada 0,5–0,786 | Reprovada: uma faixa sorteada na mesma perna rende o mesmo. |
+| Fibonacci E2, régua de saída | Reprovada: igual a alvo fixo de 2R e a níveis sorteados. |
+| OB E2, varredura + volta | Reprovada ou inconclusiva: 18 retestes em 6,7 anos. Varredura sem quebra de estrutura perde nos 3 períodos. |
+| Elliott, "passou 0,786 não é onda 2" | Verdade em 73% dos casos, mas a data sorteada dá 70–72%: é geometria, não leitura de onda. |
+
 ## O que começar a receber como aviso (plano original, antes das medições acima)
 
 1. **TPO E1, "abriu fora do valor de ontem e voltou".** É a de menor custo enquanto não há medida (1 a 3 por semana,
