@@ -13,9 +13,9 @@ import logging
 import os
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from conselho.avisos import Aviso, Estado, avaliar
+from conselho.avisos import Aviso, Estado, avaliar, avisos_de_fluxo
 from conselho.mapa_do_dia import CANDLE_MS, DIA_MS, Mapa, mapa as montar_mapa
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ PAR = "BTCUSDT"
 DIAS_HISTORICO = 36                      # composto de 10 dias + janela de 30 dias do pivô virgem
 INTERVALO_S = 60
 VALIDADE_MAPA_S = 60
+INTERVALO_FLUXO_S = 300          # a leitura de fluxo (absorção e presos) roda a cada 5 min
 CAMINHO_PADRAO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "avisos.jsonl")
 
 
@@ -36,13 +37,18 @@ class AvisosService:
 
     def __init__(self, obter_candles: Callable[[int], Sequence[Sequence[float]]], obter_preco: Callable[[], Optional[float]],
                  telegram=None, caminho: str = CAMINHO_PADRAO, intervalo_s: int = INTERVALO_S,
-                 relogio: Callable[[], float] = time.time):
+                 relogio: Callable[[], float] = time.time,
+                 obter_fluxo: Optional[Callable[[float], Tuple[List[Dict], List[Dict]]]] = None,
+                 intervalo_fluxo_s: int = INTERVALO_FLUXO_S):
         self.obter_candles = obter_candles
         self.obter_preco = obter_preco
         self.telegram = telegram
         self.caminho = caminho
         self.intervalo_s = intervalo_s
         self.relogio = relogio
+        self.obter_fluxo = obter_fluxo          # (agora_s) -> (presos, absorcoes); ver conselho/fluxo.py
+        self.intervalo_fluxo_s = intervalo_fluxo_s
+        self.ultimo_fluxo_em: float = 0.0
         self.estado = Estado()
         self.candles: List[list] = []
         self.ultimo_mapa: Optional[Mapa] = None
@@ -108,6 +114,14 @@ class AvisosService:
             logger.warning("preço atual indisponível, usando o último fechamento: %s", e)
         preco = float(preco) if preco else m.preco
         avisos = avaliar(m, preco, self.estado)
+        agora_s = agora_ms / 1000.0
+        if self.obter_fluxo is not None and agora_s - self.ultimo_fluxo_em >= self.intervalo_fluxo_s:
+            self.ultimo_fluxo_em = agora_s
+            try:
+                presos, absorcoes = self.obter_fluxo(agora_s)
+                avisos += avisos_de_fluxo(presos, absorcoes, preco, self.estado, agora_s)
+            except Exception as e:
+                logger.warning("leitura de fluxo falhou neste ciclo: %s: %s", type(e).__name__, e)
         for a in avisos:
             self._gravar(a)
             self._enviar(a)
@@ -124,7 +138,8 @@ class AvisosService:
         if self.telegram is None or not getattr(self.telegram, "ativo", False):
             return
         try:
-            self.telegram.info(f"{a.titulo}\n{a.texto}")
+            nota = "" if a.ressalva in a.texto else f"\n({a.ressalva})"
+            self.telegram.info(f"{a.titulo}\n{a.texto}{nota}")
         except Exception as e:
             logger.warning("Telegram falhou no aviso %s: %s", a.id, e)
 
@@ -173,5 +188,16 @@ def get_avisos_service() -> AvisosService:
         def preco():
             return mercado.preco(PAR)
 
-        _service = AvisosService(candles, preco, telegram=TelegramAlertService())
+        def fluxo_agora(agora_s: float):
+            from conselho import fluxo, livro_historico as lh
+            exs = ("bybit", "binance", "coinbase")
+            ini = agora_s - 6 * 3600
+            v30 = fluxo.barras(fluxo.carregar_minutos(("bybit",), ini, agora_s), 1800, preco_de="bybit")
+            presos = fluxo.presos(v30, abandono_pct=0.005, passo_s=1800)
+            v5 = fluxo.barras(fluxo.carregar_minutos(exs, ini - fluxo.JANELA_DELTA_S, agora_s), 300, preco_de="bybit")
+            calor = lh.mapa_calor(ini, agora_s, passo_s=300)
+            oi = mercado.open_interest(PAR, int((ini - 3600) * 1000), int(agora_s * 1000))
+            return presos, fluxo.absorcao(v5, calor, oi, 300)
+
+        _service = AvisosService(candles, preco, telegram=TelegramAlertService(), obter_fluxo=fluxo_agora)
     return _service

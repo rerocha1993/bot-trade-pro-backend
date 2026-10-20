@@ -62,3 +62,39 @@ def absorcao(inicio: Optional[int] = Query(None), fim: Optional[int] = Query(Non
             "velas_com_livro_e_negocios": len(cobertura), "desde": cobertura[0] if cobertura else None,
             "criterio": {"parede_vezes": fluxo.FATOR_PAREDE, "delta_z": fluxo.Z_DELTA, "encostou_pct": fluxo.ENCOSTOU_PCT * 100,
                          "oi": "subindo nos 15 min até o fim da vela"}}
+
+
+@router.get("/footprint")
+def footprint(passo: int = Query(1800, description="segundos por vela: 300, 900 ou 1800"),
+              linha: float = Query(50.0, ge=10.0, le=500.0, description="altura da linha de preço em US$"),
+              n: int = Query(24, ge=1, le=96, description="quantas velas, das mais recentes"),
+              exchanges: str = Query("bybit")) -> Dict:
+    """
+    Footprint das últimas `n` velas: em cada linha de `linha` US$, o volume agredido de venda e de compra,
+    o delta e o POC da vela, mais as marcas de presos (mesma regra de /presos).
+    """
+    if passo not in (300, 900, 1800):
+        raise HTTPException(status_code=400, detail="passo: 300, 900 ou 1800")
+    exs = [e.strip() for e in exchanges.split(",") if e.strip() in EXCHANGES_NEGOCIOS] or ["bybit"]
+    fim_s = int(time.time())
+    inicio_s = fim_s - passo * (n + 4)                   # +4 velas para a confirmação dos presos no começo
+    velas = fluxo.barras(fluxo.carregar_minutos(exs, inicio_s, fim_s), passo, preco_de=exs[0])
+    abandono = 0.002 if passo <= 300 else 0.004 if passo <= 900 else 0.005
+    marcas = {(e["ts"], e["lado"]): e for e in fluxo.presos(velas, abandono_pct=abandono, passo_s=passo)}
+    saida = []
+    for b in velas[-n:]:
+        linhas: Dict[float, list] = {}
+        for f, (c, v) in b["niveis"].items():
+            k = (f // linha) * linha
+            acc = linhas.setdefault(k, [0.0, 0.0])
+            acc[0] += c
+            acc[1] += v
+        ordenadas = sorted(linhas.items())
+        poc = max(ordenadas, key=lambda kv: kv[1][0] + kv[1][1])[0] if ordenadas else None
+        saida.append({
+            "ts": b["ts"], "abertura": b["abertura"], "maxima": b["maxima"], "minima": b["minima"], "fechamento": b["fechamento"],
+            "compra": round(b["compra"], 3), "venda": round(b["venda"], 3), "delta": round(b["delta"], 3), "poc": poc,
+            "linhas": [[p, round(c, 3), round(v, 3)] for p, (c, v) in ordenadas],
+            "presos": [marcas[(b["ts"], lado)] for lado in ("compradores", "vendedores") if (b["ts"], lado) in marcas],
+        })
+    return {"passo_s": passo, "linha_usd": linha, "exchanges": exs, "velas": saida}

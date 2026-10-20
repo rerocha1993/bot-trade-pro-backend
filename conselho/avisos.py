@@ -34,7 +34,7 @@ NOME_POSICAO = {"fundo": "fundo do composto", "meio": "meio do composto", "topo"
 @dataclass(frozen=True)
 class Aviso:
     id: str                     # "<dia>:<tipo>:<chave>": um por nível (ou sessão) por dia
-    tipo: str                   # "mapa" | "proximidade"
+    tipo: str                   # "mapa" | "proximidade" | "absorcao" | "presos"
     ts: int
     chave: str
     titulo: str
@@ -120,3 +120,64 @@ def avaliar(m: Mapa, preco: float, estado: Estado) -> List[Aviso]:
     if not m.niveis or not preco:
         return []
     return avisos_de_mapa(m, preco, estado) + avisos_de_proximidade(m, preco, estado)
+
+
+# ----------------------------------------------------------------- avisos de fluxo (absorção e presos)
+RESSALVA_FLUXO = "leitura de fluxo ainda sem % medido contra sorteio; informação, não gatilho"
+JANELA_PRESOS_S = 2 * 3600          # só avisa presos confirmados nas últimas 2 h
+JANELA_ABSORCAO_S = 3600            # e absorção da última hora
+
+
+def _hora_s(ts_s: float) -> str:
+    return datetime.fromtimestamp(ts_s, tz=timezone.utc).strftime("%H:%M UTC")
+
+
+def _dia_s(ts_s: float) -> str:
+    return datetime.fromtimestamp(ts_s, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def avisos_de_fluxo(presos: Iterable[Dict], absorcoes: Iterable[Dict], preco: float, estado: Estado,
+                    agora_s: float, passo_presos_s: int = 1800) -> List[Aviso]:
+    """
+    Avisos novos de absorção (conselho/fluxo.absorcao) e de presos CONFIRMADOS no footprint (conselho/fluxo.presos).
+    Cada evento sai uma vez só (``estado.enviados``); eventos antigos (fora das janelas) não saem.
+    """
+    out: List[Aviso] = []
+    for e in absorcoes:
+        if agora_s - e["ts"] > JANELA_ABSORCAO_S:
+            continue
+        aid = f"{_dia_s(e['ts'])}:absorcao:{e['ts']}:{e['tipo']}"
+        if aid in estado.enviados:
+            continue
+        topo = e["tipo"] == "venda"
+        parede = f"{_fmt(e['baixo'])}–{_fmt(e['alto'])}"
+        titulo = (f"Absorção no topo: parede de venda em {parede}" if topo
+                  else f"Absorção no fundo: parede de compra em {parede}")
+        quem = "Compra" if topo else "Venda"
+        texto = (f"{quem} agressiva de {abs(e['delta_btc']):.0f} BTC na vela das {_hora_s(e['ts'])} "
+                 f"({abs(e['delta_z']):.1f} desvios acima do normal), com o open interest subindo {e['oi_var_pct']:+.2f}%, "
+                 f"bateu numa parede {e['intensidade']:.0f}x maior que o normal ({e['parede_btc']:.0f} BTC) "
+                 f"e o preço não passou: fechou em {_fmt(e['fechamento'])}. "
+                 + ("Compradores alavancados ficaram presos no topo." if topo else "Vendedores alavancados ficaram presos no fundo.")
+                 + f" Preço agora: {_fmt(preco)}.")
+        out.append(Aviso(aid, "absorcao", int(agora_s * 1000), f"absorcao:{e['ts']}", titulo, texto, preco,
+                         {"baixo": e["baixo"], "alto": e["alto"], "lado": e["tipo"]}, RESSALVA_FLUXO))
+        estado.enviados.add(aid)
+    for e in presos:
+        if e.get("confirmado") is not True or agora_s - e["ts"] > JANELA_PRESOS_S:
+            continue
+        aid = f"{_dia_s(e['ts'])}:presos:{e['ts']}:{e['lado']}"
+        if aid in estado.enviados:
+            continue
+        compradores = e["lado"] == "compradores"
+        dist = distancia_pct(e["preco"], preco)
+        titulo = f"{'Compradores' if compradores else 'Vendedores'} presos em {_fmt(e['preco'])} ({passo_presos_s // 60} min)"
+        texto = (f"{e['btc']:.0f} BTC {'comprados' if compradores else 'vendidos'} a mercado "
+                 f"({e['vezes']:.0f}x a média da vela) {'no topo' if compradores else 'no fundo'} da vela das {_hora_s(e['ts'])}, "
+                 f"e as velas seguintes fecharam {'abaixo' if compradores else 'acima'}: quem entrou ali está no prejuízo. "
+                 f"No reteste desse preço, o Tradeiros procura {'venda, com stop acima' if compradores else 'compra, com stop abaixo'} "
+                 f"da vela. Preço agora: {_fmt(preco)} ({dist:+.2f}% do nível).")
+        out.append(Aviso(aid, "presos", int(agora_s * 1000), f"presos:{e['ts']}", titulo, texto, preco,
+                         {"preco": e["preco"], "lado": e["lado"]}, RESSALVA_FLUXO))
+        estado.enviados.add(aid)
+    return out

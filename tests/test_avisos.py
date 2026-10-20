@@ -213,3 +213,55 @@ def test_get_avisos_service_usa_a_api_publica(monkeypatch):
     assert s is sv.get_avisos_service() and s.obter_preco() == 1.0 and s.obter_candles(0) == []
     assert pedidos == [("BTCUSDT", "5m", 0)]
     monkeypatch.setattr(sv, "_service", None)
+
+
+# ----------------------------------------------------------------- avisos de fluxo
+from conselho.avisos import RESSALVA_FLUXO, avisos_de_fluxo  # noqa: E402
+
+AGORA_S = 1_792_530_000
+
+
+def _presos(ts, confirmado=True, lado="compradores"):
+    return {"ts": ts, "lado": lado, "preco": 82_490.0, "btc": 69.3, "vezes": 13.0, "confirmado": confirmado}
+
+
+def _absorcao(ts, tipo="venda"):
+    return {"ts": ts, "ate_ts": ts + 600, "tipo": tipo, "baixo": 83_400.0, "alto": 83_480.0, "intensidade": 9.0,
+            "parede_btc": 80.0, "delta_btc": 40.0, "delta_z": 3.1, "oi_var_pct": 0.4, "fechamento": 83_350.0}
+
+
+def test_avisos_de_fluxo_saem_uma_vez_e_so_os_recentes_e_confirmados():
+    est = Estado()
+    av = avisos_de_fluxo([_presos(AGORA_S - 3600), _presos(AGORA_S - 1800, confirmado=None), _presos(AGORA_S - 5 * 3600)],
+                         [_absorcao(AGORA_S - 600), _absorcao(AGORA_S - 2 * 3600)], 82_300.0, est, AGORA_S)
+    assert [a.tipo for a in av] == ["absorcao", "presos"]
+    ab, pr = av
+    assert "parede de venda em 83.400–83.480" in ab.titulo and "presos no topo" in ab.texto and ab.ressalva == RESSALVA_FLUXO
+    assert pr.titulo == "Compradores presos em 82.490 (30 min)" and "procura venda" in pr.texto
+    assert avisos_de_fluxo([_presos(AGORA_S - 3600)], [_absorcao(AGORA_S - 600)], 82_300.0, est, AGORA_S) == []
+
+
+def test_servico_le_o_fluxo_a_cada_5_min_e_sobrevive_a_falha(tmp_path):
+    c = candles_base(12)
+    tg = _Telegram()
+    agora = T0 + 11 * DIA_MS + 10 * H                     # fora dos horários do mapa
+    leituras = []
+
+    def fluxo_ok(agora_s):
+        leituras.append(agora_s)
+        return [_presos(agora_s - 3600)], []
+
+    s = _servico(tmp_path, c, 80_000.0, tg, agora)
+    s.obter_fluxo = fluxo_ok
+    av = s.ciclo(agora)
+    assert [a.tipo for a in av if a.tipo == "presos"] == ["presos"]
+    assert any(RESSALVA_FLUXO in t for t in tg.enviados), "a ressalva vai junto no Telegram"
+    s.ciclo(agora + 60_000)
+    assert len(leituras) == 1, "a leitura de fluxo espera 5 min"
+
+    def fluxo_quebrado(agora_s):
+        raise RuntimeError("Bybit fora do ar")
+
+    s.obter_fluxo = fluxo_quebrado
+    s.ciclo(agora + 400_000)                               # não levanta
+    assert s.ultimo_erro is None

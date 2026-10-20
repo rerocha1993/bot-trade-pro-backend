@@ -27,7 +27,7 @@ export interface MapaDoDia {
   ressalva: string; servico: ServicoAvisos
 }
 export interface Aviso {
-  id: string; tipo: 'mapa' | 'proximidade'; ts: number; chave: string; titulo: string; texto: string; preco: number
+  id: string; tipo: 'mapa' | 'proximidade' | 'absorcao' | 'presos'; ts: number; chave: string; titulo: string; texto: string; preco: number
   nivel: NivelMapa | null; ressalva: string
 }
 export interface AvisosUltimos { avisos: Aviso[]; servico: ServicoAvisos }
@@ -78,3 +78,12 @@ export interface FluxoAbsorcao {
   inicio: number; fim: number; passo_s: number; eventos: EventoAbsorcao[]; velas_com_livro_e_negocios: number
   desde: number | null; criterio: { parede_vezes: number; delta_z: number; encostou_pct: number; oi: string }
 }
+
+/** Footprint (GET /api/fluxo/footprint): por vela, [preço da linha, compra, venda] agredidos a mercado. */
+export interface VelaFootprint {
+  ts: number; abertura: number; maxima: number; minima: number; fechamento: number
+  compra: number; venda: number; delta: number; poc: number | null
+  linhas: [preco: number, compra: number, venda: number][]
+  presos: EventoPresos[]
+}
+export interface FluxoFootprint { passo_s: number; linha_usd: number; exchanges: string[]; velas: VelaFootprint[] }

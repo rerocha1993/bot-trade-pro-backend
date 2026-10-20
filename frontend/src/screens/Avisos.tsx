@@ -39,12 +39,16 @@ function LinhaNivel({ n, preco }: { n: NivelMapa; preco: number }) {
   )
 }
 
+const TIPOS = ['todos', 'absorcao', 'presos', 'mapa', 'proximidade'] as const
+const NOME_TIPO: Record<string, string> = { todos: 'todos', absorcao: 'absorção', presos: 'presos', mapa: 'mapa', proximidade: 'proximidade' }
+const COR_TIPO: Record<string, string> = { absorcao: '#f0544f', presos: '#f5c04a', mapa: 'var(--acc)', proximidade: 'var(--amber)' }
+
 function CardAviso({ a }: { a: Aviso }) {
-  const cor = a.tipo === 'mapa' ? 'var(--acc)' : 'var(--amber)'
+  const cor = COR_TIPO[a.tipo] ?? 'var(--muted)'
   return (
     <div style={{ padding: '12px 0', borderTop: '1px solid var(--border-3)' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <Tag color={cor}>{a.tipo === 'mapa' ? 'mapa' : 'proximidade'}</Tag>
+        <Tag color={cor}>{NOME_TIPO[a.tipo] ?? a.tipo}</Tag>
         <span style={{ fontWeight: 500 }}>{a.titulo}</span>
         <span className="muted mono" style={{ fontSize: 11, marginLeft: 'auto' }}>{horaUTC(a.ts)} · {fmtPreco(a.preco)}</span>
       </div>
@@ -56,7 +60,7 @@ function CardAviso({ a }: { a: Aviso }) {
 export default function Avisos() {
   const qMapa = useAvisosMapa()
   const qUlt = useAvisosUltimos(50)
-  const [tipo, setTipo] = useState<'todos' | 'mapa' | 'proximidade'>('todos')
+  const [tipo, setTipo] = useState<(typeof TIPOS)[number]>('todos')
   const m = qMapa.data
   const avisos = useMemo(() => (qUlt.data?.avisos ?? []).filter((a) => tipo === 'todos' || a.tipo === tipo), [qUlt.data, tipo])
   const servico = m?.servico ?? qUlt.data?.servico
@@ -119,9 +123,9 @@ export default function Avisos() {
                     {Object.keys(m.sessoes_hoje).length === 0 && Object.keys(m.sessoes_ontem).length === 0 && <Empty>sem sessões</Empty>}
                   </Card>
 
-                  <Card title="Últimos avisos" sub={`gravados em data/avisos.jsonl · mapa às 00:00, 08:00 e 13:30 UTC · proximidade a ${fmt(PROXIMIDADE_PCT, 1)}%, um por nível por dia`}
+                  <Card title="Últimos avisos" sub={`absorção e presos confirmados (30 min) assim que acontecem · mapa às 00:00, 08:00 e 13:30 UTC · proximidade a ${fmt(PROXIMIDADE_PCT, 1)}%, um por nível por dia`}
                     right={<span style={{ display: 'flex', gap: 6 }}>
-                      {(['todos', 'mapa', 'proximidade'] as const).map((t) => <Chip key={t} on={tipo === t} onClick={() => setTipo(t)}>{t}</Chip>)}
+                      {TIPOS.map((t) => <Chip key={t} on={tipo === t} onClick={() => setTipo(t)}>{NOME_TIPO[t]}</Chip>)}
                     </span>}>
                     <Estado query={qUlt}>
                       {avisos.length === 0 ? <Empty>nenhum aviso gravado{servico?.ativo ? '' : ' · o serviço está desligado'}</Empty>

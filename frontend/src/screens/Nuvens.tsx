@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { useAbsorcao, useCandles, useNuvensCalor, useNuvensTop, usePresos } from '../api/hooks'
+import { useAbsorcao, useCandles, useFootprint, useNuvensCalor, useNuvensTop, usePresos } from '../api/hooks'
 import type { CelulaCalor, EventoAbsorcao, EventoPresos, NuvensCalor } from '../api/types'
+import FootprintChart from '../components/chart/FootprintChart'
 import PriceChart from '../components/chart/PriceChart'
 import { Header, Page } from '../components/Layout'
 import { Card, Chip, Empty, Err, Estado, Loading, Seg } from '../components/ui'
@@ -19,6 +20,9 @@ const FATORES = ['2', '3', '5'] as const
 const COR = { bids: '#2ecc84', asks: '#f0544f', presos: '#f5c04a' }
 const MODOS = ['absorcao', 'paredes'] as const
 const TFS_PRESOS = ['300', '1800'] as const
+const VISTAS = ['velas', 'footprint'] as const
+const TFS_FP = ['300', '900', '1800'] as const
+const LINHAS_FP = ['20', '50', '100', '150'] as const
 const hhmm = (s: number) => new Date(s * 1000).toISOString().slice(11, 16)
 
 /** Escala de cor: frio (só acima do normal) → cor do lado → quente (parede muito acima do normal). */
@@ -128,6 +132,10 @@ export default function Nuvens() {
   const [modo, setModo] = useState<(typeof MODOS)[number]>('absorcao')
   const [verPresos, setVerPresos] = useState(true)
   const [tfPresos, setTfPresos] = useState<(typeof TFS_PRESOS)[number]>('1800')
+  const [vista, setVista] = useState<(typeof VISTAS)[number]>('velas')
+  const [tfFp, setTfFp] = useState<(typeof TFS_FP)[number]>('1800')
+  const [linhaFp, setLinhaFp] = useState<(typeof LINHAS_FP)[number]>('50')
+  const qFp = useFootprint(Number(tfFp), Number(linhaFp), vista === 'footprint')
   const exchanges = EXCHANGES.filter((e) => exs[e]).join(',')
   const candles = useCandles('BTCUSDT', '5m', N_CANDLES)
   const dados = candles.data ?? []
@@ -174,8 +182,15 @@ export default function Nuvens() {
       <Header titulo="Nuvens do livro" par="BTCUSDT" eyebrow="Order flow"
         subtitulo="A nuvem só aparece quando há distorção: muita gente agredindo a mercado, alavancada, contra uma parede grande no livro (Coinbase + Binance + Bybit), e o preço sem atravessar. Em “Todas as paredes” você vê o livro inteiro acima do normal; o botão Presos marca as velas onde ficou gente presa." />
       <Page>
-        <Card title="Candles de 5 min com as nuvens"
+        <Card title={vista === 'footprint' ? `Footprint de ${Number(tfFp) / 60} min` : 'Candles de 5 min com as nuvens'}
           right={<span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Seg value={vista} options={VISTAS} onChange={setVista} labels={{ velas: 'Velas', footprint: 'Footprint' }} />
+            <span style={{ width: 8 }} />
+            {vista === 'footprint' ? <>
+              <Seg value={tfFp} options={TFS_FP} onChange={setTfFp} labels={{ '300': '5 min', '900': '15 min', '1800': '30 min' }} />
+              <span className="muted" style={{ fontSize: 12 }}>linha de</span>
+              <Seg value={linhaFp} options={LINHAS_FP} onChange={setLinhaFp} labels={{ '20': '$20', '50': '$50', '100': '$100', '150': '$150' }} />
+            </> : <>
             <Seg value={modo} options={MODOS} onChange={setModo} labels={{ absorcao: 'Absorção', paredes: 'Todas as paredes' }} />
             {modo === 'paredes' && <>
               <span className="muted" style={{ fontSize: 12 }}>a partir de</span>
@@ -186,18 +201,27 @@ export default function Nuvens() {
             <Chip on={verPresos} onClick={() => setVerPresos(!verPresos)}>Presos</Chip>
             {verPresos && <Seg value={tfPresos} options={TFS_PRESOS} onChange={setTfPresos} labels={{ '300': '5 min', '1800': '30 min' }} />}
             <Chip on={mostrarTop} onClick={() => setMostrarTop(!mostrarTop)}>maiores níveis</Chip>
+            </>}
           </span>}>
-          {candles.isPending ? <Loading /> : candles.isError ? <Err e={candles.error} /> : dados.length === 0 ? <Empty>sem candles</Empty> : (
+          {vista === 'footprint' ? (
+            qFp.isPending ? <Loading /> : qFp.isError ? <Err e={qFp.error} /> : !qFp.data?.velas.length ? <Empty>ainda sem negócios gravados para o footprint</Empty> : <>
+              <FootprintChart velas={qFp.data.velas} linha={qFp.data.linha_usd} preco={ultimaVela?.close} />
+              <div className="muted" style={{ fontSize: 12, marginTop: 10, display: 'grid', gap: 4 }}>
+                <span>Em cada linha de preço: <b style={{ color: COR.asks }}>venda a mercado</b> à esquerda e <b style={{ color: '#3d8bfd' }}>compra a mercado</b> à direita (BTC, Bybit perpétuo). O contorno branco é o POC da vela; número em negrito é desequilíbrio de 3 para 1.</span>
+                <span><b style={{ color: COR.presos }}>Contorno amarelo</b>: onde ficou gente presa (entrou forte no topo ou no fundo da vela e o preço fechou do outro lado); tracejado = ainda esperando as próximas velas. Δ embaixo é compra menos venda da vela.</span>
+              </div>
+            </>
+          ) : candles.isPending ? <Loading /> : candles.isError ? <Err e={candles.error} /> : dados.length === 0 ? <Empty>sem candles</Empty> : (
             <PriceChart candles={dados} rects={rects} levels={levels} labels={labels} markers={presos.markers} height={560} />
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 12, alignItems: 'end' }}>
+          {vista === 'velas' && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 12, alignItems: 'end' }}>
             {modo === 'paredes' ? <Regua /> : <LegendaAbsorcao q={qAbs.data} />}
             <span className="muted" style={{ fontSize: 12 }}>
               {qCalor.isPending ? 'lendo o livro…' : d && d.colunas.length
                 ? `livro gravado de ${new Date(d.colunas[0].ts * 1000).toISOString().slice(11, 16)} a ${new Date(d.colunas[d.colunas.length - 1].ts * 1000).toISOString().slice(11, 16)} UTC · onde não há nuvem, nada acima do normal (ou o coletor estava parado)`
                 : 'o coletor ainda não tem livro suficiente neste período'}
             </span>
-          </div>
+          </div>}
           {semBase.length > 0 && <div style={{ marginTop: 10 }}><span className="alerta-pill">Ainda sem histórico para comparar em {semBase.join(', ')}: precisa de ~10 min de coleta.</span></div>}
         </Card>
 

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
-import type { AvisosUltimos, FluxoAbsorcao, FluxoPresos, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop } from './types'
+import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoPresos, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop } from './types'
 import { candlesDaApi } from './adapters'
 
 /** Candles públicos da Bybit, servidos pela API do conselho (timestamp em ms na API, em segundos no gráfico). */
@@ -44,4 +44,9 @@ export const usePresos = (inicio: number | null, passo: number, ligado: boolean)
 export const useAbsorcao = (inicio: number | null) => useQuery({
   queryKey: ['absorcao', inicio], enabled: inicio !== null, refetchInterval: 60_000,
   queryFn: () => api.get<FluxoAbsorcao>('/api/fluxo/absorcao', { inicio: inicio as number }),
+})
+
+export const useFootprint = (passo: number, linha: number, ligado: boolean, n = 24) => useQuery({
+  queryKey: ['footprint', passo, linha, n], enabled: ligado, refetchInterval: 30_000,
+  queryFn: () => api.get<FluxoFootprint>('/api/fluxo/footprint', { passo, linha, n }),
 })
