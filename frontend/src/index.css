@@ -214,3 +214,26 @@ button { cursor: pointer; }
 
 /* aviso curto dentro de um bloco de texto (sem a caixa do .warn) */
 .warn-txt { color: var(--amber); }
+
+/* ---------------------------------------------------------------- celular e telas estreitas
+   O painel foi desenhado para monitor (min-width 1200 px). Abaixo de 900 px tudo vira uma coluna e os
+   controles quebram linha, para o gráfico e os botões caberem na largura do telefone. */
+@media (max-width: 900px) {
+  body { min-width: 0; background-size: 48px 48px; }
+  .topbar { flex-wrap: wrap; gap: 10px 14px; padding: 12px 14px; }
+  .navpill { order: 3; width: 100%; overflow-x: auto; }
+  .topbar-right { margin-left: auto; gap: 10px; }
+  .main { padding: 0 10px 40px; }
+  .pagehead { flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 4px 12px; }
+  .pagehead h1 { font-size: 26px; }
+  .pagehead .sub { font-size: 12px; }
+  .pagehead .acoes { margin-left: 0; flex-wrap: wrap; }
+  .card-h { flex-wrap: wrap; padding: 12px 12px 6px; gap: 6px 10px; }
+  .card-r { margin-left: 0 !important; width: 100%; }
+  .card-r > span { flex-wrap: wrap; row-gap: 6px; }
+  .card-b { padding: 8px 8px 14px; }
+  .grid { grid-template-columns: 1fr !important; }
+  .kpi { padding: 14px 16px; }
+  .table { font-size: 12px; }
+  .alerta-pill { white-space: normal; }
+}

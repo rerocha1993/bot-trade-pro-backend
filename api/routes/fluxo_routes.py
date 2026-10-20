@@ -64,22 +64,26 @@ def absorcao(inicio: Optional[int] = Query(None), fim: Optional[int] = Query(Non
                          "oi": "subindo nos 15 min até o fim da vela"}}
 
 
+# abandono exigido para confirmar os presos, por tempo gráfico (velas maiores andam mais)
+ABANDONO_POR_PASSO = {300: 0.002, 900: 0.004, 1800: 0.005, 3600: 0.007, 14400: 0.012}
+
+
 @router.get("/footprint")
-def footprint(passo: int = Query(1800, description="segundos por vela: 300, 900 ou 1800"),
-              linha: float = Query(50.0, ge=10.0, le=500.0, description="altura da linha de preço em US$"),
-              n: int = Query(24, ge=1, le=96, description="quantas velas, das mais recentes"),
+def footprint(passo: int = Query(1800, description="segundos por vela: 300, 900, 1800, 3600 ou 14400"),
+              linha: float = Query(50.0, ge=5.0, le=1000.0, description="altura da linha de preço em US$"),
+              n: int = Query(150, ge=1, le=500, description="quantas velas, das mais recentes"),
               exchanges: str = Query("bybit")) -> Dict:
     """
     Footprint das últimas `n` velas: em cada linha de `linha` US$, o volume agredido de venda e de compra,
     o delta e o POC da vela, mais as marcas de presos (mesma regra de /presos).
     """
-    if passo not in (300, 900, 1800):
-        raise HTTPException(status_code=400, detail="passo: 300, 900 ou 1800")
+    if passo not in ABANDONO_POR_PASSO:
+        raise HTTPException(status_code=400, detail=f"passo: {sorted(ABANDONO_POR_PASSO)}")
     exs = [e.strip() for e in exchanges.split(",") if e.strip() in EXCHANGES_NEGOCIOS] or ["bybit"]
     fim_s = int(time.time())
     inicio_s = fim_s - passo * (n + 4)                   # +4 velas para a confirmação dos presos no começo
     velas = fluxo.barras(fluxo.carregar_minutos(exs, inicio_s, fim_s), passo, preco_de=exs[0])
-    abandono = 0.002 if passo <= 300 else 0.004 if passo <= 900 else 0.005
+    abandono = ABANDONO_POR_PASSO[passo]
     marcas = {(e["ts"], e["lado"]): e for e in fluxo.presos(velas, abandono_pct=abandono, passo_s=passo)}
     saida = []
     for b in velas[-n:]:

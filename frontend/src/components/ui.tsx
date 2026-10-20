@@ -10,7 +10,7 @@ export function Card({ title, sub, right, children, style, pad = true }: {
         <div className="card-h">
           <span>{title}</span>
           {sub && <span className="sub">{sub}</span>}
-          {right && <span style={{ marginLeft: 'auto' }}>{right}</span>}
+          {right && <span className="card-r" style={{ marginLeft: 'auto' }}>{right}</span>}
         </div>
       )}
       {pad ? <div className="card-b">{children}</div> : children}

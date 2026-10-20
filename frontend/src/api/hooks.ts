@@ -46,7 +46,7 @@ export const useAbsorcao = (inicio: number | null) => useQuery({
   queryFn: () => api.get<FluxoAbsorcao>('/api/fluxo/absorcao', { inicio: inicio as number }),
 })
 
-export const useFootprint = (passo: number, linha: number, ligado: boolean, n = 24) => useQuery({
+export const useFootprint = (passo: number, linha: number, ligado: boolean, n = 150) => useQuery({
   queryKey: ['footprint', passo, linha, n], enabled: ligado, refetchInterval: 30_000,
   queryFn: () => api.get<FluxoFootprint>('/api/fluxo/footprint', { passo, linha, n }),
 })

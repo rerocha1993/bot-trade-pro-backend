@@ -21,8 +21,10 @@ const COR = { bids: '#2ecc84', asks: '#f0544f', presos: '#f5c04a' }
 const MODOS = ['absorcao', 'paredes'] as const
 const TFS_PRESOS = ['300', '1800'] as const
 const VISTAS = ['velas', 'footprint'] as const
-const TFS_FP = ['300', '900', '1800'] as const
-const LINHAS_FP = ['20', '50', '100', '150'] as const
+const TFS_FP = ['300', '900', '1800', '3600', '14400'] as const
+const LINHAS_FP = ['10', '20', '50', '100', '250', '500'] as const
+/** altura de linha que cabe em cada tempo gráfico (o usuário pode trocar) */
+const LINHA_PADRAO: Record<(typeof TFS_FP)[number], (typeof LINHAS_FP)[number]> = { '300': '20', '900': '50', '1800': '50', '3600': '100', '14400': '250' }
 const hhmm = (s: number) => new Date(s * 1000).toISOString().slice(11, 16)
 
 /** Escala de cor: frio (só acima do normal) → cor do lado → quente (parede muito acima do normal). */
@@ -136,6 +138,7 @@ export default function Nuvens() {
   const [tfFp, setTfFp] = useState<(typeof TFS_FP)[number]>('1800')
   const [linhaFp, setLinhaFp] = useState<(typeof LINHAS_FP)[number]>('50')
   const qFp = useFootprint(Number(tfFp), Number(linhaFp), vista === 'footprint')
+  const trocarTfFp = (tf: (typeof TFS_FP)[number]) => { setTfFp(tf); setLinhaFp(LINHA_PADRAO[tf]) }
   const exchanges = EXCHANGES.filter((e) => exs[e]).join(',')
   const candles = useCandles('BTCUSDT', '5m', N_CANDLES)
   const dados = candles.data ?? []
@@ -182,14 +185,14 @@ export default function Nuvens() {
       <Header titulo="Nuvens do livro" par="BTCUSDT" eyebrow="Order flow"
         subtitulo="A nuvem só aparece quando há distorção: muita gente agredindo a mercado, alavancada, contra uma parede grande no livro (Coinbase + Binance + Bybit), e o preço sem atravessar. Em “Todas as paredes” você vê o livro inteiro acima do normal; o botão Presos marca as velas onde ficou gente presa." />
       <Page>
-        <Card title={vista === 'footprint' ? `Footprint de ${Number(tfFp) / 60} min` : 'Candles de 5 min com as nuvens'}
+        <Card title={vista === 'footprint' ? `Footprint ${Number(tfFp) >= 3600 ? `${Number(tfFp) / 3600}h` : `${Number(tfFp) / 60} min`}` : 'Candles de 5 min com as nuvens'}
           right={<span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             <Seg value={vista} options={VISTAS} onChange={setVista} labels={{ velas: 'Velas', footprint: 'Footprint' }} />
             <span style={{ width: 8 }} />
             {vista === 'footprint' ? <>
-              <Seg value={tfFp} options={TFS_FP} onChange={setTfFp} labels={{ '300': '5 min', '900': '15 min', '1800': '30 min' }} />
+              <Seg value={tfFp} options={TFS_FP} onChange={trocarTfFp} labels={{ '300': '5m', '900': '15m', '1800': '30m', '3600': '1h', '14400': '4h' }} />
               <span className="muted" style={{ fontSize: 12 }}>linha de</span>
-              <Seg value={linhaFp} options={LINHAS_FP} onChange={setLinhaFp} labels={{ '20': '$20', '50': '$50', '100': '$100', '150': '$150' }} />
+              <Seg value={linhaFp} options={LINHAS_FP} onChange={setLinhaFp} labels={{ '10': '$10', '20': '$20', '50': '$50', '100': '$100', '250': '$250', '500': '$500' }} />
             </> : <>
             <Seg value={modo} options={MODOS} onChange={setModo} labels={{ absorcao: 'Absorção', paredes: 'Todas as paredes' }} />
             {modo === 'paredes' && <>
@@ -205,9 +208,9 @@ export default function Nuvens() {
           </span>}>
           {vista === 'footprint' ? (
             qFp.isPending ? <Loading /> : qFp.isError ? <Err e={qFp.error} /> : !qFp.data?.velas.length ? <Empty>ainda sem negócios gravados para o footprint</Empty> : <>
-              <FootprintChart velas={qFp.data.velas} linha={qFp.data.linha_usd} preco={ultimaVela?.close} />
+              <FootprintChart velas={qFp.data.velas} linha={qFp.data.linha_usd} />
               <div className="muted" style={{ fontSize: 12, marginTop: 10, display: 'grid', gap: 4 }}>
-                <span>Em cada linha de preço: <b style={{ color: COR.asks }}>venda a mercado</b> à esquerda e <b style={{ color: '#3d8bfd' }}>compra a mercado</b> à direita (BTC, Bybit perpétuo). O contorno branco é o POC da vela; número em negrito é desequilíbrio de 3 para 1.</span>
+                <span>Arraste para os lados, use a roda do mouse ou dois dedos para o zoom; arraste o eixo de preço para esticar. Chegando perto, cada linha mostra a <b style={{ color: COR.asks }}>venda a mercado</b> à esquerda e a <b style={{ color: '#3d8bfd' }}>compra a mercado</b> à direita (BTC, Bybit perpétuo). Contorno branco é o POC da vela; número em negrito é desequilíbrio de 3 para 1; as barras embaixo são o delta.</span>
                 <span><b style={{ color: COR.presos }}>Contorno amarelo</b>: onde ficou gente presa (entrou forte no topo ou no fundo da vela e o preço fechou do outro lado); tracejado = ainda esperando as próximas velas. Δ embaixo é compra menos venda da vela.</span>
               </div>
             </>
