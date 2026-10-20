@@ -69,6 +69,17 @@ Tabela única em `data/estudo_passos_3a6_tabela.md`.
 | OB E2, varredura + volta | Reprovada ou inconclusiva: 18 retestes em 6,7 anos. Varredura sem quebra de estrutura perde nos 3 períodos. |
 | Elliott, "passou 0,786 não é onda 2" | Verdade em 73% dos casos, mas a data sorteada dá 70–72%: é geometria, não leitura de onda. |
 
+### Terceira rodada: presos no footprint com o histórico inteiro (2020–2026)
+
+Resumo em `data/estudo_presos_2020_resumo.md` (footprint da Bybit de 2020-03-25 a 2026-10-19, 2.396 dias, sem buraco).
+
+- **Presos no footprint: reprovados** em 30 min e 5 min, compra e venda, nos 3 períodos, com amostra grande (30 min:
+  −0,35 / −0,32 / −0,41 R com n 3.040 / 808 / 629). Sem taxa o resultado é zero; o custo derruba. Um nível sorteado na
+  mesma ponta da mesma vela dá o mesmo resultado: o volume preso não acrescenta nada ao lugar. Todo ano de 2020 a 2026 é
+  negativo. Os presos ficam no painel só como leitura de contexto, com o rótulo "medido: sem vantagem".
+- **Cauda na borda + presos: inconclusiva** (n 23 / 8 / 12). Os presos não melhoram a cauda; só cortam a amostra.
+- Continua de pé só a **cauda no bloco de 30 min na borda**, sozinha e inconclusiva por amostra.
+
 ## O que começar a receber como aviso (plano original, antes das medições acima)
 
 1. **TPO E1, "abriu fora do valor de ontem e voltou".** É a de menor custo enquanto não há medida (1 a 3 por semana,

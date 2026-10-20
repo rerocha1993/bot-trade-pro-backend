@@ -73,3 +73,6 @@ data/avisos.jsonl
 
 # pacote do servidor gerado por deploy\empacotar.ps1
 conselho.tar.gz
+
+# saídas por evento dos estudos (regeneráveis pelos scripts; o estudo_presos_2020.csv tem 128 MB)
+data/estudo_*.csv
