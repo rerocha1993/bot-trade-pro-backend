@@ -57,6 +57,7 @@ class Overlay implements ISeriesPrimitive<Time> {
       // retângulos (order blocks, zonas)
       for (const r of this.data.rects) {
         if (range && r.from > (range.to as number)) continue
+        if (range && r.to !== null && r.to < (range.from as number)) continue   // já saiu pela esquerda
         let x1 = this.x(r.from)
         if (x1 === null) x1 = range && r.from < (range.from as number) ? 0 : null
         if (x1 === null) continue

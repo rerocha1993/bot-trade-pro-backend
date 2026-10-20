@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type {
   Backtest, BacktestsBot, BotStatusItem, Decisao, Dial, LogExecucao, Mestre, MultiGrau, NiveisResp, PontoInstitucional,
-  OpcoesAlavancagem, Plano, PosicoesResp, PosicaoAberta, RangeContexto, Sentimento, StatusBot, Trader, InverseEstado, PropostaRange,
-  TradeirosBacktestResp, TradeirosPlanoResp } from './types'
+  OpcoesAlavancagem, Plano, PosicoesResp, PosicaoAberta, RangeContexto, MapaDoDia, AvisosUltimos, Sentimento, StatusBot, Trader, InverseEstado, PropostaRange,
+  TradeirosBacktestResp, TradeirosPlanoResp, NuvensOverlay, NuvensTop } from './types'
 import { candlesDaApi } from './adapters'
 
 export const useBots = () => useQuery({ queryKey: ['bots'], queryFn: () => api.get<BotStatusItem[]>('/bot-control/'), refetchInterval: 5_000 })
@@ -170,4 +170,25 @@ export const useRangeContexto = (par = 'BTCUSDT') => useQuery({
 export const usePosicoesAbertas = () => useQuery({
   queryKey: ['posicoes-abertas'], refetchInterval: 10_000,
   queryFn: () => api.get<PosicaoAberta[]>('/posicoes/abertas'),
+})
+
+export const useAvisosMapa = () => useQuery({
+  queryKey: ['avisos-mapa'], refetchInterval: 60_000,
+  queryFn: () => api.get<MapaDoDia>('/api/avisos/mapa'),
+})
+
+export const useAvisosUltimos = (n = 50) => useQuery({
+  queryKey: ['avisos-ultimos', n], refetchInterval: 60_000,
+  queryFn: () => api.get<AvisosUltimos>('/api/avisos/ultimos', { n }),
+})
+
+/** Nuvens do TRDR: overlay por categoria a partir do primeiro candle do gráfico (segundos) e os top levels de agora. */
+export const useNuvensOverlay = (inicio: number | null, exchanges: string, passo = 300) => useQuery({
+  queryKey: ['nuvens-overlay', inicio, exchanges, passo], enabled: inicio !== null, refetchInterval: 60_000,
+  queryFn: () => api.get<NuvensOverlay>('/api/nuvens/overlay', { inicio: inicio as number, exchanges, passo }),
+})
+
+export const useNuvensTop = (exchanges: string) => useQuery({
+  queryKey: ['nuvens-top', exchanges], refetchInterval: 60_000,
+  queryFn: () => api.get<NuvensTop>('/api/nuvens/top', { exchanges }),
 })

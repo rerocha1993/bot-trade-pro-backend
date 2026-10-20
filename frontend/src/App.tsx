@@ -1,10 +1,12 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { TopBar } from './components/Layout'
+import Avisos from './screens/Avisos'
 import BotDetail from './screens/BotDetail'
 import BotForm from './screens/BotForm'
 import Dashboard from './screens/Dashboard'
 import Historico from './screens/Historico'
 import Mercado from './screens/Mercado'
+import Nuvens from './screens/Nuvens'
 import Pontos from './screens/Pontos'
 import Posicoes from './screens/Posicoes'
 import Range from './screens/Range'
@@ -27,7 +29,9 @@ export default function App() {
           <Route path="/pontos" element={<Pontos />} />
           <Route path="/posicoes" element={<Posicoes />} />
           <Route path="/range" element={<Range />} />
+          <Route path="/nuvens" element={<Nuvens />} />
           <Route path="/tradeiros" element={<Tradeiros />} />
+          <Route path="/avisos" element={<Avisos />} />
           <Route path="/sentimento" element={<Sentimento />} />
           <Route path="/historico" element={<Historico />} />
           <Route path="*" element={<Navigate to="/" replace />} />

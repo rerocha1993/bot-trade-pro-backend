@@ -5,7 +5,8 @@ API do Bot Trade Pro.
     uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 Ao subir, inicia os bots com `ativo_bot = True` (um thread por bot) e a manutenção institucional
-periódica. Defina INICIAR_BOTS=0 no .env para subir só a API.
+periódica. Defina INICIAR_BOTS=0 no .env para subir só a API. SERVICO_AVISOS=1 liga o conselho de avisos
+(services/avisos_service.py: só informa, nunca opera; desligado por padrão).
 """
 import logging
 import os
@@ -26,6 +27,7 @@ from api.routes import (  # noqa: E402
     bot_control_controller, bot_controller, coins_routes, elliott_routes, indicador_controller,
     institucional_routes, log_chart_routes, log_routes, nuvens_endpoint, order_blocks_routes,
     ponto_institucional_routes, posicoes_routes, range_routes, tradeiros_routes, status_routes, backtest_routes, inverse_routes,
+    avisos_routes, nuvens_routes,
 )
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -73,7 +75,17 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             # um robô com problema não pode derrubar a API inteira: sem painel você fica cego
             logger.exception("falha ao iniciar os robôs: %s", e)
+    avisos = None
+    if os.getenv("SERVICO_AVISOS", "0") == "1":
+        try:
+            from services.avisos_service import get_avisos_service
+            avisos = get_avisos_service()
+            avisos.iniciar()
+        except Exception as e:
+            logger.exception("falha ao ligar o serviço de avisos: %s", e)
     yield
+    if avisos is not None:
+        avisos.parar()
     parar_keepalive()
     try:
         manager.stop_all()
@@ -102,6 +114,8 @@ app.include_router(elliott_routes.router, prefix="/api/elliott", tags=["Elliott"
 app.include_router(range_routes.router, prefix="/api/range", tags=["Range"])
 app.include_router(tradeiros_routes.router, prefix="/api/tradeiros", tags=["Portal Tradeiros"])
 app.include_router(posicoes_routes.router, prefix="/posicoes", tags=["Posições"])
+app.include_router(avisos_routes.router, prefix="/api/avisos", tags=["Avisos"])
+app.include_router(nuvens_routes.router, prefix="/api/nuvens", tags=["Nuvens"])
 
 # painel (React + Lightweight Charts): `cd frontend && npm run build` gera frontend/dist, servido em /painel
 _painel = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")

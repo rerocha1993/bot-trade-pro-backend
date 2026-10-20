@@ -61,3 +61,9 @@ data/cenarios/
 
 # sinais dos indicadores calculados do historico (core/sinais_indicadores.py)
 data/sinais/
+
+# livro de ordens gravado pelo coletor (conselho/coletor_livro.py), ~3,5 MB/dia
+dados/livro/
+
+# avisos do conselho (gerado pelo services/avisos_service.py)
+data/avisos.jsonl
