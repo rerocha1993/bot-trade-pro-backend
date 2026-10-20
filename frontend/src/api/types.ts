@@ -52,3 +52,29 @@ export interface NuvensTop {
   ts: number | null; mid: number | null; bids: NuvensNivel[]; asks: NuvensNivel[]; exchanges: string[]; aproximado: boolean
   exchanges_pedidas: string[]
 }
+
+/** Mapa de calor do livro (GET /api/nuvens/calor): só as células com ordens acima do normal da distância. */
+export type CelulaCalor = [baixo: number, alto: number, lado: 0 | 1, btc: number, intensidade: number]
+export interface NuvensCalor {
+  inicio: number; fim: number; passo_s: number; grade_usd: number | null; fator_min: number; btc_min: number
+  exchanges: string[]; base: Record<string, number>
+  colunas: { ts: number; mid: number; celulas: CelulaCalor[] }[]
+  limitacoes: Record<string, string>
+}
+
+/** Presos no footprint (GET /api/fluxo/presos): confirmado null = ainda sem as velas seguintes. */
+export interface EventoPresos { ts: number; lado: 'compradores' | 'vendedores'; preco: number; btc: number; vezes: number; confirmado: boolean | null }
+export interface FluxoPresos {
+  inicio: number; fim: number; passo_s: number; exchanges: string[]; abandono_pct: number
+  velas_com_footprint: number; primeira_vela: number | null; eventos: EventoPresos[]
+}
+
+/** Absorção (GET /api/fluxo/absorcao): parede no livro + agressão alavancada contra ela + preço travado. */
+export interface EventoAbsorcao {
+  ts: number; ate_ts: number; tipo: 'venda' | 'compra'; baixo: number; alto: number; intensidade: number
+  parede_btc: number; delta_btc: number; delta_z: number; oi_var_pct: number; fechamento: number
+}
+export interface FluxoAbsorcao {
+  inicio: number; fim: number; passo_s: number; eventos: EventoAbsorcao[]; velas_com_livro_e_negocios: number
+  desde: number | null; criterio: { parede_vezes: number; delta_z: number; encostou_pct: number; oi: string }
+}

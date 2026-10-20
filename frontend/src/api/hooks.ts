@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
-import type { AvisosUltimos, MapaDoDia, NuvensOverlay, NuvensTop } from './types'
+import type { AvisosUltimos, FluxoAbsorcao, FluxoPresos, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop } from './types'
 import { candlesDaApi } from './adapters'
 
 /** Candles públicos da Bybit, servidos pela API do conselho (timestamp em ms na API, em segundos no gráfico). */
@@ -28,4 +28,20 @@ export const useNuvensOverlay = (inicio: number | null, exchanges: string, passo
 export const useNuvensTop = (exchanges: string) => useQuery({
   queryKey: ['nuvens-top', exchanges], refetchInterval: 60_000,
   queryFn: () => api.get<NuvensTop>('/api/nuvens/top', { exchanges }),
+})
+
+/** Mapa de calor: células de preço com `fator` vezes o normal da distância, a partir do primeiro candle (segundos). */
+export const useNuvensCalor = (inicio: number | null, exchanges: string, fator: number, passo = 300) => useQuery({
+  queryKey: ['nuvens-calor', inicio, exchanges, fator, passo], enabled: inicio !== null, refetchInterval: 60_000,
+  queryFn: () => api.get<NuvensCalor>('/api/nuvens/calor', { inicio: inicio as number, exchanges, fator, passo }),
+})
+
+export const usePresos = (inicio: number | null, passo: number, ligado: boolean) => useQuery({
+  queryKey: ['presos', inicio, passo], enabled: ligado && inicio !== null, refetchInterval: 60_000,
+  queryFn: () => api.get<FluxoPresos>('/api/fluxo/presos', { inicio: inicio as number, passo }),
+})
+
+export const useAbsorcao = (inicio: number | null) => useQuery({
+  queryKey: ['absorcao', inicio], enabled: inicio !== null, refetchInterval: 60_000,
+  queryFn: () => api.get<FluxoAbsorcao>('/api/fluxo/absorcao', { inicio: inicio as number }),
 })

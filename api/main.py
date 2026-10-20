@@ -24,7 +24,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-from api.routes import avisos_routes, mercado_routes, nuvens_routes  # noqa: E402
+from api.routes import avisos_routes, fluxo_routes, mercado_routes, nuvens_routes  # noqa: E402
 from conselho.console import preparar_console_servidor  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -54,6 +54,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 app.include_router(avisos_routes.router, prefix="/api/avisos", tags=["Avisos"])
 app.include_router(nuvens_routes.router, prefix="/api/nuvens", tags=["Nuvens"])
 app.include_router(mercado_routes.router, prefix="/api/mercado", tags=["Mercado"])
+app.include_router(fluxo_routes.router, prefix="/api/fluxo", tags=["Fluxo"])
 
 # painel (React + Lightweight Charts): `cd frontend && npm run build` gera frontend/dist, servido em /painel
 _painel = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")

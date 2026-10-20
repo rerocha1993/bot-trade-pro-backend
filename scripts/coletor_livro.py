@@ -1,7 +1,8 @@
 """
 COMO USAR: na raiz do projeto, clique duas vezes em coletor_livro.bat (ou rode
   .venv\\Scripts\\python.exe scripts\\coletor_livro.py) e deixe a janela aberta; Ctrl+C para parar.
-Grava o livro de BTC (Coinbase, Binance, Bybit) a cada 30 s em dados/livro/<exchange>/<dia>.jsonl.gz;
+Grava o livro de BTC (Coinbase, Binance, Bybit) a cada 30 s em dados/livro/<exchange>/<dia>.jsonl.gz e os negócios
+a mercado, por minuto, em dados/negocios/<exchange>/<dia>.jsonl.gz (footprint; --sem-negocios desliga);
 log em logs/coletor_livro.log. Opções: --intervalo 30  --duracao 180 (segundos; sem = infinito)
   --exchanges coinbase,binance,bybit  --pasta dados/livro  --silencioso (sem log no console).
 """
@@ -26,6 +27,7 @@ def main(argv=None) -> int:
     ap.add_argument("--exchanges", default=",".join(BUSCADORES), help="lista separada por vírgula")
     ap.add_argument("--pasta", default=PASTA_DADOS, help="pasta raiz dos arquivos jsonl.gz")
     ap.add_argument("--silencioso", action="store_true", help="não espelhar o log no console")
+    ap.add_argument("--sem-negocios", action="store_true", help="não coletar os negócios (footprint)")
     args = ap.parse_args(argv)
 
     log = configurar_log(console=not args.silencioso)
@@ -37,6 +39,10 @@ def main(argv=None) -> int:
     buscadores = {e: BUSCADORES[e] for e in pedidas}
 
     coletor = ColetorLivro(raiz=args.pasta, intervalo_s=args.intervalo, buscadores=buscadores)
+    if not args.sem_negocios:
+        # negócios a mercado (quem agrediu) para o footprint, a absorção e os presos; mesmo sinal de parada
+        from conselho.coletor_negocios import ColetorNegocios
+        ColetorNegocios(parar=coletor.parar).iniciar()
 
     def _parar(signum, frame):  # noqa: ARG001
         log.info("sinal %s recebido, parando...", signum)

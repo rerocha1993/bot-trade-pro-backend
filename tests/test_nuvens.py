@@ -183,6 +183,8 @@ def cliente(tmp_path, monkeypatch):
     monkeypatch.setattr(nr.lh, "serie_overlay", lambda *a, **k: serie(*a, raiz=raiz, **k))
     monkeypatch.setattr(nr.lh, "top_agregado", lambda ts, exs: top_ag(ts, exs, raiz))
     monkeypatch.setattr(nr.lh, "ultimo_ts", lambda exs: ult(exs, raiz))
+    calor = lh.mapa_calor
+    monkeypatch.setattr(nr.lh, "mapa_calor", lambda *a, **k: calor(*a, raiz=raiz, **k))
     for k in range(3):
         cl.gravar_snapshot(registro_novo(T0 + 300 * k, "coinbase", 100_000.0, [1, 2, 3, 4, 5], [5, 4, 3, 2, 1],
                                          top_b=[[99_000.0, 10.0]], top_a=[[101_000.0, 7.0]]), raiz)
@@ -211,3 +213,36 @@ def test_rota_top(cliente):
     assert d["ts"] == T0 + 600 and d["exchanges"] == ["coinbase"] and d["exchanges_pedidas"] == ["coinbase", "binance"]
     assert d["bids"] == [{"preco": 99_000.0, "qtd": 10.0, "exchanges": ["coinbase"]}]
     assert d["asks"][0]["preco"] == 101_000.0
+
+
+def test_mapa_calor_acende_parede_parada_e_ignora_spoof(tmp_path):
+    raiz = str(tmp_path)
+    # 30 snapshots de 30 s = 3 colunas de 5 min; livro de 1 BTC por faixa (o "normal")
+    for k in range(30):
+        bids = [1.0] * cl.N_FAIXAS
+        if k >= 20:
+            bids[5] = 10.0          # parede parada na 3ª coluna inteira
+        if k == 12:
+            bids[8] = 10.0          # spoof: aparece num snapshot só da 2ª coluna
+        cl.gravar_snapshot(registro_falso(T0 + 30 * k, "coinbase", 100_000.0, bids), raiz)
+    m = lh.mapa_calor(T0, T0 + 899, ("coinbase",), raiz, passo_s=300, janela_base_s=0)
+    assert m["grade_usd"] == 100.0 and [c["ts"] for c in m["colunas"]] == [T0, T0 + 300, T0 + 600]
+    assert m["colunas"][0]["celulas"] == [] and m["colunas"][1]["celulas"] == []   # o spoof dilui para 1,9x
+    (cel,) = m["colunas"][2]["celulas"]
+    assert cel[0] == 99_400.0 and cel[1] == 99_500.0 and cel[2] == 0 and cel[3] == 10.0 and cel[4] == 10.0
+
+
+def test_mapa_calor_sem_base_suficiente_nao_acende(tmp_path):
+    raiz = str(tmp_path)
+    for k in range(5):
+        cl.gravar_snapshot(registro_falso(T0 + 30 * k, "coinbase", 100_000.0, [50.0] * cl.N_FAIXAS), raiz)
+    m = lh.mapa_calor(T0, T0 + 299, ("coinbase",), raiz, janela_base_s=0)
+    assert m["colunas"] == [] and m["base"] == {"coinbase": 5}
+
+
+def test_rota_calor(cliente):
+    r = cliente.get("/api/nuvens/calor", params={"inicio": T0, "fim": T0 + 700, "exchanges": "coinbase", "fator": 3})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["fator_min"] == 3 and d["exchanges"] == ["coinbase"] and d["colunas"] == []   # 3 snapshots: sem base
+    assert cliente.get("/api/nuvens/calor", params={"fator": 0.5}).status_code == 422

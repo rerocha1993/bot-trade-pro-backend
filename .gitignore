@@ -65,5 +65,8 @@ data/sinais/
 # livro de ordens gravado pelo coletor (conselho/coletor_livro.py), ~3,5 MB/dia
 dados/livro/
 
+# negócios a mercado por minuto (conselho/coletor_negocios.py), footprint
+dados/negocios/
+
 # avisos do conselho (gerado pelo services/avisos_service.py)
 data/avisos.jsonl

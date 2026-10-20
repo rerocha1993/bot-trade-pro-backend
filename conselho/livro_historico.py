@@ -386,3 +386,83 @@ def top_agregado(ts: Optional[float] = None, exchanges: Iterable[str] = EXCHANGE
         "exchanges": list(usados),
         "aproximado": aproximado,
     }
+
+
+# ----------------------------------------------------------------- mapa de calor (heatmap de liquidez)
+FATOR_MIN_CALOR = 2.0        # a faixa só acende com pelo menos 2x o normal daquela distância
+BTC_MIN_CALOR = 2.0          # e com pelo menos 2 BTC somados na célula (corta ruído de livro raso)
+MIN_SNAPSHOTS_BASE = 20      # sem 20 snapshots de base, a exchange não entra (não há "normal" para comparar)
+
+
+def mapa_calor(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EXCHANGES, raiz: str = PASTA_DADOS,
+               passo_s: int = PASSO_OVERLAY_S, fator_min: float = FATOR_MIN_CALOR, btc_min: float = BTC_MIN_CALOR,
+               janela_base_s: float = JANELA_24H_S) -> Dict:
+    """
+    Heatmap de liquidez do livro (estilo Bookmap/TRDR): só acende onde há ordens acima do normal.
+
+    Para cada exchange e lado, o NORMAL de cada faixa de 0,1% é a mediana da quantidade naquela mesma distância do
+    mid, nos snapshots de [ts_inicio − janela_base_s, ts_fim]. Em cada coluna de ``passo_s`` segundos a quantidade é
+    a MÉDIA dos snapshots da coluna: parede que pisca (spoof) fica diluída, parede que fica parada aparece inteira.
+    As faixas das exchanges vão para uma grade absoluta de preço (0,1% do preço, arredondado a US$ 10) e somam;
+    a intensidade da célula é soma(quantidade) / soma(normal). Só saem células com intensidade >= ``fator_min`` e
+    quantidade >= ``btc_min``.
+
+    Devolve {"passo_s", "grade_usd", "fator_min", "btc_min", "exchanges", "base": {ex: snapshots},
+             "colunas": [{"ts", "mid", "celulas": [[preco_baixo, preco_alto, lado (0 bids / 1 asks), btc, intensidade]]}]}
+    Faixas que a exchange não alcança (quantidade sempre 0) não têm normal e nunca acendem.
+    """
+    exs = list(exchanges)
+    passo = max(1, int(passo_s))
+    dados: Dict[str, Dict] = {}
+    base_n: Dict[str, int] = {}
+    for ex in exs:
+        regs = carregar_periodo(ex, ts_inicio - janela_base_s, ts_fim, raiz)
+        base_n[ex] = len(regs)
+        if len(regs) < MIN_SNAPSHOTS_BASE:
+            continue
+        m = matriz(regs)
+        normal = {lado: np.median(m[lado], axis=0) for lado in LADOS}
+        sel = m["ts"] >= ts_inicio
+        dados[ex] = {"ts": m["ts"][sel], "mid": m["mid"][sel], "bids": m["bids"][sel], "asks": m["asks"][sel],
+                     "normal": normal, "faixa_pct": float(regs[-1].get("faixa_pct", 0.001))}
+    if not dados:
+        return {"passo_s": passo, "grade_usd": None, "fator_min": fator_min, "btc_min": btc_min, "exchanges": exs,
+                "base": base_n, "colunas": []}
+
+    mids = np.concatenate([d["mid"] for d in dados.values() if len(d["mid"])]) if any(len(d["mid"]) for d in dados.values()) else np.array([])
+    ref = float(np.median(mids)) if len(mids) else 0.0
+    grade = max(1.0, round(ref * 0.001 / 10.0) * 10.0) if ref else 1.0
+
+    # coluna -> lado -> bin da grade -> [btc, normal]
+    colunas: Dict[int, Dict] = {}
+    for ex, d in dados.items():
+        chaves = (d["ts"] // passo) * passo
+        for chave in np.unique(chaves):
+            linhas = chaves == chave
+            mid = float(np.mean(d["mid"][linhas]))
+            col = colunas.setdefault(int(chave), {"mids": [], "bins": {0: {}, 1: {}}})
+            col["mids"].append(mid)
+            for k, lado in enumerate(LADOS):
+                qtd = d[lado][linhas].mean(axis=0)
+                normal = d["normal"][lado]
+                for i in np.nonzero((qtd > 0) & (normal > 0))[0]:
+                    preco = preco_da_faixa(mid, lado, int(i), d["faixa_pct"])
+                    b = int(preco // grade)
+                    acc = col["bins"][k].setdefault(b, [0.0, 0.0])
+                    acc[0] += float(qtd[i])
+                    acc[1] += float(normal[i])
+
+    saida = []
+    for chave in sorted(colunas):
+        col = colunas[chave]
+        celulas = []
+        for k in (0, 1):
+            for b, (btc, normal) in col["bins"][k].items():
+                if normal <= 0:
+                    continue
+                inten = btc / normal
+                if inten >= fator_min and btc >= btc_min:
+                    celulas.append([round(b * grade, 2), round((b + 1) * grade, 2), k, round(btc, 3), round(inten, 2)])
+        saida.append({"ts": chave, "mid": round(float(np.mean(col["mids"])), 2), "celulas": celulas})
+    return {"passo_s": passo, "grade_usd": grade, "fator_min": fator_min, "btc_min": btc_min, "exchanges": exs,
+            "base": base_n, "colunas": saida}

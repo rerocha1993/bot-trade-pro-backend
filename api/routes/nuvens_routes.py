@@ -6,6 +6,8 @@ As "nuvens" do TRDR no painel (conselho/coletor_livro.py grava, conselho/livro_h
                                                         categoria de distância (0–1%, 1–2,5%, 2,5–5%, 5–10%,
                                                         10–25%) somando as exchanges, razão bids/asks e o lado
                                                         com vantagem; `inicio`/`fim` em segundos (epoch, UTC)
+    GET /api/nuvens/calor?inicio&fim&exchanges&fator   heatmap de liquidez: só as faixas de preço com ordens
+                                                        acima do normal; a intensidade é a cor
     GET /api/nuvens/top?ts&exchanges                    Order Book Top Levels: os 10 maiores níveis por lado,
                                                         somados entre exchanges no mesmo preço (grade de 0,05%)
 
@@ -68,3 +70,22 @@ def top(ts: Optional[int] = Query(None, description="epoch em segundos (UTC); pa
         exchanges: str = Query("coinbase,binance,bybit")) -> Dict:
     exs = _exchanges(exchanges)
     return {**lh.top_agregado(ts, exs), "exchanges_pedidas": exs}
+
+
+@router.get("/calor")
+def calor(inicio: Optional[int] = Query(None, description="epoch em segundos (UTC); padrão: fim - 24 h"),
+          fim: Optional[int] = Query(None, description="epoch em segundos (UTC); padrão: agora"),
+          exchanges: str = Query("coinbase,binance,bybit"),
+          passo: int = Query(lh.PASSO_OVERLAY_S, ge=30, le=3600, description="segundos por coluna (300 = candle de 5 min)"),
+          fator: float = Query(lh.FATOR_MIN_CALOR, ge=1.0, le=20.0, description="só acende com N vezes o normal da distância"),
+          btc: float = Query(lh.BTC_MIN_CALOR, ge=0.0, le=1000.0, description="quantidade mínima na célula")) -> Dict:
+    """Heatmap de liquidez: células de preço com ordens acima do normal (mediana 24 h na mesma distância do mid)."""
+    exs = _exchanges(exchanges)
+    fim_s = int(fim) if fim is not None else int(time.time())
+    inicio_s = int(inicio) if inicio is not None else fim_s - 86400
+    if inicio_s > fim_s:
+        raise HTTPException(status_code=400, detail="inicio depois do fim")
+    if fim_s - inicio_s > PERIODO_MAXIMO_S:
+        raise HTTPException(status_code=400, detail=f"período máximo de {PERIODO_MAXIMO_S // 86400} dias")
+    mapa = lh.mapa_calor(inicio_s, fim_s, exs, passo_s=passo, fator_min=fator, btc_min=btc)
+    return {"inicio": inicio_s, "fim": fim_s, **mapa, "limitacoes": {ex: LIMITACOES[ex] for ex in exs}}

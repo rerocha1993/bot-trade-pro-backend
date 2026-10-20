@@ -70,3 +70,24 @@ def preco(simbolo: str, sessao: Optional[requests.Session] = None) -> Optional[f
     except Exception as e:
         logger.warning("preço da Bybit indisponível: %s", e)
         return None
+
+
+def open_interest(simbolo: str, desde_ms: int, ate_ms: Optional[int] = None,
+                  sessao: Optional[requests.Session] = None) -> List[list]:
+    """Open interest da Bybit de 5 em 5 min (em BTC), [[ts_ms, oi], ...] em ordem crescente."""
+    ate_ms = int(ate_ms or time.time() * 1000)
+    vistos = {}
+    fim = ate_ms
+    while fim > desde_ms:
+        res = _get("/v5/market/open-interest", {"category": CATEGORIA, "symbol": simbolo, "intervalTime": "5min",
+                                                "startTime": int(desde_ms), "endTime": int(fim), "limit": 200}, sessao)
+        lista = res.get("list") or []
+        if not lista:
+            break
+        for p in lista:
+            vistos[int(p["timestamp"])] = float(p["openInterest"])
+        menor = min(int(p["timestamp"]) for p in lista)
+        if menor >= fim or len(lista) < 200:
+            break
+        fim = menor - 1
+    return [[k, vistos[k]] for k in sorted(vistos) if desde_ms <= k <= ate_ms]
