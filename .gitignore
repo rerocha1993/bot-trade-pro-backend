@@ -70,3 +70,6 @@ dados/negocios/
 
 # avisos do conselho (gerado pelo services/avisos_service.py)
 data/avisos.jsonl
+
+# pacote do servidor gerado por deploy\empacotar.ps1
+conselho.tar.gz

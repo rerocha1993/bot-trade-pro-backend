@@ -1,0 +1,10 @@
+# Caddy na frente da API do conselho: HTTPS automático (Let's Encrypt) e usuário/senha em tudo.
+# Gerado pelo deploy/instalar.sh; para trocar a senha: caddy hash-password e edite /etc/caddy/Caddyfile.
+__SITE__ {
+	encode gzip
+	basic_auth {
+		__USUARIO__ __HASH__
+	}
+	redir / /painel/ 302
+	reverse_proxy 127.0.0.1:8000
+}

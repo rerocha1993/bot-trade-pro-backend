@@ -1,0 +1,12 @@
+# Dependências mínimas do Conselho BTC no servidor (testadas num ambiente limpo em 20/10/2026).
+# O requirements.txt da raiz ainda lista as do sistema de robôs antigo; para o servidor use este.
+fastapi==0.115.12
+uvicorn==0.34.2
+requests==2.32.3
+httpx==0.28.1
+numpy==2.2.6
+pandas==2.2.3
+python-dotenv==1.1.0
+websocket-client==1.5.1
+python-telegram-bot==22.1
+pytest==9.1.1

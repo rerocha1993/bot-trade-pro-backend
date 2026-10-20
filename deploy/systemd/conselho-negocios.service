@@ -1,0 +1,8 @@
+[Unit]
+Description=Conselho BTC - completa o footprint com os arquivos diários da Bybit (minutos que faltam)
+
+[Service]
+Type=oneshot
+User=conselho
+WorkingDirectory=/opt/conselho
+ExecStart=/opt/conselho/.venv/bin/python scripts/baixar_negocios_bybit.py --dias 3

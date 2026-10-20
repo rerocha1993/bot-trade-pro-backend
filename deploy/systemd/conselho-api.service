@@ -1,0 +1,15 @@
+[Unit]
+Description=Conselho BTC - API, painel e serviço de avisos
+After=network-online.target conselho-coletor.service
+Wants=network-online.target
+
+[Service]
+User=conselho
+WorkingDirectory=/opt/conselho
+EnvironmentFile=-/opt/conselho/.env
+ExecStart=/opt/conselho/.venv/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

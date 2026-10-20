@@ -1,0 +1,14 @@
+[Unit]
+Description=Conselho BTC - coletor do livro e dos negócios (Coinbase, Binance, Bybit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=conselho
+WorkingDirectory=/opt/conselho
+ExecStart=/opt/conselho/.venv/bin/python scripts/coletor_livro.py --silencioso
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
