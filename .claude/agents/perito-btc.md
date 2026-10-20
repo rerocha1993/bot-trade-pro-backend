@@ -61,7 +61,9 @@ O usuário estudou 2 anos no grupo privado do Tradeiros (Shaka e Maroja; YouTube
 - Laboratório de votação (516 robôs): no 4h, das aprovadas só 21% seguraram no holdout; no 1h sobrou 1 (VWAP janela + VWAP sessão + Fibonacci, 3 de 3), +0,1 R por trade, fraco.
 - Tudo isso acima foi testado com entrada e saída de uma vez.
 - **Gestão do usuário (11/09/2026)**, 516 robôs no 4h sem seleção, holdout 2025–2026: entrada única −0,042 R (32% positivos); **só a entrada em 5 fatias +0,047 R (70% positivos)**; só tirar o risco −0,041 R (não ajuda: corta os ganhadores); as duas +0,029 R. No 1h as fatias levam de −0,127 R a −0,003 R. O efeito da família cai para ~0 exigindo que a limitada atravesse o nível em 0,10% (parte vinha de execução otimista).
-- **Melhor candidato até agora**: 4h, 5 fatias, 2 de 4 [VWAP sessão + TPO + Volume Profile + Order Block] com filtro de regime, stop 1,5 ATR, alvo 3 ATR, até 24 candles: +0,215 / +0,208 / +0,165 R por trade (treino / validação / holdout), compra e venda positivas, +0,150 R no holdout com execução exigente. Ainda é o vencedor de uma busca de 516: confirmar em demo antes de qualquer outra coisa.
+- **Robô 9 (4h, 5 fatias, 2 de 4 [VWAP sessão + TPO + VP + OB], stop 1,5 ATR, alvo 3 ATR)**: os +0,215 / +0,208 / +0,165 R eram ARTEFATO do motor otimista (stop aplicado antes das fatias). Corrigido em 13/09/2026, caiu para +0,047 / +0,025 / −0,001 R, indistinguível da direção sorteada (`scripts/checagem_motores.py`). Não é candidato.
+- **Régua obrigatória desde 13/09/2026**: toda estratégia roda também com a direção (ou o nível) SORTEADA nos mesmos candles, 20 sorteios; só vale se o real ficar acima de ~95% deles no holdout.
+- **Níveis de TPO em 5 min (20/10/2026, `scripts/estudo_niveis_tpo.py`)**: 36 tipos de nível (POC/VAH/VAL do dia, das sessões, da semana, do mês, do ano, naked POC, extremos, aberturas) contra níveis sorteados, R 0,3% e 0,6%: 0 de 180 positivos nos três períodos. POC/VAH/VAL = sorteio; extremos de dia/sessão piores que o sorteio (e a continuação também não paga). Resumo em `data/estudo_niveis_tpo_resumo.md`; desenho do conselho de avisos em `docs/CONSELHO_ESPECIALISTAS.md`.
 
 ## Mapa do projeto
 
