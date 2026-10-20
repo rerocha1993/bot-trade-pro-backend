@@ -25,8 +25,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence
 
-from core.tpo_sessao import DIA_MS, SESSOES, Perfil, dias as perfis_por_dia, merge, naked_pocs, sessoes
-from tradeiros.leitura import pivo_virgem, posicao_no_range
+from conselho.tpo import DIA_MS, SESSOES, Perfil, dias as perfis_por_dia, merge, naked_pocs, sessoes
+from conselho.niveis import pivo_virgem, posicao_no_range
 
 CANDLE_MS = 5 * 60 * 1000
 DIAS_COMPOSTO = 10

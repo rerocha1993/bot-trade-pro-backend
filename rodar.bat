@@ -1,28 +1,26 @@
 @echo off
-REM Sobe a API, o painel e TODOS os robos ativos, num processo so.
-REM Deixe esta janela aberta. Fechar a janela ou Ctrl+C para os robos.
-REM Nao consome tokens de IA: sao processos Python falando com a Bybit.
+REM Sobe o conselho de avisos de BTC: o coletor do livro (janela propria) e a API com o painel.
+REM Nao envia ordens: so le dados publicos e avisa. Deixe as duas janelas abertas.
+REM Nao consome tokens de IA: sao processos Python falando com APIs publicas.
 
 cd /d "%~dp0"
-title Bot Trade Pro - NAO FECHE ESTA JANELA
+title Conselho BTC - NAO FECHE ESTA JANELA
 
 echo.
-echo  Bot Trade Pro
-echo  -------------
+echo  Conselho de avisos BTC
+echo  ----------------------
 echo  Painel:  http://localhost:8000/painel/
 echo  API:     http://localhost:8000/docs
 echo  Log:     logs\servidor.log
 echo.
-echo  Deixe esta janela aberta. Ctrl+C para parar tudo.
+echo  O coletor do livro (nuvens) abre em outra janela. Deixe as duas abertas.
+echo  Ctrl+C aqui para parar a API.
 echo.
 
-REM O LocalDB desliga sozinho por ociosidade e demora a subir na primeira conexao.
-REM Acordar antes evita o erro "o tempo limite do logon expirou".
-echo  Acordando o banco...
-sqllocaldb start MSSQLLocalDB >nul 2>&1
+start "Coletor do livro" coletor_livro.bat
 
 .venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 
 echo.
-echo  Servidor encerrado. Os robos pararam.
+echo  API encerrada.
 pause

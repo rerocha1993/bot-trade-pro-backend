@@ -79,8 +79,8 @@ import pandas as pd
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
-from core.range_tradeiros import ParametrosRange, contexto  # noqa: E402
-from core.tpo_sessao import BLOCO_MS, DIA_MS, dias  # noqa: E402
+from conselho.composto import ParametrosRange, contexto  # noqa: E402
+from conselho.tpo import BLOCO_MS, DIA_MS, dias  # noqa: E402
 
 CSV5 = RAIZ / "data" / "historico" / "BTCUSDT_binance_5m.csv"
 FUNDING = RAIZ / "data" / "historico" / "funding_bybit.json"

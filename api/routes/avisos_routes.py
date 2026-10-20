@@ -12,7 +12,7 @@ from typing import Dict
 from fastapi import APIRouter, Query
 
 from conselho.avisos import RESSALVA
-from services.avisos_service import get_avisos_service
+from conselho.servico_avisos import get_avisos_service
 
 router = APIRouter()
 

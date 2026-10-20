@@ -64,8 +64,8 @@ from numpy.lib.stride_tricks import sliding_window_view
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ))
 
-from core.range_tradeiros import ParametrosRange, contexto, contexto_adaptativo  # noqa: E402
-from core.tpo_sessao import DIA_MS, dias  # noqa: E402
+from conselho.composto import ParametrosRange, contexto, contexto_adaptativo  # noqa: E402
+from conselho.tpo import DIA_MS, dias  # noqa: E402
 
 CSV = RAIZ / "data" / "historico" / "BTCUSDT_binance_15m.csv"
 LSR = RAIZ / "data" / "historico" / "lsr_bybit_1h.json"

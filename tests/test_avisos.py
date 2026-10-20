@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from conselho.avisos import HORAS_MAPA, JANELA_MAPA_MIN, PROXIMIDADE_PCT, RESSALVA, Estado, avaliar
 from conselho.mapa_do_dia import CANDLE_MS, DIA_MS, Mapa, Nivel, mapa
-from services.avisos_service import AvisosService
+from conselho.servico_avisos import AvisosService
 from tests.test_mapa_do_dia import T0, candles_base, dia_flat
 
 H = 3_600_000
@@ -201,12 +201,15 @@ def test_rotas_devolvem_json_puro(tmp_path, monkeypatch):
     assert u["avisos"] and u["avisos"][0]["tipo"] in ("mapa", "proximidade")
 
 
-def test_get_avisos_service_usa_o_conector_publico(monkeypatch):
-    import services.avisos_service as sv
-    con = SimpleNamespace(obter_ohlcv_historico=lambda par, tf, desde: [], obter_preco_atual=lambda par: 1.0)
-    monkeypatch.setattr("services.bot_manager.get_manager",
-                        lambda: SimpleNamespace(servicos={"connectors": {"simulador": con}, "telegram": _Telegram(False)}))
+def test_get_avisos_service_usa_a_api_publica(monkeypatch):
+    import conselho.mercado as mercado
+    import conselho.servico_avisos as sv
+    pedidos = []
+    monkeypatch.setattr(mercado, "candles", lambda par, tf, desde: pedidos.append((par, tf, desde)) or [])
+    monkeypatch.setattr(mercado, "preco", lambda par: 1.0)
+    monkeypatch.setattr("conselho.telegram.TelegramAlertService", lambda: _Telegram(False))
     monkeypatch.setattr(sv, "_service", None)
     s = sv.get_avisos_service()
     assert s is sv.get_avisos_service() and s.obter_preco() == 1.0 and s.obter_candles(0) == []
+    assert pedidos == [("BTCUSDT", "5m", 0)]
     monkeypatch.setattr(sv, "_service", None)

@@ -1,9 +1,9 @@
 import pytest
 
-from core.elliott_pro.patterns import Leg, ajustar_diagonal, ajustar_flat, ajustar_impulso, ajustar_todos, ajustar_triangulo, ajustar_wxy, ajustar_zigzag
-from core.elliott_pro.pivots import zigzag_atr
-from core.elliott_pro.scenarios import ScenarioEngine
-from core.elliott_pro.multidegree import AnaliseMultiGrau, analisar_serie, timeframes_do_perfil
+from conselho.elliott.patterns import Leg, ajustar_diagonal, ajustar_flat, ajustar_impulso, ajustar_todos, ajustar_triangulo, ajustar_wxy, ajustar_zigzag
+from conselho.elliott.pivots import zigzag_atr
+from conselho.elliott.scenarios import ScenarioEngine
+from conselho.elliott.multidegree import AnaliseMultiGrau, analisar_serie, timeframes_do_perfil
 from tests.conftest import gerar_candles, impulso_5_ondas
 
 

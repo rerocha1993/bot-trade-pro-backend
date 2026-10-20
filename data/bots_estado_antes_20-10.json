@@ -1,0 +1,72 @@
+[
+ {
+  "id": 1,
+  "nome": "Bot de Teste 1",
+  "ativo_bot": false
+ },
+ {
+  "id": 2,
+  "nome": "Bot de Teste 2",
+  "ativo_bot": false
+ },
+ {
+  "id": 3,
+  "nome": "Bot de Teste 3",
+  "ativo_bot": false
+ },
+ {
+  "id": 4,
+  "nome": "Scalp Fluxo",
+  "ativo_bot": false
+ },
+ {
+  "id": 5,
+  "nome": "Day TPO",
+  "ativo_bot": true
+ },
+ {
+  "id": 6,
+  "nome": "Swing Estrutura",
+  "ativo_bot": true
+ },
+ {
+  "id": 7,
+  "nome": "Elliott Puro",
+  "ativo_bot": false
+ },
+ {
+  "id": 8,
+  "nome": "Hedge Inverso",
+  "ativo_bot": true
+ },
+ {
+  "id": 9,
+  "nome": "Swing Fatias 4h",
+  "ativo_bot": true
+ },
+ {
+  "id": 10,
+  "nome": "Range Tradeiros 30m",
+  "ativo_bot": true
+ },
+ {
+  "id": 11,
+  "nome": "Tradeiros Shaka · trades",
+  "ativo_bot": false
+ },
+ {
+  "id": 12,
+  "nome": "Tradeiros Shaka · hedge",
+  "ativo_bot": false
+ },
+ {
+  "id": 13,
+  "nome": "Tradeiros Maroja · trades",
+  "ativo_bot": false
+ },
+ {
+  "id": 14,
+  "nome": "Tradeiros Maroja · hedge",
+  "ativo_bot": false
+ }
+]

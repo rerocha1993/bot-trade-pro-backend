@@ -2,25 +2,23 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { api } from '../api/client'
-import type { StatusGeral } from '../api/types'
+import type { StatusConselho } from '../api/types'
 import { fmt, pctSigned } from '../lib/format'
 
-const NAV = [
-  ['/', 'Visão geral'], ['/posicoes', 'Posições'], ['/trader', 'Mesa do trader'], ['/mercado', 'Mercado'], ['/range', 'Range'], ['/nuvens', 'Nuvens'], ['/tradeiros', 'Tradeiros'], ['/avisos', 'Avisos'], ['/pontos', 'Pontos'],
-  ['/sentimento', 'Sentimento'], ['/historico', 'Histórico'], ['/bots/novo', 'Configurar'],
-] as const
+const NAV = [['/', 'Mapa e avisos'], ['/nuvens', 'Nuvens']] as const
 
-interface DiagBybit { modo: string; publico?: string; privado?: string; saldo_usdt?: unknown; [k: string]: unknown }
+/** Coletor parado há mais de 5 min = buraco no histórico das nuvens. */
+const COLETOR_ATRASO_S = 300
 
-export function useStatusGeral() {
-  return useQuery({ queryKey: ['status'], queryFn: () => api.get<StatusGeral>('/status/'), refetchInterval: 10_000 })
+export function useStatusConselho() {
+  return useQuery({ queryKey: ['status'], queryFn: () => api.get<StatusConselho>('/api/mercado/status'), refetchInterval: 30_000 })
 }
 
 export function usePreco(par = 'BTCUSDT') {
   return useQuery({
     queryKey: ['preco', par],
     queryFn: async () => {
-      const r = await api.get<{ candles: number[][] }>('/status/mercado/candles', { par, timeframe: '1d', limite: 2 })
+      const r = await api.get<{ candles: number[][] }>('/api/mercado/candles', { par, timeframe: '1d', limite: 2 })
       const c = r.candles
       const ultimo = c[c.length - 1], anterior = c[c.length - 2]
       return { preco: ultimo[4], var24h: anterior ? ultimo[4] / anterior[4] - 1 : 0 }
@@ -38,29 +36,26 @@ function useRelogio() {
   return hora
 }
 
-/** Saúde das conexões: vira o ponto do topo (detalhe ao passar o mouse) e a faixa de alerta quando algo falha. */
+/** Saúde do conselho: vira o ponto do topo (detalhe ao passar o mouse) e a faixa de alerta quando algo falha. */
 function useSaude() {
-  const status = useStatusGeral()
-  const bybit = useQuery({ queryKey: ['bybit', 'simulador'], queryFn: () => api.get<DiagBybit>('/status/bybit', { modo: 'simulador' }), refetchInterval: 60_000, retry: 0 })
-  // as chaves são do Demo Trading da conta oficial, não do testnet (registro separado, sem o KYC dele)
-  const conta = useQuery({ queryKey: ['bybit', 'demo'], queryFn: () => api.get<DiagBybit>('/status/bybit', { modo: 'demo' }), refetchInterval: 120_000, retry: 0 })
-  const md = status.data?.servicos?.market_data as { cesta?: string; membros?: string[]; falhas?: Record<string, unknown> } | undefined
-  const totExch = md?.membros?.length
-  const okExch = totExch !== undefined ? totExch - Object.keys(md?.falhas ?? {}).length : undefined
-  const dados = bybit.isError ? 'falha' : bybit.data ? (bybit.data.publico === 'ok' ? 'ok' : 'falha') : '…'
-  const contaTxt = conta.isError ? 'falha' : conta.data ? (conta.data.privado === 'ok' ? 'ok' : String(conta.data.privado || '').startsWith('erro') ? 'chave inválida' : 'sem chave') : '…'
-  const cesta = okExch !== undefined && totExch ? `${okExch}/${totExch}` : '—'
-  const linhas: [string, string][] = [['Bybit dados', dados], ['Bybit conta (demo)', contaTxt], ['Cesta de exchanges', cesta],
-    ['Telegram', status.data ? (status.data.servicos.telegram ? 'ok' : 'off') : '…']]
+  const status = useStatusConselho()
+  const preco = usePreco('BTCUSDT')
+  const s = status.data
+  const dados = preco.isError ? 'falha' : preco.data ? 'ok' : '…'
+  const avisos = s ? (s.avisos.ativo ? 'ok' : 'off') : '…'
+  const idades = s ? Object.values(s.coletor_idade_s) : []
+  const atrasado = idades.some((v) => v === null || v > COLETOR_ATRASO_S)
+  const coletor = !s ? '…' : atrasado ? 'parado' : 'ok'
+  const linhas: [string, string][] = [['Bybit dados', dados], ['Serviço de avisos', avisos], ['Coletor do livro', coletor],
+    ['Telegram', s ? (s.telegram ? 'ok' : 'off') : '…']]
   const problemas: string[] = []
   if (dados === 'falha') problemas.push('dados públicos da Bybit indisponíveis')
-  if (contaTxt === 'chave inválida' || contaTxt === 'falha') problemas.push('chave da Bybit (demo) inválida · ordens suspensas')
-  if (okExch !== undefined && totExch && okExch < totExch) problemas.push(`cesta ${cesta} exchanges`)
-  if (status.isError) problemas.push('API do robô sem resposta')
+  if (coletor === 'parado') problemas.push('coletor do livro parado · abra o coletor_livro.bat')
+  if (status.isError) problemas.push('API do conselho sem resposta')
   return { linhas, problemas }
 }
 
-const corSaude = (v: string) => (v === 'ok' ? 'var(--acc)' : v === '…' || v === '—' || v === 'sem chave' || v === 'off' ? 'var(--muted)' : 'var(--amber)')
+const corSaude = (v: string) => (v === 'ok' ? 'var(--acc)' : v === '…' || v === '—' || v === 'off' ? 'var(--muted)' : 'var(--amber)')
 
 export function TopBar() {
   const hora = useRelogio()
@@ -72,7 +67,7 @@ export function TopBar() {
     <>
       <header className="topbar">
         <Link to="/" className="logo">
-          <span className="logo-txt">Bot<span>Trade</span></span>
+          <span className="logo-txt">Conselho<span>BTC</span></span>
           <span className="logo-ring" />
         </Link>
         <nav className="navpill">

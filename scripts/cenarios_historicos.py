@@ -23,9 +23,9 @@ import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from core.elliott_pro.pivots import zigzag_atr  # noqa: E402
-from core.elliott_pro.scenarios import ScenarioEngine  # noqa: E402
-from core.utils_indicadores import atr as calc_atr  # noqa: E402
+from conselho.elliott.pivots import zigzag_atr  # noqa: E402
+from conselho.elliott.scenarios import ScenarioEngine  # noqa: E402
+from conselho.indicadores import atr as calc_atr  # noqa: E402
 
 FONTES = {"1d": "BTCUSD_bitstamp_1d.csv", "4h": "BTCUSD_bitstamp_4h.csv", "1h": "BTCUSD_bitstamp_1h.csv",
           "15m": "BTCUSDT_binance_15m.csv"}

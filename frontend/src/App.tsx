@@ -1,18 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { TopBar } from './components/Layout'
 import Avisos from './screens/Avisos'
-import BotDetail from './screens/BotDetail'
-import BotForm from './screens/BotForm'
-import Dashboard from './screens/Dashboard'
-import Historico from './screens/Historico'
-import Mercado from './screens/Mercado'
 import Nuvens from './screens/Nuvens'
-import Pontos from './screens/Pontos'
-import Posicoes from './screens/Posicoes'
-import Range from './screens/Range'
-import Sentimento from './screens/Sentimento'
-import Trader from './screens/Trader'
-import Tradeiros from './screens/Tradeiros'
 
 export default function App() {
   return (
@@ -20,20 +9,8 @@ export default function App() {
       <TopBar />
       <main className="main">
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/bots/novo" element={<BotForm />} />
-          <Route path="/bots/:id" element={<BotDetail />} />
-          <Route path="/bots/:id/editar" element={<BotForm />} />
-          <Route path="/trader" element={<Trader />} />
-          <Route path="/mercado" element={<Mercado />} />
-          <Route path="/pontos" element={<Pontos />} />
-          <Route path="/posicoes" element={<Posicoes />} />
-          <Route path="/range" element={<Range />} />
+          <Route path="/" element={<Avisos />} />
           <Route path="/nuvens" element={<Nuvens />} />
-          <Route path="/tradeiros" element={<Tradeiros />} />
-          <Route path="/avisos" element={<Avisos />} />
-          <Route path="/sentimento" element={<Sentimento />} />
-          <Route path="/historico" element={<Historico />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
