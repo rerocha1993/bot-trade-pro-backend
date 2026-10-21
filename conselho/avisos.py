@@ -155,8 +155,8 @@ def avisos_de_fluxo(presos: Iterable[Dict], absorcoes: Iterable[Dict], preco: fl
                   else f"Absorção no fundo: parede de compra em {parede}")
         quem = "Compra" if topo else "Venda"
         texto = (f"{quem} agressiva de {abs(e['delta_btc']):.0f} BTC na vela das {_hora_s(e['ts'])} "
-                 f"({abs(e['delta_z']):.1f} desvios acima do normal), com o open interest subindo {e['oi_var_pct']:+.2f}%, "
-                 f"bateu numa parede {e['intensidade']:.0f}x maior que o normal ({e['parede_btc']:.0f} BTC) "
+                 f"(entre as 10% maiores do dia), com o open interest subindo {e['oi_var_pct']:+.2f}%, "
+                 f"bateu numa parede {e['intensidade']:.0f}x mais grossa que as vizinhas ({e['parede_btc']:.0f} BTC) "
                  f"e o preço não passou: fechou em {_fmt(e['fechamento'])}. "
                  + ("Compradores alavancados ficaram presos no topo." if topo else "Vendedores alavancados ficaram presos no fundo.")
                  + f" Preço agora: {_fmt(preco)}.")

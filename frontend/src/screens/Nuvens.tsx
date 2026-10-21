@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useAbsorcao, useCandles, useFootprint, useNuvensCalor, useNuvensTop, usePresos } from '../api/hooks'
-import type { CelulaCalor, EventoAbsorcao, EventoPresos, NuvensCalor } from '../api/types'
+import type { CelulaCalor, EventoAbsorcao, EventoPresos, PressaoLivro } from '../api/types'
 import FootprintChart from '../components/chart/FootprintChart'
 import PriceChart from '../components/chart/PriceChart'
 import { Header, Page } from '../components/Layout'
 import { Card, Chip, Empty, Err, Estado, Loading, Seg } from '../components/ui'
-import type { ChartLabel, ChartLevel, ChartMarker, ChartRect } from '../lib/chart-tipos'
+import type { ChartHeatmap, ChartLabel, ChartLevel, ChartMarker, ChartRect } from '../lib/chart-tipos'
 import { fmt, preco as fmtPreco } from '../lib/format'
 
 /**
@@ -37,22 +37,70 @@ const FRIO = 2, QUENTE = 12
 /** 0 no limite de "acima do normal", 1 em 12x ou mais; escala log para 3x e 6x ficarem bem distintos. */
 const nivel = (inten: number) => Math.max(0, Math.min(1, Math.log(inten / FRIO) / Math.log(QUENTE / FRIO)))
 
-function corCalor(lado: 0 | 1, inten: number): string {
+/** Cor do mapa de calor em números (0–255 e alfa 0–1): frio → cor do lado → quente. */
+function corRGBA(lado: 0 | 1, inten: number): [number, number, number, number] {
   const e = lado === 0 ? ESCALA.bids : ESCALA.asks
   const t = nivel(inten)
   const [a, b, u] = t < 0.5 ? [e[0], e[1], t / 0.5] : [e[1], e[2], (t - 0.5) / 0.5]
   const m = (i: number) => a[i] + (b[i] - a[i]) * u
-  return `rgba(${m(0).toFixed(0)},${m(1).toFixed(0)},${m(2).toFixed(0)},${m(3).toFixed(3)})`
+  return [m(0), m(1), m(2), m(3)]
 }
 
-function retangulos(d: NuvensCalor | undefined): ChartRect[] {
-  if (!d) return []
-  const out: ChartRect[] = []
-  d.colunas.forEach((c, i) => {
-    const to = i === d.colunas.length - 1 ? null : c.ts + d.passo_s
-    for (const [lo, hi, lado, , inten] of c.celulas) out.push({ from: c.ts, to, top: hi, bottom: lo, color: corCalor(lado, inten) })
-  })
-  return out
+function corCalor(lado: 0 | 1, inten: number): string {
+  const [r, g, b, a] = corRGBA(lado, inten)
+  return `rgba(${r.toFixed(0)},${g.toFixed(0)},${b.toFixed(0)},${a.toFixed(3)})`
+}
+
+/** Força de uma célula: a maior entre a régua histórica e a das vizinhas. */
+const forca = (c: CelulaCalor) => Math.max(c[4], c[5] ?? 0)
+
+/**
+ * Monta a imagem do mapa de calor: uma coluna por passo de tempo, uma linha por faixa da grade. `fatorAlfa` < 1 deixa a
+ * nuvem mais transparente (a pressão do modo Absorção é uma nuvem fraca).
+ */
+function imagemCalor(colunas: { ts: number; celulas: CelulaCalor[] }[], passo: number, grade: number, fatorAlfa = 1, minimo = 0): ChartHeatmap | null {
+  const cols = colunas.map((c) => ({ ts: c.ts, celulas: c.celulas.filter((x) => forca(x) >= minimo) })).filter((c) => c.celulas.length)
+  if (!cols.length || !grade) return null
+  const t0 = cols[0].ts
+  const nCols = Math.round((cols[cols.length - 1].ts - t0) / passo) + 1
+  let pMin = Infinity, pMax = -Infinity
+  for (const c of cols) for (const x of c.celulas) { pMin = Math.min(pMin, x[0]); pMax = Math.max(pMax, x[1]) }
+  const pBase = Math.floor(pMin / grade) * grade
+  const nRows = Math.max(1, Math.round((Math.ceil(pMax / grade) * grade - pBase) / grade))
+  if (nCols * nRows > 4_000_000) return null
+  const rgba = new Uint8ClampedArray(nCols * nRows * 4)
+  for (const c of cols) {
+    const ci = Math.round((c.ts - t0) / passo)
+    for (const x of c.celulas) {
+      const ri = nRows - 1 - Math.round((x[0] - pBase) / grade)
+      if (ri < 0 || ri >= nRows) continue
+      const [r, g, b, a] = corRGBA(x[2], forca(x))
+      const o = (ri * nCols + ci) * 4
+      if (a * fatorAlfa * 255 <= rgba[o + 3]) continue          // duas células no mesmo pixel: fica a mais forte
+      rgba[o] = r; rgba[o + 1] = g; rgba[o + 2] = b; rgba[o + 3] = Math.round(a * fatorAlfa * 255)
+    }
+  }
+  return { t0, passo, nCols, pBase, grade, nRows, rgba }
+}
+
+/**
+ * O modo Absorção como colunas do mapa de calor: a pressão entra fria (nuvem fraca) e a absorção entra quente, na
+ * faixa da parede e uma faixa acima e abaixo, por pelo menos 6 velas (nuvem forte). A imagem suavizada faz o resto.
+ */
+const FORCA_PRESSAO = 3, FORCA_ABSORCAO = 14, VELAS_ABSORCAO = 6
+
+function colunasDoModoAbsorcao(ps: PressaoLivro[], evs: EventoAbsorcao[], passo: number, grade: number): { ts: number; celulas: CelulaCalor[] }[] {
+  const por = new Map<number, CelulaCalor[]>()
+  const por_em = (ts: number, c: CelulaCalor) => { const l = por.get(ts) ?? []; l.push(c); por.set(ts, l) }
+  for (const p of ps) por_em(p.ts, [p.baixo, p.alto, p.tipo === 'venda' ? 1 : 0, p.btc, FORCA_PRESSAO])
+  for (const e of evs) {
+    const lado = e.tipo === 'venda' ? 1 : 0
+    const fim = Math.max(e.ate_ts, e.ts + VELAS_ABSORCAO * passo)
+    for (let ts = e.ts; ts < fim; ts += passo) {
+      for (let k = -1; k <= 1; k++) por_em(ts, [e.baixo + k * grade, e.alto + k * grade, lado, e.parede_btc, k === 0 ? FORCA_ABSORCAO : FORCA_ABSORCAO * 0.6])
+    }
+  }
+  return [...por.entries()].sort((a, b) => a[0] - b[0]).map(([ts, celulas]) => ({ ts, celulas }))
 }
 
 /** A nuvem de absorção: do momento em que a parede segurou a agressão até ela sair do livro. */
@@ -61,8 +109,7 @@ function nuvensAbsorcao(evs: EventoAbsorcao[]): { rects: ChartRect[]; labels: Ch
   const labels: ChartLabel[] = []
   for (const e of evs) {
     const lado = e.tipo === 'venda' ? 1 : 0
-    const forte = Math.max(e.intensidade, 6)
-    rects.push({ from: e.ts, to: e.ate_ts, top: e.alto, bottom: e.baixo, color: corCalor(lado, forte), border: lado ? COR.asks : COR.bids })
+    rects.push({ from: e.ts, to: Math.max(e.ate_ts, e.ts + 6 * 300), top: e.alto, bottom: e.baixo, color: 'rgba(0,0,0,0)', border: lado ? COR.asks : COR.bids })
     labels.push({ time: e.ts, price: lado ? e.alto : e.baixo, color: lado ? COR.asks : COR.bids,
                   text: `absorção ${fmt(e.intensidade, 0)}x · delta ${e.delta_btc > 0 ? '+' : ''}${fmt(e.delta_btc, 0)} · OI +${fmt(e.oi_var_pct, 2)}%` })
   }
@@ -88,8 +135,9 @@ function LegendaAbsorcao({ q }: { q: import('../api/types').FluxoAbsorcao | unde
   const n = q?.eventos.length ?? 0
   return (
     <div style={{ display: 'grid', gap: 6, maxWidth: 640, fontSize: 12 }}>
-      <span><b style={{ color: COR.asks }}>Nuvem vermelha</b>: compra agressiva e alavancada (delta forte, OI subindo) batendo numa parede de venda {q ? `${fmt(q.criterio.parede_vezes, 0)}x` : ''} acima do normal, e o preço não passou: compradores presos no topo.</span>
-      <span><b style={{ color: COR.bids }}>Nuvem verde</b>: o espelho no fundo, venda agressiva segurada por uma parede de compra.</span>
+      <span><b style={{ color: COR.asks }}>Nuvem fraca</b>: parede pesada colada no preço ({q ? `${fmt(q.criterio.pressao_vezes, 0)}x` : ''} as faixas vizinhas): a pressão está ali, ainda sem a distorção.</span>
+      <span><b style={{ color: COR.asks }}>Nuvem forte com contorno (vermelha)</b>: compra agressiva entre as 10% maiores do dia, com OI subindo, batendo numa parede {q ? `${fmt(q.criterio.parede_vezes, 0)}x` : ''} mais grossa que as vizinhas, e o preço não passou: compradores presos no topo.</span>
+      <span><b style={{ color: COR.bids }}>Verde</b>: o espelho no fundo, venda agressiva segurada por uma parede de compra.</span>
       <span><b style={{ color: COR.presos }}>Faixa amarela com seta</b>: presos no footprint (quem agrediu no topo ou no fundo da vela e ficou do lado errado); "presos?" ainda espera as próximas velas.</span>
       <span className="muted">{!q ? 'lendo…' : q.velas_com_livro_e_negocios < 24
         ? `a absorção precisa de ~2 h de livro e negócios juntos para saber o que é normal; hoje há ${q.velas_com_livro_e_negocios} velas${q.desde ? ` desde ${hhmm(q.desde)} UTC` : ''}`
@@ -113,7 +161,8 @@ function Regua() {
 }
 
 function ParedeBarra({ c, preco, max }: { c: CelulaCalor; preco: number; max: number }) {
-  const [lo, hi, lado, btc, inten] = c
+  const [lo, hi, lado, btc] = c
+  const inten = forca(c)
   const meio = (lo + hi) / 2
   const dist = (meio / preco - 1) * 100
   return (
@@ -129,7 +178,7 @@ function ParedeBarra({ c, preco, max }: { c: CelulaCalor; preco: number; max: nu
 
 export default function Nuvens() {
   const [exs, setExs] = useState<Record<string, boolean>>({ coinbase: true, binance: true, bybit: true })
-  const [fator, setFator] = useState<(typeof FATORES)[number]>('2')
+  const [fator, setFator] = useState<(typeof FATORES)[number]>('3')
   const [mostrarTop, setMostrarTop] = useState(false)
   const [modo, setModo] = useState<(typeof MODOS)[number]>('absorcao')
   const [verPresos, setVerPresos] = useState(true)
@@ -154,7 +203,12 @@ export default function Nuvens() {
 
   const absorcao = useMemo(() => nuvensAbsorcao(qAbs.data?.eventos ?? []), [qAbs.data])
   const presos = useMemo(() => (verPresos ? marcasPresos(qPresos.data?.eventos ?? [], Number(tfPresos)) : { markers: [], rects: [] }), [verPresos, qPresos.data, tfPresos])
-  const rects = useMemo(() => [...(modo === 'paredes' ? retangulos(d) : absorcao.rects), ...presos.rects], [modo, d, absorcao, presos])
+  const rects = useMemo(() => [...(modo === 'paredes' ? [] : absorcao.rects), ...presos.rects], [modo, absorcao, presos])
+  const heatmap = useMemo<ChartHeatmap | null>(() => {
+    if (!d?.grade_usd) return null
+    if (modo === 'paredes') return imagemCalor(d.colunas, d.passo_s, d.grade_usd, 1, Number(fator))
+    return imagemCalor(colunasDoModoAbsorcao(qAbs.data?.pressao ?? [], qAbs.data?.eventos ?? [], d.passo_s, d.grade_usd), d.passo_s, d.grade_usd)
+  }, [modo, d, qAbs.data, fator])
   const labels = useMemo(() => (modo === 'absorcao' ? absorcao.labels : []), [modo, absorcao])
   const levels = useMemo<ChartLevel[]>(() => {
     if (!mostrarTop || !top) return []
@@ -168,10 +222,10 @@ export default function Nuvens() {
   const paredes = useMemo(() => {
     if (!ultimaCol || !ultimaVela) return { acima: [] as CelulaCalor[], abaixo: [] as CelulaCalor[], max: 1 }
     const p = ultimaVela.close
-    const fortes = [...ultimaCol.celulas].sort((a, b) => b[4] - a[4]).slice(0, 12)
+    const fortes = [...ultimaCol.celulas].sort((a, b) => forca(b) - forca(a)).slice(0, 12)
     const acima = fortes.filter((c) => c[0] > p).sort((a, b) => b[0] - a[0]).slice(-4)
     const abaixo = fortes.filter((c) => c[1] < p).sort((a, b) => b[0] - a[0]).slice(0, 4)
-    return { acima, abaixo, max: Math.max(1, ...fortes.map((c) => c[4])) }
+    return { acima, abaixo, max: Math.max(1, ...fortes.map((c) => forca(c))) }
   }, [ultimaCol, ultimaVela])
 
   const toggleEx = (e: string) => {
@@ -215,7 +269,7 @@ export default function Nuvens() {
               </div>
             </>
           ) : candles.isPending ? <Loading /> : candles.isError ? <Err e={candles.error} /> : dados.length === 0 ? <Empty>sem candles</Empty> : (
-            <PriceChart candles={dados} rects={rects} levels={levels} labels={labels} markers={presos.markers} height={560} />
+            <PriceChart candles={dados} rects={rects} heatmap={heatmap} levels={levels} labels={labels} markers={presos.markers} height={560} />
           )}
           {vista === 'velas' && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 12, alignItems: 'end' }}>
             {modo === 'paredes' ? <Regua /> : <LegendaAbsorcao q={qAbs.data} />}

@@ -57,11 +57,13 @@ def absorcao(inicio: Optional[int] = Query(None), fim: Optional[int] = Query(Non
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"open interest da Bybit indisponível: {e}")
     eventos = [e for e in fluxo.absorcao(velas, calor, oi, passo) if e["ts"] >= inicio_s]
+    pressoes = [e for e in fluxo.pressao(velas, calor) if e["ts"] >= inicio_s]
     cobertura = sorted({b["ts"] for b in velas if b["ts"] >= inicio_s} & {c["ts"] for c in calor.get("colunas", [])})
-    return {"inicio": inicio_s, "fim": fim_s, "passo_s": passo, "eventos": eventos,
+    return {"inicio": inicio_s, "fim": fim_s, "passo_s": passo, "eventos": eventos, "pressao": pressoes,
             "velas_com_livro_e_negocios": len(cobertura), "desde": cobertura[0] if cobertura else None,
-            "criterio": {"parede_vezes": fluxo.FATOR_PAREDE, "delta_z": fluxo.Z_DELTA, "encostou_pct": fluxo.ENCOSTOU_PCT * 100,
-                         "oi": "subindo nos 15 min até o fim da vela"}}
+            "criterio": {"parede_vezes": fluxo.FATOR_PAREDE, "parede_btc": fluxo.BTC_MIN_PAREDE,
+                         "agressao_percentil": fluxo.PERCENTIL_DELTA, "encostou_pct": fluxo.ENCOSTOU_PCT * 100,
+                         "pressao_vezes": fluxo.FATOR_PRESSAO, "oi": "subindo nos 15 min até o fim da vela"}}
 
 
 # abandono exigido para confirmar os presos, por tempo gráfico (velas maiores andam mais)

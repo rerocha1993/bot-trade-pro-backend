@@ -390,6 +390,8 @@ def top_agregado(ts: Optional[float] = None, exchanges: Iterable[str] = EXCHANGE
 
 # ----------------------------------------------------------------- mapa de calor (heatmap de liquidez)
 FATOR_MIN_CALOR = 2.0        # a faixa só acende com pelo menos 2x o normal daquela distância
+FATOR_LOCAL_MIN = 3.0        # ... ou com pelo menos 3x as faixas vizinhas (±VIZINHAS) no mesmo instante
+VIZINHAS = 5                 # 5 faixas da grade para cada lado (~0,5%)
 BTC_MIN_CALOR = 2.0          # e com pelo menos 2 BTC somados na célula (corta ruído de livro raso)
 MIN_SNAPSHOTS_BASE = 20      # sem 20 snapshots de base, a exchange não entra (não há "normal" para comparar)
 
@@ -408,7 +410,10 @@ def mapa_calor(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EXCHA
     quantidade >= ``btc_min``.
 
     Devolve {"passo_s", "grade_usd", "fator_min", "btc_min", "exchanges", "base": {ex: snapshots},
-             "colunas": [{"ts", "mid", "celulas": [[preco_baixo, preco_alto, lado (0 bids / 1 asks), btc, intensidade]]}]}
+             "colunas": [{"ts", "mid", "celulas": [[preco_baixo, preco_alto, lado (0 bids / 1 asks), btc, intensidade,
+                                                     intensidade_local]]}]}
+    intensidade = contra o histórico na mesma distância; intensidade_local = contra as faixas vizinhas no mesmo instante.
+    Sai a célula que passa em qualquer uma das duas (``fator_min`` ou FATOR_LOCAL_MIN).
     Faixas que a exchange não alcança (quantidade sempre 0) não têm normal e nunca acendem.
     """
     exs = list(exchanges)
@@ -457,12 +462,18 @@ def mapa_calor(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EXCHA
         col = colunas[chave]
         celulas = []
         for k in (0, 1):
-            for b, (btc, normal) in col["bins"][k].items():
-                if normal <= 0:
+            bins = col["bins"][k]
+            for b, (btc, normal) in bins.items():
+                if normal <= 0 or btc < btc_min:
                     continue
                 inten = btc / normal
-                if inten >= fator_min and btc >= btc_min:
-                    celulas.append([round(b * grade, 2), round((b + 1) * grade, 2), k, round(btc, 3), round(inten, 2)])
+                # intensidade LOCAL: contra as faixas vizinhas do mesmo lado neste instante (é o que o olho vê como
+                # "parede" perto do preço, onde o livro é sempre cheio e a régua histórica quase nunca passa de 2x)
+                viz = [bins[j][0] for j in range(b - VIZINHAS, b + VIZINHAS + 1) if j != b and j in bins and bins[j][0] > 0]
+                local = btc / float(np.median(viz)) if viz else 0.0
+                if inten >= fator_min or local >= FATOR_LOCAL_MIN:
+                    celulas.append([round(b * grade, 2), round((b + 1) * grade, 2), k, round(btc, 3), round(inten, 2),
+                                    round(local, 2)])
         saida.append({"ts": chave, "mid": round(float(np.mean(col["mids"])), 2), "celulas": celulas})
     return {"passo_s": passo, "grade_usd": grade, "fator_min": fator_min, "btc_min": btc_min, "exchanges": exs,
             "base": base_n, "colunas": saida}

@@ -54,7 +54,8 @@ export interface NuvensTop {
 }
 
 /** Mapa de calor do livro (GET /api/nuvens/calor): só as células com ordens acima do normal da distância. */
-export type CelulaCalor = [baixo: number, alto: number, lado: 0 | 1, btc: number, intensidade: number]
+/** intensidade = contra o histórico na mesma distância; local = contra as faixas vizinhas no mesmo instante */
+export type CelulaCalor = [baixo: number, alto: number, lado: 0 | 1, btc: number, intensidade: number, local?: number]
 export interface NuvensCalor {
   inicio: number; fim: number; passo_s: number; grade_usd: number | null; fator_min: number; btc_min: number
   exchanges: string[]; base: Record<string, number>
@@ -74,9 +75,11 @@ export interface EventoAbsorcao {
   ts: number; ate_ts: number; tipo: 'venda' | 'compra'; baixo: number; alto: number; intensidade: number
   parede_btc: number; delta_btc: number; delta_z: number; oi_var_pct: number; fechamento: number
 }
+export interface PressaoLivro { ts: number; tipo: 'venda' | 'compra'; baixo: number; alto: number; forca: number; btc: number }
 export interface FluxoAbsorcao {
-  inicio: number; fim: number; passo_s: number; eventos: EventoAbsorcao[]; velas_com_livro_e_negocios: number
-  desde: number | null; criterio: { parede_vezes: number; delta_z: number; encostou_pct: number; oi: string }
+  inicio: number; fim: number; passo_s: number; eventos: EventoAbsorcao[]; pressao: PressaoLivro[]
+  velas_com_livro_e_negocios: number; desde: number | null
+  criterio: { parede_vezes: number; parede_btc: number; agressao_percentil: number; encostou_pct: number; pressao_vezes: number; oi: string }
 }
 
 /** Footprint (GET /api/fluxo/footprint): por vela, [preço da linha, compra, venda] agredidos a mercado. */

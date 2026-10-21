@@ -11,9 +11,9 @@ import {
 import { useEffect, useRef } from 'react'
 import type { Candle } from '../../api/types'
 
-import type { ChartLabel, ChartLevel, ChartMarker, ChartPath, ChartProfile, ChartRect } from '../../lib/chart-tipos'
+import type { ChartHeatmap, ChartLabel, ChartLevel, ChartMarker, ChartPath, ChartProfile, ChartRect } from '../../lib/chart-tipos'
 
-interface OverlayData { rects: ChartRect[]; profile: ChartProfile | null; labels: ChartLabel[] }
+interface OverlayData { rects: ChartRect[]; profile: ChartProfile | null; labels: ChartLabel[]; heatmap: ChartHeatmap | null }
 type DrawTarget = Parameters<ISeriesPrimitivePaneRenderer['draw']>[0]
 
 const MONO = "11px 'IBM Plex Mono', monospace"
@@ -22,7 +22,8 @@ class Overlay implements ISeriesPrimitive<Time> {
   private chart: IChartApi | null = null
   private series: ISeriesApi<'Candlestick'> | null = null
   private requestUpdate: (() => void) | null = null
-  private data: OverlayData = { rects: [], profile: null, labels: [] }
+  private data: OverlayData = { rects: [], profile: null, labels: [], heatmap: null }
+  private imagem: { de: ChartHeatmap; canvas: HTMLCanvasElement } | null = null
   private view: ISeriesPrimitivePaneView = {
     zOrder: () => 'normal',
     renderer: () => ({ draw: (target: DrawTarget) => this.draw(target) }),
@@ -47,6 +48,35 @@ class Overlay implements ISeriesPrimitive<Time> {
     return c === null || c === undefined ? null : c
   }
 
+  /** Desenha o mapa de calor como uma imagem esticada com suavização (nuvem), alinhada ao tempo e ao preço. */
+  private desenharHeatmap(ctx: CanvasRenderingContext2D) {
+    const h = this.data.heatmap
+    if (!h || !h.nCols || !h.nRows) return
+    if (!this.imagem || this.imagem.de !== h) {
+      const cv = document.createElement('canvas')
+      cv.width = h.nCols
+      cv.height = h.nRows
+      const g = cv.getContext('2d')
+      if (!g) return
+      g.putImageData(new ImageData(new Uint8ClampedArray(h.rgba), h.nCols, h.nRows), 0, 0)
+      this.imagem = { de: h, canvas: cv }
+    }
+    // a 1ª e a última coluna que existem no eixo de tempo do gráfico dão a escala horizontal
+    let c0 = -1, x0 = 0, c1 = -1, x1 = 0
+    for (let c = 0; c < h.nCols; c++) {
+      const x = this.x(h.t0 + c * h.passo)
+      if (x !== null) { if (c0 < 0) { c0 = c; x0 = x } c1 = c; x1 = x }
+    }
+    if (c0 < 0) return
+    const larg = c1 > c0 ? (x1 - x0) / (c1 - c0) : 6
+    const xa = x0 - c0 * larg - larg / 2
+    const yTopo = this.y(h.pBase + h.nRows * h.grade), yBase = this.y(h.pBase)
+    if (yTopo === null || yBase === null) return
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(this.imagem.canvas, xa, yTopo, h.nCols * larg, yBase - yTopo)
+  }
+
   private draw(target: DrawTarget) {
     if (!this.chart || !this.series) return
     const range = this.chart.timeScale().getVisibleRange()
@@ -54,6 +84,7 @@ class Overlay implements ISeriesPrimitive<Time> {
       const W = mediaSize.width, H = mediaSize.height
       ctx.save()
       ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip()
+      this.desenharHeatmap(ctx)
       // retângulos (order blocks, zonas)
       for (const r of this.data.rects) {
         if (range && r.from > (range.to as number)) continue
@@ -111,6 +142,7 @@ interface Props {
   labels?: ChartLabel[]
   levels?: ChartLevel[]
   rects?: ChartRect[]
+  heatmap?: ChartHeatmap | null
   profile?: ChartProfile | null
   markers?: ChartMarker[]
   logScale?: boolean
@@ -129,7 +161,7 @@ function ordenar<T extends { time: number }>(pts: T[]): T[] {
   return [...m.values()].sort((a, b) => a.time - b.time)
 }
 
-export default function PriceChart({ candles, paths = [], labels = [], levels = [], rects = [], profile = null, markers = [], logScale = false, height = 430 }: Props) {
+export default function PriceChart({ candles, paths = [], labels = [], levels = [], rects = [], heatmap = null, profile = null, markers = [], logScale = false, height = 430 }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const serie = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -215,8 +247,8 @@ export default function PriceChart({ candles, paths = [], labels = [], levels = 
   }, [markers])
 
   useEffect(() => {
-    overlay.current?.set({ rects, profile, labels })
-  }, [rects, profile, labels])
+    overlay.current?.set({ rects, profile, labels, heatmap })
+  }, [rects, profile, labels, heatmap])
 
   return <div ref={el} style={{ width: '100%', height }} />
 }

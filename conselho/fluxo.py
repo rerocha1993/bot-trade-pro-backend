@@ -34,9 +34,13 @@ FATOR_NO = 3.0
 BTC_MIN_NO = 5.0
 N_ABANDONO = 2
 ABANDONO_PCT = 0.003
-FATOR_PAREDE = 4.0
-ENCOSTOU_PCT = 0.0015
-Z_DELTA = 2.0
+FATOR_PAREDE = 5.0          # parede = >= 5x as faixas vizinhas no mesmo instante (p90 perto do preço ~6x, medido 21/10)
+BTC_MIN_PAREDE = 20.0
+ENCOSTOU_PCT = 0.002
+PERCENTIL_DELTA = 90.0      # agressão = delta entre os 10% maiores do mesmo lado nas últimas 24 h
+Z_DELTA = 2.0               # só informativo (o z robusto do delta)
+PRESSAO_PCT = 0.003         # pressão = parede forte a até 0,3% do fechamento, mesmo sem a distorção completa
+FATOR_PRESSAO = 10.0        # ... com força >= 10x as vizinhas: acende em ~20% das velas (medido em 30 h, 21/10)
 JANELA_DELTA_S = 24 * 3600
 
 
@@ -140,12 +144,22 @@ def _subindo(oi: List[list], ts_s: int, janela_s: int = 900) -> Optional[float]:
     return float(v[fim] / v[ini] - 1) * 100
 
 
+def _forca(c) -> float:
+    """Força da parede: a intensidade local (contra as vizinhas) quando existe; senão a histórica."""
+    return float(c[5]) if len(c) > 5 else float(c[4])
+
+
 def absorcao(velas: List[Dict], calor: Dict, oi: List[list], passo_s: int = 300, fator_parede: float = FATOR_PAREDE,
-             encostou_pct: float = ENCOSTOU_PCT, z_delta: float = Z_DELTA) -> List[Dict]:
+             encostou_pct: float = ENCOSTOU_PCT, percentil: float = PERCENTIL_DELTA) -> List[Dict]:
     """
-    Velas com absorção (ver o topo do módulo). ``calor`` é a saída de ``livro_historico.mapa_calor`` no mesmo passo;
-    ``oi`` é [[ts_ms, oi], ...] de ``conselho.mercado.open_interest``. Cada evento diz até quando a parede ficou de pé
-    (``ate_ts``: última coluna seguida em que ainda havia célula no mesmo preço).
+    Velas com absorção (ver o topo do módulo), com a régua revista em 21/10/2026:
+      a) parede no livro com força >= ``fator_parede`` (contra as vizinhas) e >= BTC_MIN_PAREDE, a até ``encostou_pct``
+         do extremo da vela (venda: parede de asks acima da máxima; compra: bids abaixo da mínima);
+      b) delta da vela entre os (100 − ``percentil``)% maiores do mesmo lado nas 24 h anteriores;
+      c) open interest da Bybit subindo nos 15 min até o fim da vela;
+      d) a vela fecha sem atravessar a parede.
+    ``calor`` é a saída de ``livro_historico.mapa_calor`` no mesmo passo; ``oi`` é [[ts_ms, oi], ...]. Cada evento diz
+    até quando a parede ficou de pé (``ate_ts``).
     """
     colunas = {c["ts"]: c for c in calor.get("colunas", [])}
     if not velas or not colunas:
@@ -160,33 +174,60 @@ def absorcao(velas: List[Dict], calor: Dict, oi: List[list], passo_s: int = 300,
         janela = deltas[(tss < b["ts"]) & (tss >= b["ts"] - JANELA_DELTA_S)]
         if len(janela) < 24:
             continue
-        escala = float(np.median(np.abs(janela - np.median(janela)))) * 1.4826
-        if escala <= 0:
+        d = b["delta"]
+        mesmo_lado = janela[janela > 0] if d > 0 else janela[janela < 0]
+        if d == 0 or len(mesmo_lado) < 12 or abs(d) < np.percentile(np.abs(mesmo_lado), percentil):
             continue
-        z = (b["delta"] - float(np.median(janela))) / escala
+        escala = float(np.median(np.abs(janela - np.median(janela)))) * 1.4826
+        z = (d - float(np.median(janela))) / escala if escala > 0 else 0.0
         var_oi = _subindo(oi, b["ts"] + passo_s)
         if var_oi is None or var_oi <= 0:
             continue
         hi, lo, fe = b["maxima"], b["minima"], b["fechamento"]
-        for lo_c, hi_c, lado, btc, inten in col["celulas"]:
-            if inten < fator_parede:
+        for c in col["celulas"]:
+            lo_c, hi_c, lado, btc = c[0], c[1], c[2], c[3]
+            forca = _forca(c)
+            if forca < fator_parede or btc < BTC_MIN_PAREDE:
                 continue
-            if lado == 1 and z >= z_delta and hi >= lo_c * (1 - encostou_pct) and fe < lo_c:
+            if lado == 1 and d > 0 and hi >= lo_c * (1 - encostou_pct) and fe < lo_c:
                 tipo = "venda"          # parede de venda segurou compradores agressivos: compradores presos no topo
-            elif lado == 0 and z <= -z_delta and lo <= hi_c * (1 + encostou_pct) and fe > hi_c:
+            elif lado == 0 and d < 0 and lo <= hi_c * (1 + encostou_pct) and fe > hi_c:
                 tipo = "compra"         # parede de compra segurou vendedores agressivos: vendedores presos no fundo
             else:
                 continue
             ate = b["ts"]
             for j in range(i + 1, len(velas)):
                 prox = colunas.get(velas[j]["ts"])
-                if not prox or not any(c[2] == lado and c[0] == lo_c for c in prox["celulas"]):
+                if not prox or not any(x[2] == lado and x[0] == lo_c for x in prox["celulas"]):
                     break
                 ate = velas[j]["ts"]
             eventos.append({"ts": b["ts"], "ate_ts": ate + passo_s, "tipo": tipo, "baixo": lo_c, "alto": hi_c,
-                            "intensidade": inten, "parede_btc": btc, "delta_btc": round(b["delta"], 2),
+                            "intensidade": round(forca, 1), "parede_btc": btc, "delta_btc": round(d, 2),
                             "delta_z": round(z, 1), "oi_var_pct": round(var_oi, 2), "fechamento": fe})
     return eventos
+
+
+def pressao(velas: List[Dict], calor: Dict, fator_parede: float = FATOR_PRESSAO, distancia: float = PRESSAO_PCT) -> List[Dict]:
+    """
+    A nuvem FRACA: em cada vela, as paredes pesadas (>= ``fator_parede`` contra as vizinhas e >= BTC_MIN_PAREDE) a até
+    ``distancia`` do fechamento — venda logo acima, compra logo abaixo. É a pressão se formando, sem a distorção completa.
+    """
+    colunas = {c["ts"]: c for c in calor.get("colunas", [])}
+    saida = []
+    for b in velas:
+        col = colunas.get(b["ts"])
+        if not col:
+            continue
+        fe = b["fechamento"]
+        for c in col["celulas"]:
+            lo_c, hi_c, lado, btc = c[0], c[1], c[2], c[3]
+            forca = _forca(c)
+            if forca < fator_parede or btc < BTC_MIN_PAREDE:
+                continue
+            if (lado == 1 and fe <= lo_c <= fe * (1 + distancia)) or (lado == 0 and fe * (1 - distancia) <= hi_c <= fe):
+                saida.append({"ts": b["ts"], "tipo": "venda" if lado == 1 else "compra", "baixo": lo_c, "alto": hi_c,
+                              "forca": round(forca, 1), "btc": btc})
+    return saida
 
 
 def leitura_recente(agora_s: float, horas: float = 6.0) -> Dict:
@@ -202,4 +243,5 @@ def leitura_recente(agora_s: float, horas: float = 6.0) -> Dict:
     v5 = barras(carregar_minutos(("bybit", "binance", "coinbase"), ini - JANELA_DELTA_S, agora_s), 300, preco_de="bybit")
     calor = lh.mapa_calor(ini, agora_s, passo_s=300)
     oi = mercado.open_interest("BTCUSDT", int((ini - 3600) * 1000), int(agora_s * 1000))
-    return {"presos": presos_30, "absorcoes": absorcao(v5, calor, oi, 300), "calor": calor, "oi": oi}
+    return {"presos": presos_30, "absorcoes": absorcao(v5, calor, oi, 300), "pressao": pressao(v5, calor),
+            "calor": calor, "oi": oi}
