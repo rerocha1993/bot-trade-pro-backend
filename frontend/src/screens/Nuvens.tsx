@@ -114,61 +114,58 @@ function colunasDoModoAbsorcao(ps: PressaoLivro[], evs: EventoAbsorcao[], passo:
 }
 
 /**
- * Livro inteiro (o Order Book Depth Overlay do TRDR): por vela, uma faixa em cada distância do preço (0–1%, 1–2,5%,
- * 2,5–5%), verde embaixo e vermelha em cima; o lado com mais BTC naquela distância fica mais forte, e a cor esmaece
- * para longe do preço. As paredes de `minimo`x o normal ou mais entram por cima, como as linhas fortes do TRDR.
+ * Livro inteiro: o Order Book Depth Overlay do TRDR com as configurações do usuário (21/10/2026): profundidade de 1%
+ * (inclusive) a 10%, só spot (Coinbase + Binance), opacidade até 100%, mínimo de 40% para cada lado, escala fixa.
+ * Por vela, soma o BTC de compra e de venda entre 1% e 10% do preço; a fatia de cada lado vira a opacidade da faixa
+ * dele (verde de 1% a 10% abaixo, vermelha de 1% a 10% acima): 40% ou menos não aparece, 100% fica opaca.
+ * As paredes de `minimo`x o normal ou mais entram por cima, como as linhas do heatmap.
  */
-const CATS_LIVRO = 3, PAREDE_LIVRO = 6, VAO_LIVRO = 0.004
+const LIVRO = { de: 0.01, ate: 0.10, opacidadeMax: 1.0, minCompra: 40, minVenda: 40 }
+const EXCHANGES_SPOT = ['coinbase', 'binance']
+const PAREDE_LIVRO = 8, PAREDE_LIVRO_LONGE = 0.003   // colada no preço vira mancha sobre as velas
 const RGB_LADO = [[46, 204, 132], [240, 84, 79]] as const
-/** fatia do lado (0–1) → alfa: 35% ou menos quase some, 75% ou mais no máximo */
-const alfaLado = (s: number) => 0.05 + 0.5 * Math.max(0, Math.min(1, (s - 0.35) / 0.4))
+/** fatia do lado em % → opacidade, na escala fixa do TRDR: do mínimo (0) a 100% (opacidadeMax) */
+const opacidadeLivro = (fatia: number, minimo: number) => (fatia <= minimo ? 0 : LIVRO.opacidadeMax * (fatia - minimo) / (100 - minimo))
 
-function imagemLivro(pontos: NuvensPonto[], categorias: NuvensCategoria[], colunas: { ts: number; celulas: CelulaCalor[] }[],
+function imagemLivro(pontos: NuvensPonto[], categorias: NuvensCategoria[], colunas: { ts: number; mid: number; celulas: CelulaCalor[] }[],
                      passo: number, grade: number, minimo: number): ChartHeatmap | null {
-  const cats = categorias.slice(0, CATS_LIVRO)
-  if (!pontos.length || !cats.length || !grade) return null
-  const hiMax = cats[cats.length - 1].hi
+  const ks = categorias.map((c, k) => (c.lo >= LIVRO.de - 1e-9 && c.hi <= LIVRO.ate + 1e-9 ? k : -1)).filter((k) => k >= 0)
+  if (!pontos.length || !ks.length || !grade) return null
   const t0 = Math.min(pontos[0].ts, colunas[0]?.ts ?? Infinity)
   const tFim = Math.max(pontos[pontos.length - 1].ts, colunas[colunas.length - 1]?.ts ?? -Infinity)
   const nCols = Math.round((tFim - t0) / passo) + 1
   let pMin = Infinity, pMax = -Infinity
-  for (const p of pontos) { pMin = Math.min(pMin, p.mid * (1 - hiMax)); pMax = Math.max(pMax, p.mid * (1 + hiMax)) }
+  for (const p of pontos) { pMin = Math.min(pMin, p.mid * (1 - LIVRO.ate)); pMax = Math.max(pMax, p.mid * (1 + LIVRO.ate)) }
   const pBase = Math.floor(pMin / grade) * grade
   const nRows = Math.max(1, Math.ceil((pMax - pBase) / grade))
   if (nCols * nRows > 4_000_000) return null
   const rgba = new Uint8ClampedArray(nCols * nRows * 4)
-  const pinta = (ci: number, preco: number, r: number, g: number, b: number, a: number, porCima = false) => {
+  const pinta = (ci: number, preco: number, r: number, g: number, b: number, a: number) => {
     const ri = nRows - 1 - Math.round((preco - pBase) / grade)
     if (ri < 0 || ri >= nRows || ci < 0 || ci >= nCols) return
     const o = (ri * nCols + ci) * 4
-    if (!porCima && a * 255 <= rgba[o + 3]) return
     rgba[o] = r; rgba[o + 1] = g; rgba[o + 2] = b; rgba[o + 3] = Math.round(a * 255)
   }
   for (const p of pontos) {
     const ci = Math.round((p.ts - t0) / passo)
-    cats.forEach((c, k) => {
-      const b = p.bids[k] ?? 0, a = p.asks[k] ?? 0
-      if (b + a <= 0) return
-      for (const lado of [0, 1] as const) {
-        const alfa = alfaLado(lado === 0 ? b / (b + a) : a / (b + a))
-        const sinal = lado === 0 ? -1 : 1
-        const lo = Math.min(p.mid * (1 + sinal * c.lo), p.mid * (1 + sinal * c.hi))
-        const hi = Math.max(p.mid * (1 + sinal * c.lo), p.mid * (1 + sinal * c.hi))
-        const [r, g, bl] = RGB_LADO[lado]
-        for (let preco = Math.ceil(lo / grade) * grade; preco < hi; preco += grade) {
-          const dist = Math.abs(preco / p.mid - 1)
-          const perto = Math.min(1, dist / VAO_LIVRO)          // nasce transparente para não cobrir as velas
-          pinta(ci, preco, r, g, bl, alfa * (1 - 0.4 * dist / hiMax) * (0.1 + 0.9 * perto))
-        }
-      }
-    })
+    const b = ks.reduce((s, k) => s + (p.bids[k] ?? 0), 0)
+    const a = ks.reduce((s, k) => s + (p.asks[k] ?? 0), 0)
+    if (b + a <= 0) continue
+    for (const lado of [0, 1] as const) {
+      const alfa = lado === 0 ? opacidadeLivro(100 * b / (b + a), LIVRO.minCompra) : opacidadeLivro(100 * a / (b + a), LIVRO.minVenda)
+      if (alfa <= 0) continue
+      const [r, g, bl] = RGB_LADO[lado]
+      const lo = lado === 0 ? p.mid * (1 - LIVRO.ate) : p.mid * (1 + LIVRO.de)
+      const hi = lado === 0 ? p.mid * (1 - LIVRO.de) : p.mid * (1 + LIVRO.ate)
+      for (let preco = Math.ceil(lo / grade) * grade; preco < hi; preco += grade) pinta(ci, preco, r, g, bl, alfa)
+    }
   }
   for (const c of colunas) {
     const ci = Math.round((c.ts - t0) / passo)
     for (const x of c.celulas) {
-      if (forca(x) < minimo) continue
+      if (forca(x) < minimo || Math.abs((x[0] + x[1]) / 2 / c.mid - 1) < PAREDE_LIVRO_LONGE) continue
       const [r, g, b, a] = corRGBA(x[2], forca(x))
-      pinta(ci, x[0], r, g, b, Math.max(a, 0.75), true)
+      pinta(ci, x[0], r, g, b, Math.max(a, 0.75))
     }
   }
   return { t0, passo, nCols, pBase, grade, nRows, rgba }
@@ -178,9 +175,10 @@ function LegendaLivro({ q }: { q: NuvensOverlay | undefined }) {
   const n = q?.pontos.length ?? 0
   return (
     <div style={{ display: 'grid', gap: 6, maxWidth: 640, fontSize: 12 }}>
-      <span><b style={{ color: COR.bids }}>Faixa verde</b>: as ordens de compra de 0 a 5% abaixo do preço; <b style={{ color: COR.asks }}>faixa vermelha</b>: as de venda de 0 a 5% acima. Em cada distância (0–1%, 1–2,5%, 2,5–5%), o lado com mais BTC fica mais forte e o outro quase some.</span>
-      <span><b>Linhas fortes</b>: paredes de {PAREDE_LIVRO}x o normal ou mais; quanto mais quente, mais pesada. Para ver todas, use "Todas as paredes".</span>
-      <span className="muted">{!q ? 'lendo o livro…' : `${n} velas com livro gravado · `}O livro mostra intenção, não execução: ordem parada pode sumir (spoof). Coinbase alcança as três faixas; Binance só até ~1% e Bybit só o topo do livro.</span>
+      <span>Igual ao <b>Order Book Depth Overlay</b> do TRDR com as suas configurações: livro spot (Coinbase + Binance) de 1% a 10% do preço, mínimo de 40% de cada lado, opacidade até 100%, escala fixa.</span>
+      <span><b style={{ color: COR.bids }}>Faixa verde</b> (1% a 10% abaixo): quanto mais da liquidez dessa distância é de compra, mais forte. <b style={{ color: COR.asks }}>Faixa vermelha</b> (1% a 10% acima): o mesmo para a venda. Com 40% ou menos, o lado some.</span>
+      <span><b>Linhas fortes</b>: paredes de {PAREDE_LIVRO}x o normal ou mais, a mais de 0,3% do preço. Para ver todas, use "Todas as paredes".</span>
+      <span className="muted">{!q ? 'lendo o livro…' : `${n} velas com livro gravado · `}O livro mostra intenção, não execução: ordem parada pode sumir (spoof). De 1% a 10% quem alcança é a Coinbase; a Binance pára perto de 1%.</span>
     </div>
   )
 }
@@ -276,7 +274,7 @@ export default function Nuvens() {
   const inicio = dados.length ? dados[0].time : null
   const qCalor = useNuvensCalor(inicio, exchanges, Number(fator), PASSO_S)
   const qAbs = useAbsorcao(inicio)
-  const qLivro = useNuvensOverlay(modo === 'livro' ? inicio : null, exchanges, PASSO_S)
+  const qLivro = useNuvensOverlay(modo === 'livro' ? inicio : null, EXCHANGES_SPOT.join(','), PASSO_S)
   const qPresos = usePresos(inicio, Number(tfPresos), verPresos)
   const qTop = useNuvensTop(exchanges)
   const d = qCalor.data
@@ -333,11 +331,9 @@ export default function Nuvens() {
               <Seg value={linhaFp} options={LINHAS_FP} onChange={setLinhaFp} labels={{ '10': '$10', '20': '$20', '50': '$50', '100': '$100', '250': '$250', '500': '$500' }} />
             </> : <>
             <Seg value={modo} options={MODOS} onChange={setModo} labels={{ absorcao: 'Absorção', livro: 'Livro inteiro', paredes: 'Todas as paredes' }} />
-            {modo !== 'absorcao' && <>
-              {modo === 'paredes' && <>
-                <span className="muted" style={{ fontSize: 12 }}>a partir de</span>
-                <Seg value={fator} options={FATORES} onChange={setFator} labels={{ '2': '2x', '3': '3x', '5': '5x' }} />
-              </>}
+            {modo === 'paredes' && <>
+              <span className="muted" style={{ fontSize: 12 }}>a partir de</span>
+              <Seg value={fator} options={FATORES} onChange={setFator} labels={{ '2': '2x', '3': '3x', '5': '5x' }} />
               {EXCHANGES.map((e) => <Chip key={e} on={!!exs[e]} onClick={() => toggleEx(e)}>{NOME_EX[e]}</Chip>)}
             </>}
             <span style={{ width: 8 }} />
