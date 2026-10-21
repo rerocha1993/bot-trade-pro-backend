@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useAbsorcao, useCandles, useFootprint, useNuvensCalor, useNuvensTop, usePresos } from '../api/hooks'
-import type { CelulaCalor, EventoAbsorcao, EventoPresos, PressaoLivro } from '../api/types'
+import { useAbsorcao, useCandles, useFootprint, useNuvensCalor, useNuvensOverlay, useNuvensTop, usePresos } from '../api/hooks'
+import type { CelulaCalor, EventoAbsorcao, EventoPresos, NuvensCategoria, NuvensOverlay, NuvensPonto, PressaoLivro } from '../api/types'
 import FootprintChart from '../components/chart/FootprintChart'
 import PriceChart from '../components/chart/PriceChart'
 import { Header, Page } from '../components/Layout'
@@ -18,7 +18,7 @@ const PASSO_S = 300
 const N_CANDLES = 288
 const FATORES = ['2', '3', '5'] as const
 const COR = { bids: '#2ecc84', asks: '#f0544f', presos: '#f5c04a' }
-const MODOS = ['absorcao', 'paredes'] as const
+const MODOS = ['absorcao', 'livro', 'paredes'] as const
 const TFS_PRESOS = ['300', '1800'] as const
 const VISTAS = ['velas', 'footprint'] as const
 const TFS_FP = ['300', '900', '1800', '3600', '14400'] as const
@@ -113,6 +113,78 @@ function colunasDoModoAbsorcao(ps: PressaoLivro[], evs: EventoAbsorcao[], passo:
   return [...por.entries()].sort((a, b) => a[0] - b[0]).map(([ts, celulas]) => ({ ts, celulas }))
 }
 
+/**
+ * Livro inteiro (o Order Book Depth Overlay do TRDR): por vela, uma faixa em cada distância do preço (0–1%, 1–2,5%,
+ * 2,5–5%), verde embaixo e vermelha em cima; o lado com mais BTC naquela distância fica mais forte, e a cor esmaece
+ * para longe do preço. As paredes de `minimo`x o normal ou mais entram por cima, como as linhas fortes do TRDR.
+ */
+const CATS_LIVRO = 3, PAREDE_LIVRO = 6, VAO_LIVRO = 0.004
+const RGB_LADO = [[46, 204, 132], [240, 84, 79]] as const
+/** fatia do lado (0–1) → alfa: 35% ou menos quase some, 75% ou mais no máximo */
+const alfaLado = (s: number) => 0.05 + 0.5 * Math.max(0, Math.min(1, (s - 0.35) / 0.4))
+
+function imagemLivro(pontos: NuvensPonto[], categorias: NuvensCategoria[], colunas: { ts: number; celulas: CelulaCalor[] }[],
+                     passo: number, grade: number, minimo: number): ChartHeatmap | null {
+  const cats = categorias.slice(0, CATS_LIVRO)
+  if (!pontos.length || !cats.length || !grade) return null
+  const hiMax = cats[cats.length - 1].hi
+  const t0 = Math.min(pontos[0].ts, colunas[0]?.ts ?? Infinity)
+  const tFim = Math.max(pontos[pontos.length - 1].ts, colunas[colunas.length - 1]?.ts ?? -Infinity)
+  const nCols = Math.round((tFim - t0) / passo) + 1
+  let pMin = Infinity, pMax = -Infinity
+  for (const p of pontos) { pMin = Math.min(pMin, p.mid * (1 - hiMax)); pMax = Math.max(pMax, p.mid * (1 + hiMax)) }
+  const pBase = Math.floor(pMin / grade) * grade
+  const nRows = Math.max(1, Math.ceil((pMax - pBase) / grade))
+  if (nCols * nRows > 4_000_000) return null
+  const rgba = new Uint8ClampedArray(nCols * nRows * 4)
+  const pinta = (ci: number, preco: number, r: number, g: number, b: number, a: number, porCima = false) => {
+    const ri = nRows - 1 - Math.round((preco - pBase) / grade)
+    if (ri < 0 || ri >= nRows || ci < 0 || ci >= nCols) return
+    const o = (ri * nCols + ci) * 4
+    if (!porCima && a * 255 <= rgba[o + 3]) return
+    rgba[o] = r; rgba[o + 1] = g; rgba[o + 2] = b; rgba[o + 3] = Math.round(a * 255)
+  }
+  for (const p of pontos) {
+    const ci = Math.round((p.ts - t0) / passo)
+    cats.forEach((c, k) => {
+      const b = p.bids[k] ?? 0, a = p.asks[k] ?? 0
+      if (b + a <= 0) return
+      for (const lado of [0, 1] as const) {
+        const alfa = alfaLado(lado === 0 ? b / (b + a) : a / (b + a))
+        const sinal = lado === 0 ? -1 : 1
+        const lo = Math.min(p.mid * (1 + sinal * c.lo), p.mid * (1 + sinal * c.hi))
+        const hi = Math.max(p.mid * (1 + sinal * c.lo), p.mid * (1 + sinal * c.hi))
+        const [r, g, bl] = RGB_LADO[lado]
+        for (let preco = Math.ceil(lo / grade) * grade; preco < hi; preco += grade) {
+          const dist = Math.abs(preco / p.mid - 1)
+          const perto = Math.min(1, dist / VAO_LIVRO)          // nasce transparente para não cobrir as velas
+          pinta(ci, preco, r, g, bl, alfa * (1 - 0.4 * dist / hiMax) * (0.1 + 0.9 * perto))
+        }
+      }
+    })
+  }
+  for (const c of colunas) {
+    const ci = Math.round((c.ts - t0) / passo)
+    for (const x of c.celulas) {
+      if (forca(x) < minimo) continue
+      const [r, g, b, a] = corRGBA(x[2], forca(x))
+      pinta(ci, x[0], r, g, b, Math.max(a, 0.75), true)
+    }
+  }
+  return { t0, passo, nCols, pBase, grade, nRows, rgba }
+}
+
+function LegendaLivro({ q }: { q: NuvensOverlay | undefined }) {
+  const n = q?.pontos.length ?? 0
+  return (
+    <div style={{ display: 'grid', gap: 6, maxWidth: 640, fontSize: 12 }}>
+      <span><b style={{ color: COR.bids }}>Faixa verde</b>: as ordens de compra de 0 a 5% abaixo do preço; <b style={{ color: COR.asks }}>faixa vermelha</b>: as de venda de 0 a 5% acima. Em cada distância (0–1%, 1–2,5%, 2,5–5%), o lado com mais BTC fica mais forte e o outro quase some.</span>
+      <span><b>Linhas fortes</b>: paredes de {PAREDE_LIVRO}x o normal ou mais; quanto mais quente, mais pesada. Para ver todas, use "Todas as paredes".</span>
+      <span className="muted">{!q ? 'lendo o livro…' : `${n} velas com livro gravado · `}O livro mostra intenção, não execução: ordem parada pode sumir (spoof). Coinbase alcança as três faixas; Binance só até ~1% e Bybit só o topo do livro.</span>
+    </div>
+  )
+}
+
 /** A nuvem de absorção: do momento em que a parede segurou a agressão até ela sair do livro. */
 function nuvensAbsorcao(evs: EventoAbsorcao[]): { rects: ChartRect[]; labels: ChartLabel[] } {
   const rects: ChartRect[] = []
@@ -204,6 +276,7 @@ export default function Nuvens() {
   const inicio = dados.length ? dados[0].time : null
   const qCalor = useNuvensCalor(inicio, exchanges, Number(fator), PASSO_S)
   const qAbs = useAbsorcao(inicio)
+  const qLivro = useNuvensOverlay(modo === 'livro' ? inicio : null, exchanges, PASSO_S)
   const qPresos = usePresos(inicio, Number(tfPresos), verPresos)
   const qTop = useNuvensTop(exchanges)
   const d = qCalor.data
@@ -217,8 +290,9 @@ export default function Nuvens() {
   const heatmap = useMemo<ChartHeatmap | null>(() => {
     if (!d?.grade_usd) return null
     if (modo === 'paredes') return imagemCalor(d.colunas, d.passo_s, d.grade_usd, 1, Number(fator))
+    if (modo === 'livro') return qLivro.data ? imagemLivro(qLivro.data.pontos, qLivro.data.categorias, d.colunas, d.passo_s, d.grade_usd, PAREDE_LIVRO) : null
     return imagemCalor(colunasDoModoAbsorcao(qAbs.data?.pressao ?? [], qAbs.data?.eventos ?? [], d.passo_s, d.grade_usd), d.passo_s, d.grade_usd)
-  }, [modo, d, qAbs.data, fator])
+  }, [modo, d, qAbs.data, qLivro.data, fator])
   const labels = useMemo(() => (modo === 'absorcao' ? absorcao.labels : []), [modo, absorcao])
   const levels = useMemo<ChartLevel[]>(() => {
     if (!mostrarTop || !top) return []
@@ -258,10 +332,12 @@ export default function Nuvens() {
               <span className="muted" style={{ fontSize: 12 }}>linha de</span>
               <Seg value={linhaFp} options={LINHAS_FP} onChange={setLinhaFp} labels={{ '10': '$10', '20': '$20', '50': '$50', '100': '$100', '250': '$250', '500': '$500' }} />
             </> : <>
-            <Seg value={modo} options={MODOS} onChange={setModo} labels={{ absorcao: 'Absorção', paredes: 'Todas as paredes' }} />
-            {modo === 'paredes' && <>
-              <span className="muted" style={{ fontSize: 12 }}>a partir de</span>
-              <Seg value={fator} options={FATORES} onChange={setFator} labels={{ '2': '2x', '3': '3x', '5': '5x' }} />
+            <Seg value={modo} options={MODOS} onChange={setModo} labels={{ absorcao: 'Absorção', livro: 'Livro inteiro', paredes: 'Todas as paredes' }} />
+            {modo !== 'absorcao' && <>
+              {modo === 'paredes' && <>
+                <span className="muted" style={{ fontSize: 12 }}>a partir de</span>
+                <Seg value={fator} options={FATORES} onChange={setFator} labels={{ '2': '2x', '3': '3x', '5': '5x' }} />
+              </>}
               {EXCHANGES.map((e) => <Chip key={e} on={!!exs[e]} onClick={() => toggleEx(e)}>{NOME_EX[e]}</Chip>)}
             </>}
             <span style={{ width: 8 }} />
@@ -282,7 +358,7 @@ export default function Nuvens() {
             <PriceChart candles={dados} rects={rects} heatmap={heatmap} levels={levels} labels={labels} markers={presos.markers} height={560} />
           )}
           {vista === 'velas' && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 12, alignItems: 'end' }}>
-            {modo === 'paredes' ? <Regua /> : <LegendaAbsorcao q={qAbs.data} />}
+            {modo === 'paredes' ? <Regua /> : modo === 'livro' ? <LegendaLivro q={qLivro.data} /> : <LegendaAbsorcao q={qAbs.data} />}
             <span className="muted" style={{ fontSize: 12 }}>
               {qCalor.isPending ? 'lendo o livro…' : d && d.colunas.length
                 ? `livro gravado de ${new Date(d.colunas[0].ts * 1000).toISOString().slice(11, 16)} a ${new Date(d.colunas[d.colunas.length - 1].ts * 1000).toISOString().slice(11, 16)} UTC · onde não há nuvem, nada acima do normal (ou o coletor estava parado)`
