@@ -21,7 +21,7 @@ from typing import Dict, Iterable, List, Optional, Set
 
 from conselho.mapa_do_dia import DIA_MS, NOME_SESSAO, Mapa, Nivel, distancia_pct
 
-RESSALVA = "nível de TPO não bate o sorteio nos estudos de 20/10; informação, não gatilho"
+RESSALVA = "nos testes de 2020 a 2026, nível de TPO sozinho não ganhou do acaso: use como mapa, não como gatilho"
 PROXIMIDADE_PCT = 0.2
 JANELA_MAPA_MIN = 30                       # o aviso de mapa sai até 30 min depois da hora (serviço roda a cada 60 s)
 HORAS_MAPA = (("asia", 0, 0), ("europa", 8, 0), ("america", 13, 30))

@@ -17,8 +17,8 @@ const GRUPO: Record<string, { nome: string; cor: string }> = {
   pivo: { nome: 'pivô virgem', cor: 'var(--red)' },
 }
 const POSICAO: Record<string, string> = {
-  fundo: 'fundo do composto', meio: 'meio do composto', topo: 'topo do composto',
-  fora_abaixo: 'fora do composto, abaixo', fora_acima: 'fora do composto, acima', sem_composto: 'sem composto',
+  fundo: 'no fundo', meio: 'no meio', topo: 'no topo',
+  fora_abaixo: 'abaixo do range', fora_acima: 'acima do range', sem_composto: 'sem range',
 }
 const PROXIMIDADE_PCT = 0.2
 const SESSAO = { asia: 'Ásia', europa: 'Europa', america: 'América' } as const
@@ -76,7 +76,7 @@ export default function Avisos() {
             <>
               <div className="grid" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
                 <KPI l="Preço do mapa" v={fmtPreco(m.preco)} sub={`candles fechados até ${horaUTC(m.ts)}`} />
-                <KPI l="Posição no composto" v={POSICAO[m.posicao] ?? m.posicao}
+                <KPI l="Posição no range (composto 10 dias)" v={POSICAO[m.posicao] ?? m.posicao}
                   color={m.posicao === 'meio' ? 'var(--muted)' : m.posicao.startsWith('fora') ? 'var(--amber)' : 'var(--text)'}
                   sub={m.composto ? `VAL ${fmt(m.composto.val, 0)} · POC ${fmt(m.composto.poc, 0)} · VAH ${fmt(m.composto.vah, 0)} (${m.dias_no_composto}d)` : 'sem composto'} />
                 <KPI l="Nível mais perto" v={maisPerto ? `${maisPerto.distancia_pct > 0 ? '+' : ''}${fmt(maisPerto.distancia_pct, 2)}%` : '—'}

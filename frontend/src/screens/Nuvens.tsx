@@ -87,17 +87,27 @@ function imagemCalor(colunas: { ts: number; celulas: CelulaCalor[] }[], passo: n
  * O modo Absorção como colunas do mapa de calor: a pressão entra fria (nuvem fraca) e a absorção entra quente, na
  * faixa da parede e uma faixa acima e abaixo, por pelo menos 6 velas (nuvem forte). A imagem suavizada faz o resto.
  */
-const FORCA_PRESSAO = 3, FORCA_ABSORCAO = 14, VELAS_ABSORCAO = 6
+const FORCA_PRESSAO = 5, FORCA_ABSORCAO = 14, VELAS_ABSORCAO = 12, ALTURA_ABSORCAO = 3
 
 function colunasDoModoAbsorcao(ps: PressaoLivro[], evs: EventoAbsorcao[], passo: number, grade: number): { ts: number; celulas: CelulaCalor[] }[] {
   const por = new Map<number, CelulaCalor[]>()
   const por_em = (ts: number, c: CelulaCalor) => { const l = por.get(ts) ?? []; l.push(c); por.set(ts, l) }
-  for (const p of ps) por_em(p.ts, [p.baixo, p.alto, p.tipo === 'venda' ? 1 : 0, p.btc, FORCA_PRESSAO])
+  // pressão: a faixa da parede e uma de cada lado, um pouco mais fraca
+  for (const p of ps) {
+    const lado = p.tipo === 'venda' ? 1 : 0
+    for (let k = -1; k <= 1; k++) por_em(p.ts, [p.baixo + k * grade, p.alto + k * grade, lado, p.btc, k === 0 ? FORCA_PRESSAO : FORCA_PRESSAO * 0.7])
+  }
+  // absorção: nuvem quente em volta da parede, esmaecendo para cima/baixo e para a frente no tempo
   for (const e of evs) {
     const lado = e.tipo === 'venda' ? 1 : 0
     const fim = Math.max(e.ate_ts, e.ts + VELAS_ABSORCAO * passo)
-    for (let ts = e.ts; ts < fim; ts += passo) {
-      for (let k = -1; k <= 1; k++) por_em(ts, [e.baixo + k * grade, e.alto + k * grade, lado, e.parede_btc, k === 0 ? FORCA_ABSORCAO : FORCA_ABSORCAO * 0.6])
+    const n = Math.round((fim - e.ts) / passo)
+    for (let j = 0; j < n; j++) {
+      const tempo = 1 - 0.55 * (j / Math.max(1, n - 1))
+      for (let k = -ALTURA_ABSORCAO; k <= ALTURA_ABSORCAO; k++) {
+        const altura = 1 - 0.2 * Math.abs(k)
+        por_em(e.ts + j * passo, [e.baixo + k * grade, e.alto + k * grade, lado, e.parede_btc, Math.max(2.2, FORCA_ABSORCAO * tempo * altura)])
+      }
     }
   }
   return [...por.entries()].sort((a, b) => a[0] - b[0]).map(([ts, celulas]) => ({ ts, celulas }))
@@ -109,7 +119,7 @@ function nuvensAbsorcao(evs: EventoAbsorcao[]): { rects: ChartRect[]; labels: Ch
   const labels: ChartLabel[] = []
   for (const e of evs) {
     const lado = e.tipo === 'venda' ? 1 : 0
-    rects.push({ from: e.ts, to: Math.max(e.ate_ts, e.ts + 6 * 300), top: e.alto, bottom: e.baixo, color: 'rgba(0,0,0,0)', border: lado ? COR.asks : COR.bids })
+    rects.push({ from: e.ts, to: Math.max(e.ate_ts, e.ts + 12 * 300), top: e.alto, bottom: e.baixo, color: 'rgba(0,0,0,0)', border: lado ? COR.asks : COR.bids })
     labels.push({ time: e.ts, price: lado ? e.alto : e.baixo, color: lado ? COR.asks : COR.bids,
                   text: `absorção ${fmt(e.intensidade, 0)}x · delta ${e.delta_btc > 0 ? '+' : ''}${fmt(e.delta_btc, 0)} · OI +${fmt(e.oi_var_pct, 2)}%` })
   }
