@@ -62,6 +62,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Conselho de avisos BTC", version="3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+
+@app.middleware("http")
+async def sem_cache_no_painel(request, call_next):
+    """A página do painel sempre vem fresca (o celular guardava a versão antiga); os arquivos de assets/ mudam de nome
+    a cada build e podem ficar em cache à vontade."""
+    resposta = await call_next(request)
+    caminho = request.url.path
+    if caminho.startswith("/painel") and "/assets/" not in caminho:
+        resposta.headers["Cache-Control"] = "no-cache, must-revalidate"
+    elif caminho.startswith("/painel/assets/"):
+        resposta.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resposta
+
 app.include_router(avisos_routes.router, prefix="/api/avisos", tags=["Avisos"])
 app.include_router(nuvens_routes.router, prefix="/api/nuvens", tags=["Nuvens"])
 app.include_router(mercado_routes.router, prefix="/api/mercado", tags=["Mercado"])
