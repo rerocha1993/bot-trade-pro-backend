@@ -109,3 +109,12 @@ export interface TradeRobo {
   robo: string; lado: 'compra' | 'venda'; criado_s: number; entrada_s: number; saida_s: number; medio: number; stop: number
   alvo: number | null; saida: string; tomou_1r: boolean; resultado_r: number; resultado_usdt: number; banca: number; motivo: string
 }
+
+/** Liquidações dos perpétuos (GET /api/fluxo/liquidacoes): long = quem estava comprado e foi fechado a mercado. */
+export interface VelaLiquidacoes { ts: number; long_usd: number; short_usd: number; long_btc: number; short_btc: number; n: number }
+export interface FluxoLiquidacoes { inicio: number; fim: number; passo_s: number; exchanges: string[]; desde: number | null; velas: VelaLiquidacoes[] }
+
+/** Funding (GET /api/mercado/funding): [ts_ms, taxa] por corretora e [ts_ms, taxa média, n corretoras]. */
+export interface FundingAgregado {
+  por_exchange: Record<string, [number, number][]>; media: [number, number, number][]; falhas: Record<string, string>
+}

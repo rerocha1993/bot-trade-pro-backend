@@ -6,7 +6,7 @@
 import {
   ColorType, CrosshairMode, LineStyle, PriceScaleMode, createChart,
   type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesPrimitive, type ISeriesPrimitivePaneRenderer,
-  type ISeriesPrimitivePaneView, type SeriesAttachedParameter, type SeriesMarker, type Time, type UTCTimestamp,
+  type ISeriesPrimitivePaneView, type LogicalRange, type SeriesAttachedParameter, type SeriesMarker, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
 import { useEffect, useRef } from 'react'
 import type { Candle } from '../../api/types'
@@ -147,7 +147,12 @@ interface Props {
   markers?: ChartMarker[]
   logScale?: boolean
   height?: number
+  /** avisa quando o usuário arrasta ou dá zoom, para os painéis de baixo (SubChart) acompanharem */
+  onRange?: (r: LogicalRange | null) => void
 }
+
+/** largura fixa da escala de preço, a mesma dos painéis de baixo, para as velas ficarem alinhadas */
+export const LARGURA_ESCALA = 72
 
 function precisao(p: number): { precision: number; minMove: number } {
   if (p >= 1000) return { precision: 0, minMove: 1 }
@@ -161,7 +166,7 @@ function ordenar<T extends { time: number }>(pts: T[]): T[] {
   return [...m.values()].sort((a, b) => a.time - b.time)
 }
 
-export default function PriceChart({ candles, paths = [], labels = [], levels = [], rects = [], heatmap = null, profile = null, markers = [], logScale = false, height = 430 }: Props) {
+export default function PriceChart({ candles, paths = [], labels = [], levels = [], rects = [], heatmap = null, profile = null, markers = [], logScale = false, height = 430, onRange }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const serie = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -169,6 +174,8 @@ export default function PriceChart({ candles, paths = [], labels = [], levels = 
   const linhas = useRef<Map<string, ISeriesApi<'Line'>>>(new Map())
   const priceLines = useRef<IPriceLine[]>([])
   const nCandles = useRef(0)
+  const avisaRange = useRef(onRange)
+  avisaRange.current = onRange
 
   useEffect(() => {
     if (!el.current) return
@@ -176,7 +183,7 @@ export default function PriceChart({ candles, paths = [], labels = [], levels = 
       height,
       layout: { background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' }, textColor: '#4d5766', fontFamily: "'DM Mono', monospace", fontSize: 11 },
       grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
-      rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)', scaleMargins: { top: 0.08, bottom: 0.08 } },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)', scaleMargins: { top: 0.08, bottom: 0.08 }, minimumWidth: LARGURA_ESCALA },
       timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: true, secondsVisible: false, rightOffset: 6 },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(232,236,242,0.25)', labelBackgroundColor: '#1a2130' }, horzLine: { color: 'rgba(232,236,242,0.25)', labelBackgroundColor: '#1a2130' } },
       handleScroll: true, handleScale: true,
@@ -188,6 +195,7 @@ export default function PriceChart({ candles, paths = [], labels = [], levels = 
     const ov = new Overlay()
     s.attachPrimitive(ov)
     chart.current = c; serie.current = s; overlay.current = ov
+    c.timeScale().subscribeVisibleLogicalRangeChange((r) => avisaRange.current?.(r))
     const ro = new ResizeObserver(() => { if (el.current) c.applyOptions({ width: el.current.clientWidth }) })
     ro.observe(el.current)
     c.applyOptions({ width: el.current.clientWidth })

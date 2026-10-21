@@ -97,3 +97,40 @@ def funding(simbolo: str, sessao: Optional[requests.Session] = None) -> List[lis
     """Os últimos 200 pagamentos de funding (8 em 8 h, ~66 dias) da Bybit: [[ts_ms, taxa], ...] em ordem crescente."""
     res = _get("/v5/market/funding/history", {"category": CATEGORIA, "symbol": simbolo, "limit": 200}, sessao)
     return sorted([int(p["fundingRateTimestamp"]), float(p["fundingRate"])] for p in res.get("list") or [])
+
+
+# ----------------------------------------------------------------- funding agregado (painel "Funding Rate" do TRDR)
+def funding_binance(simbolo: str = "BTCUSDT", limite: int = 200) -> List[list]:
+    """Funding do perpétuo da Binance (REST de futuros responde daqui; o websocket não): [[ts_ms, taxa], ...]."""
+    r = requests.get("https://fapi.binance.com/fapi/v1/fundingRate", params={"symbol": simbolo, "limit": limite},
+                     headers=CABECALHOS, timeout=TIMEOUT_S)
+    r.raise_for_status()
+    return sorted([int(p["fundingTime"]), float(p["fundingRate"])] for p in r.json())
+
+
+def funding_okx(inst: str = "BTC-USDT-SWAP", limite: int = 100) -> List[list]:
+    """Funding do perpétuo da OKX (no máximo 100 por chamada, ~33 dias): [[ts_ms, taxa], ...]."""
+    r = requests.get("https://www.okx.com/api/v5/public/funding-rate-history", params={"instId": inst, "limit": limite},
+                     headers=CABECALHOS, timeout=TIMEOUT_S)
+    r.raise_for_status()
+    return sorted([int(p["fundingTime"]), float(p["fundingRate"])] for p in r.json().get("data") or [])
+
+
+def funding_agregado() -> dict:
+    """
+    Funding das três corretoras e a média entre elas em cada pagamento (de 8 em 8 h, arredondado à hora).
+    {"por_exchange": {ex: [[ts_ms, taxa], ...]}, "media": [[ts_ms, taxa_media, n_exchanges], ...], "falhas": {ex: erro}}
+    """
+    fontes = {"bybit": lambda: funding("BTCUSDT"), "binance": funding_binance, "okx": funding_okx}
+    por_ex, falhas = {}, {}
+    for ex, f in fontes.items():
+        try:
+            por_ex[ex] = f()
+        except Exception as e:      # uma corretora fora do ar não derruba o painel
+            falhas[ex] = f"{type(e).__name__}: {str(e)[:120]}"
+    juntos: dict = {}
+    for serie in por_ex.values():
+        for ts, taxa in serie:
+            juntos.setdefault(round(ts / 3_600_000) * 3_600_000, []).append(taxa)
+    media = [[ts, sum(v) / len(v), len(v)] for ts, v in sorted(juntos.items())]
+    return {"por_exchange": por_ex, "media": media, "falhas": falhas}

@@ -2,7 +2,7 @@
 COMO USAR: na raiz do projeto, clique duas vezes em coletor_livro.bat (ou rode
   .venv\\Scripts\\python.exe scripts\\coletor_livro.py) e deixe a janela aberta; Ctrl+C para parar.
 Grava o livro de BTC (Coinbase, Binance, Bybit) a cada 30 s em dados/livro/<exchange>/<dia>.jsonl.gz e os negócios
-a mercado, por minuto, em dados/negocios/<exchange>/<dia>.jsonl.gz (footprint; --sem-negocios desliga);
+a mercado e as liquidações dos perpétuos, por minuto, em dados/negocios/ e dados/liquidacoes/ (--sem-negocios desliga os dois);
 log em logs/coletor_livro.log. Opções: --intervalo 30  --duracao 180 (segundos; sem = infinito)
   --exchanges coinbase,binance,bybit  --pasta dados/livro  --silencioso (sem log no console).
 """
@@ -43,6 +43,9 @@ def main(argv=None) -> int:
         # negócios a mercado (quem agrediu) para o footprint, a absorção e os presos; mesmo sinal de parada
         from conselho.coletor_negocios import ColetorNegocios
         ColetorNegocios(parar=coletor.parar).iniciar()
+        # liquidações dos perpétuos (Bybit + OKX), para o painel de liquidações
+        from conselho.coletor_liquidacoes import ColetorLiquidacoes
+        ColetorLiquidacoes(parar=coletor.parar).iniciar()
 
     def _parar(signum, frame):  # noqa: ARG001
         log.info("sinal %s recebido, parando...", signum)

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
-import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoPresos, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo } from './types'
+import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoLiquidacoes, FluxoPresos, FundingAgregado, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo } from './types'
 import { candlesDaApi } from './adapters'
 
 /** Candles públicos da Bybit, servidos pela API do conselho (timestamp em ms na API, em segundos no gráfico). */
@@ -59,4 +59,16 @@ export const useRobos = () => useQuery({
 export const useTradesRobos = () => useQuery({
   queryKey: ['robos-trades'], refetchInterval: 30_000,
   queryFn: () => api.get<{ trades: TradeRobo[] }>('/api/robos/trades', { n: 300 }),
+})
+
+/** Liquidações dos perpétuos (Bybit + OKX) por vela, a partir do primeiro candle do gráfico (segundos). */
+export const useLiquidacoes = (inicio: number | null, passo = 300) => useQuery({
+  queryKey: ['liquidacoes', inicio, passo], enabled: inicio !== null, refetchInterval: 60_000,
+  queryFn: () => api.get<FluxoLiquidacoes>('/api/fluxo/liquidacoes', { inicio: inicio as number, passo }),
+})
+
+/** Funding de Bybit, Binance e OKX e a média entre eles (muda de 8 em 8 h). */
+export const useFunding = () => useQuery({
+  queryKey: ['funding'], refetchInterval: 10 * 60_000,
+  queryFn: () => api.get<FundingAgregado>('/api/mercado/funding'),
 })

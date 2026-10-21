@@ -5,6 +5,7 @@ Leituras de fluxo para o gráfico (conselho/fluxo.py):
     GET /api/fluxo/presos?inicio&passo&exchanges     velas com compradores ou vendedores presos no footprint
     GET /api/fluxo/absorcao?inicio                   a "distorção": parede no livro + agressão alavancada contra ela
                                                      + preço travado; é a nuvem que aparece no gráfico
+    GET /api/fluxo/liquidacoes?inicio&passo          liquidações dos perpétuos (Bybit + OKX) por vela: long e short
 
 `inicio` e os `ts` da resposta em segundos (UTC). Só lê dados/negocios e dados/livro, mais o open interest público
 da Bybit; nada envia ordem.
@@ -15,6 +16,7 @@ from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from conselho import fluxo, livro_historico as lh, mercado
+from conselho.coletor_liquidacoes import FONTES as FONTES_LIQ, PASTA_LIQUIDACOES
 
 router = APIRouter()
 
@@ -104,3 +106,21 @@ def footprint(passo: int = Query(1800, description="segundos por vela: 300, 900,
             "presos": [marcas[(b["ts"], lado)] for lado in ("compradores", "vendedores") if (b["ts"], lado) in marcas],
         })
     return {"passo_s": passo, "linha_usd": linha, "exchanges": exs, "velas": saida}
+
+
+@router.get("/liquidacoes")
+def liquidacoes(inicio: Optional[int] = Query(None), fim: Optional[int] = Query(None),
+                passo: int = Query(300, ge=60, le=14400, description="segundos por vela")) -> Dict:
+    """Soma, por vela, os dólares liquidados de quem estava comprado (long) e vendido (short), Bybit + OKX."""
+    inicio_s, fim_s = _periodo(inicio, fim)
+    velas: Dict[int, Dict] = {}
+    primeiro = None
+    for ex in FONTES_LIQ:
+        for r in lh.carregar_periodo(ex, inicio_s, fim_s, PASTA_LIQUIDACOES):
+            t = int(r["ts"]) // passo * passo
+            primeiro = t if primeiro is None else min(primeiro, t)
+            v = velas.setdefault(t, {"ts": t, "long_usd": 0.0, "short_usd": 0.0, "long_btc": 0.0, "short_btc": 0.0, "n": 0})
+            for k in ("long_usd", "short_usd", "long_btc", "short_btc", "n"):
+                v[k] += r.get(k, 0)
+    return {"inicio": inicio_s, "fim": fim_s, "passo_s": passo, "exchanges": list(FONTES_LIQ), "desde": primeiro,
+            "velas": [velas[t] for t in sorted(velas)]}

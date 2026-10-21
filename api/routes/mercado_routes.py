@@ -17,6 +17,8 @@ router = APIRouter()
 RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PASTA_LIVRO = os.path.join(RAIZ, "dados", "livro")
 LIMITE_MAX = 2000
+CACHE_FUNDING_S = 600
+_funding_cache = {"ts": 0.0, "dados": None}
 
 
 @router.get("/candles")
@@ -50,3 +52,15 @@ def status():
     except Exception as e:
         avisos = {"ativo": False, "ultimo_erro": str(e)}
     return {"avisos": avisos, "telegram": bool(avisos.get("telegram")), "coletor_idade_s": _idade_coletor()}
+
+
+@router.get("/funding")
+def funding():
+    """Funding dos perpétuos (Bybit, Binance, OKX) e a média entre eles; o funding muda de 8 em 8 h, então guarda 10 min."""
+    agora = time.time()
+    if _funding_cache["dados"] is None or agora - _funding_cache["ts"] > CACHE_FUNDING_S:
+        dados = mercado.funding_agregado()
+        if not dados["por_exchange"]:
+            raise HTTPException(502, f"funding indisponível: {dados['falhas']}")
+        _funding_cache.update(ts=agora, dados=dados)
+    return _funding_cache["dados"]
