@@ -1,7 +1,19 @@
 # Publicar o Conselho BTC num servidor barato
 
-O sistema é leve: dois processos Python ligados o tempo todo (o coletor e a API) e uns 5 MB de dados por dia.
-Qualquer servidor com 1–2 GB de RAM e Ubuntu 22.04 ou 24.04 serve.
+O sistema é leve: dois processos Python ligados o tempo todo (o coletor e a API, que também roda os 4 robôs em
+simulação e os avisos) e uns 5 MB de dados por dia. Qualquer servidor com 1–2 GB de RAM e Ubuntu 22.04 ou 24.04 serve.
+
+## O jeito mais fácil: você cria o servidor, o Claude instala
+
+1. Crie a conta na Hetzner (hetzner.com/cloud; pede cartão) e um servidor **CX22**, **Ubuntu 24.04**, em Falkenstein,
+   Nuremberg ou Helsinki.
+2. Em *SSH keys*, cole a chave pública do seu computador (o conteúdo de `C:\Users\Usuario\.ssh\id_ed25519.pub`).
+3. Mande o IP do servidor para o Claude. Ele envia o pacote e roda `instalar.sh --sem-senha` por você.
+4. No fim, você entra uma vez no servidor e escolhe a senha do painel:
+   `ssh root@SEU_IP` e `sudo bash /opt/conselho/deploy/senha.sh`.
+   (Do celular dá para usar um app de SSH, como o Termius.)
+
+O resto deste documento é o passo a passo para fazer tudo sozinho.
 
 | Opção | Custo | Prós | Contras |
 |---|---|---|---|
@@ -78,12 +90,14 @@ sudo systemctl restart conselho-api
 | ver se está tudo rodando | `systemctl status conselho-api conselho-coletor` |
 | ver o log ao vivo | `journalctl -u conselho-api -f` ou `journalctl -u conselho-coletor -f` |
 | atualizar o código | gere e envie um pacote novo, `tar -xzf conselho.tar.gz` e `sudo bash conselho_pacote/deploy/instalar.sh --atualizar` |
-| trocar a senha do painel | `caddy hash-password` e troque a linha do usuário em `/etc/caddy/Caddyfile`; depois `sudo systemctl reload caddy` |
+| trocar a senha do painel | `sudo bash /opt/conselho/deploy/senha.sh` |
+| ver os robôs (simulação) | painel → Robôs; trades em `/opt/conselho/data/robos/trades.jsonl` |
+| desligar os robôs | `ROBOS=0` em `/opt/conselho/.env` e `sudo systemctl restart conselho-api` |
 | preencher o footprint dos últimos dias | roda sozinho todo dia às 03:30 UTC (`systemctl list-timers conselho-negocios.timer`) |
 
 Os dados ficam em `/opt/conselho/dados` e `/opt/conselho/data`; uma atualização nunca os apaga.
 
 ## O que o servidor NÃO faz
 
-Não envia ordem e não guarda chave de corretora: só lê dados públicos e avisa. Por isso o `.env` do servidor
-tem só o Telegram.
+Não envia ordem e não guarda chave de corretora: só lê dados públicos, avisa e roda os 4 robôs em SIMULAÇÃO
+(banca virtual). Por isso o `.env` do servidor tem só o Telegram.
