@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { LogicalRange } from 'lightweight-charts'
 import { useAbsorcao, useCandles, useFootprint, useFunding, useLiquidacoes, useLivroPerp, useNuvensCalor, useNuvensOverlay, useNuvensTop, usePresos } from '../api/hooks'
-import type { CelulaCalor, EventoAbsorcao, EventoPresos, FluxoLiquidacoes, FundingAgregado, LivroPerp, NuvensCategoria, NuvensOverlay, NuvensPonto, PressaoLivro } from '../api/types'
+import type { Candle, CelulaCalor, EventoAbsorcao, EventoPresos, FluxoLiquidacoes, FundingAgregado, LivroPerp, NuvensCategoria, NuvensOverlay, NuvensPonto, PressaoLivro } from '../api/types'
 import FootprintChart from '../components/chart/FootprintChart'
 import PriceChart from '../components/chart/PriceChart'
 import SubChart, { type SerieSub } from '../components/chart/SubChart'
@@ -312,16 +312,37 @@ function nuvensAbsorcao(evs: EventoAbsorcao[]): { rects: ChartRect[]; labels: Ch
   return { rects, labels }
 }
 
-/** Presos: seta na vela e uma faixa amarela no preço onde ficaram presos, por 6 velas. */
-function marcasPresos(evs: EventoPresos[], passo: number): { markers: ChartMarker[]; rects: ChartRect[] } {
+/**
+ * Presos, desenhados nas velas de 5 min do gráfico mesmo quando foram achados na vela de 30 min:
+ * - o bloco de 30 min fica sombreado de leve (as 6 velas de 5 min de que o aviso fala);
+ * - a seta vai na vela de 5 min onde o nível foi negociado (a de topo mais alto, para compradores presos);
+ * - a faixa amarela é o preço de quem ficou preso e acaba quando uma vela FECHA do outro lado dele (os presos saíram
+ *   no zero a zero), ou depois de 6 blocos.
+ */
+const FAIXA_FOOTPRINT_USD = 20
+
+function marcasPresos(evs: EventoPresos[], passo: number, velas: Candle[]): { markers: ChartMarker[]; rects: ChartRect[] } {
   const markers: ChartMarker[] = []
   const rects: ChartRect[] = []
+  const passoGrafico = velas.length > 1 ? velas[1].time - velas[0].time : PASSO_S
   for (const e of evs) {
     if (e.confirmado === false) continue
     const comprador = e.lado === 'compradores'
-    markers.push({ time: e.ts, side: comprador ? 'sell' : 'buy', text: e.confirmado ? 'presos' : 'presos?' })
-    const meia = e.preco * 0.00012
-    rects.push({ from: e.ts, to: e.ts + passo * 6, top: e.preco + meia, bottom: e.preco - meia,
+    const nivel = e.preco + FAIXA_FOOTPRINT_USD / 2
+    const bloco = velas.filter((v) => v.time >= e.ts && v.time < e.ts + passo)
+    const tocaram = bloco.filter((v) => v.low <= e.preco + FAIXA_FOOTPRINT_USD && v.high >= e.preco)
+    const candidatas = tocaram.length ? tocaram : bloco
+    const alvo = candidatas.reduce<Candle | null>((m, v) => (!m ? v : comprador ? (v.high > m.high ? v : m) : (v.low < m.low ? v : m)), null)
+    const tSeta = alvo?.time ?? e.ts
+    markers.push({ time: tSeta, side: comprador ? 'sell' : 'buy', text: e.confirmado ? 'presos' : 'presos?' })
+    if (bloco.length > 1) {
+      rects.push({ from: bloco[0].time, to: bloco[bloco.length - 1].time + passoGrafico,
+                   top: Math.max(...bloco.map((v) => v.high)), bottom: Math.min(...bloco.map((v) => v.low)), color: 'rgba(245,192,74,0.07)' })
+    }
+    const saiu = velas.find((v) => v.time > tSeta && (comprador ? v.close > nivel : v.close < nivel))
+    const ultima = velas.length ? velas[velas.length - 1].time + passoGrafico : e.ts + passo
+    const meia = nivel * 0.00012
+    rects.push({ from: tSeta, to: Math.min(saiu ? saiu.time : ultima, e.ts + passo * 6), top: nivel + meia, bottom: nivel - meia,
                  color: e.confirmado ? 'rgba(245,192,74,0.85)' : 'rgba(245,192,74,0.45)' })
   }
   return { markers, rects }
@@ -404,7 +425,7 @@ export default function Nuvens() {
   const ultimaCol = d?.colunas.length ? d.colunas[d.colunas.length - 1] : null
 
   const absorcao = useMemo(() => nuvensAbsorcao(qAbs.data?.eventos ?? []), [qAbs.data])
-  const presos = useMemo(() => (verPresos ? marcasPresos(qPresos.data?.eventos ?? [], Number(tfPresos)) : { markers: [], rects: [] }), [verPresos, qPresos.data, tfPresos])
+  const presos = useMemo(() => (verPresos ? marcasPresos(qPresos.data?.eventos ?? [], Number(tfPresos), dados) : { markers: [], rects: [] }), [verPresos, qPresos.data, tfPresos, dados])
   const rects = useMemo(() => [...(modo === 'paredes' ? [] : absorcao.rects), ...presos.rects], [modo, absorcao, presos])
   const heatmap = useMemo<ChartHeatmap | null>(() => {
     if (!d?.grade_usd) return null
