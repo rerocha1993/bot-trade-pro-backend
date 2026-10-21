@@ -16,19 +16,24 @@ export interface SerieSub {
   valores: (number | null)[]
   /** cor por barra (opcional) */
   cores?: (string | null)[]
+  /** espessura da linha (só para `linha`) */
+  largura?: number
 }
 
 interface Props {
   titulo: string
+  /** uma linha explicando as cores, embaixo do título */
+  explica?: string
+  /** a leitura de agora, num selo colorido ao lado do título */
+  leitura?: { texto: string; cor: string }
   tempos: number[]
   series: SerieSub[]
   range: LogicalRange | null
   formato?: (v: number) => string
   height?: number
-  nota?: string
 }
 
-export default function SubChart({ titulo, tempos, series, range, formato, height = 120, nota }: Props) {
+export default function SubChart({ titulo, explica, leitura, tempos, series, range, formato, height = 90 }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const ss = useRef<Map<string, ISeriesApi<'Histogram'> | ISeriesApi<'Line'>>>(new Map())
@@ -37,7 +42,7 @@ export default function SubChart({ titulo, tempos, series, range, formato, heigh
     if (!el.current) return
     const c = createChart(el.current, {
       height,
-      layout: { background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' }, textColor: '#4d5766', fontFamily: "'DM Mono', monospace", fontSize: 10 },
+      layout: { background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' }, textColor: '#4d5766', fontFamily: "'DM Mono', monospace", fontSize: 10, attributionLogo: false },
       grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
       rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)', scaleMargins: { top: 0.12, bottom: 0.08 }, minimumWidth: LARGURA_ESCALA },
       timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: true, secondsVisible: false, rightOffset: 6, visible: false },
@@ -62,10 +67,10 @@ export default function SubChart({ titulo, tempos, series, range, formato, heigh
       if (!serie) {
         serie = s.tipo === 'barra'
           ? c.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, base: 0 })
-          : c.addLineSeries({ priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false, lineWidth: 2 })
+          : c.addLineSeries({ priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false })
         ss.current.set(s.id, serie)
       }
-      serie.applyOptions({ color: s.cor })
+      serie.applyOptions(s.tipo === 'linha' ? { color: s.cor, lineWidth: (s.largura ?? 2) as 1 | 2 | 3 | 4 } : { color: s.cor })
       // um ponto por vela; sem dado vira "espaço em branco", que mantém o alinhamento com o gráfico de cima
       serie.setData(tempos.map((t, i) => {
         const v = s.valores[i]
@@ -82,11 +87,12 @@ export default function SubChart({ titulo, tempos, series, range, formato, heigh
   }, [range, series, tempos])
 
   return (
-    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 4 }}>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 11, marginBottom: -14, position: 'relative', zIndex: 2, pointerEvents: 'none' }}>
-        <span style={{ color: '#a8b0bd' }}>{titulo}</span>
-        {nota && <span className="muted">{nota}</span>}
+    <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10, marginTop: 6 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+        <b style={{ color: '#e8ecf2', fontWeight: 600 }}>{titulo}</b>
+        {leitura && <span style={{ color: leitura.cor, border: `1px solid ${leitura.cor}`, borderRadius: 999, padding: '1px 9px', fontSize: 11 }}>{leitura.texto}</span>}
       </div>
+      {explica && <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{explica}</div>}
       <div ref={el} style={{ width: '100%', height }} />
     </div>
   )
