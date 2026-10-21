@@ -10,6 +10,8 @@ As "nuvens" do TRDR no painel (conselho/coletor_livro.py grava, conselho/livro_h
                                                         acima do normal; a intensidade é a cor
     GET /api/nuvens/top?ts&exchanges                    Order Book Top Levels: os 10 maiores níveis por lado,
                                                         somados entre exchanges no mesmo preço (grade de 0,05%)
+    GET /api/nuvens/perp?inicio&passo                  livro dos perpétuos (Binance, Bybit, OKX) até 0,1% do preço,
+                                                        por vela: o mais fundo que as três APIs públicas alcançam
 
 Só lê os arquivos de dados/livro/; nada aqui toca a internet nem envia ordem. Registros gravados antes das
 categorias (20/10/2026) entram aproximados pelas faixas de 0,1% e vêm marcados com `aproximado`.
@@ -21,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from conselho import livro_historico as lh
 from conselho.coletor_livro import EXCHANGES
+from conselho.coletor_livro_perp import BUSCADORES as PERPS, FAIXA_PCT as FAIXA_PERP, PASTA_LIVRO_PERP
 
 router = APIRouter()
 
@@ -89,3 +92,24 @@ def calor(inicio: Optional[int] = Query(None, description="epoch em segundos (UT
         raise HTTPException(status_code=400, detail=f"período máximo de {PERIODO_MAXIMO_S // 86400} dias")
     mapa = lh.mapa_calor(inicio_s, fim_s, exs, passo_s=passo, fator_min=fator, btc_min=btc)
     return {"inicio": inicio_s, "fim": fim_s, **mapa, "limitacoes": {ex: LIMITACOES[ex] for ex in exs}}
+
+
+@router.get("/perp")
+def perp(inicio: Optional[int] = Query(None, description="epoch em segundos (UTC); padrão: agora - 24 h"),
+         passo: int = Query(lh.PASSO_OVERLAY_S, ge=60, le=14400, description="segundos por vela")) -> Dict:
+    """Por vela: média de cada corretora no período da vela, somada entre as corretoras presentes."""
+    fim_s = int(time.time())
+    inicio_s = int(inicio) if inicio is not None else fim_s - 86400
+    if fim_s - inicio_s > PERIODO_MAXIMO_S:
+        raise HTTPException(status_code=400, detail=f"período máximo de {PERIODO_MAXIMO_S // 86400} dias")
+    por_vela: Dict[int, Dict[str, List[Dict]]] = {}
+    for ex in PERPS:
+        for r in lh.carregar_periodo(ex, inicio_s, fim_s, PASTA_LIVRO_PERP):
+            por_vela.setdefault(int(r["ts"]) // passo * passo, {}).setdefault(ex, []).append(r)
+    velas = []
+    for t in sorted(por_vela):
+        exs = por_vela[t]
+        velas.append({"ts": t, "exchanges": sorted(exs),
+                      "bids": round(sum(sum(r["bids"] for r in rs) / len(rs) for rs in exs.values()), 3),
+                      "asks": round(sum(sum(r["asks"] for r in rs) / len(rs) for rs in exs.values()), 3)})
+    return {"inicio": inicio_s, "fim": fim_s, "passo_s": passo, "faixa_pct": FAIXA_PERP, "exchanges": list(PERPS), "velas": velas}

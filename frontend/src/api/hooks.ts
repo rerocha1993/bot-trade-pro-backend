@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
-import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoLiquidacoes, FluxoPresos, FundingAgregado, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo } from './types'
+import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoLiquidacoes, FluxoPresos, FundingAgregado, LivroPerp, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo } from './types'
 import { candlesDaApi } from './adapters'
 
 /** Candles públicos da Bybit, servidos pela API do conselho (timestamp em ms na API, em segundos no gráfico). */
@@ -71,4 +71,10 @@ export const useLiquidacoes = (inicio: number | null, passo = 300) => useQuery({
 export const useFunding = () => useQuery({
   queryKey: ['funding'], refetchInterval: 10 * 60_000,
   queryFn: () => api.get<FundingAgregado>('/api/mercado/funding'),
+})
+
+/** Livro dos perpétuos (Binance, Bybit, OKX) até 0,1% do preço, por vela. */
+export const useLivroPerp = (inicio: number | null, passo = 300) => useQuery({
+  queryKey: ['livro-perp', inicio, passo], enabled: inicio !== null, refetchInterval: 60_000,
+  queryFn: () => api.get<LivroPerp>('/api/nuvens/perp', { inicio: inicio as number, passo }),
 })

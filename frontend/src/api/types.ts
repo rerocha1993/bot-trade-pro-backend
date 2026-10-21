@@ -118,3 +118,9 @@ export interface FluxoLiquidacoes { inicio: number; fim: number; passo_s: number
 export interface FundingAgregado {
   por_exchange: Record<string, [number, number][]>; media: [number, number, number][]; falhas: Record<string, string>
 }
+
+/** Livro dos perpétuos até 0,1% do preço (GET /api/nuvens/perp), somado entre Binance, Bybit e OKX. */
+export interface LivroPerp {
+  inicio: number; fim: number; passo_s: number; faixa_pct: number; exchanges: string[]
+  velas: { ts: number; exchanges: string[]; bids: number; asks: number }[]
+}

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { LogicalRange } from 'lightweight-charts'
-import { useAbsorcao, useCandles, useFootprint, useFunding, useLiquidacoes, useNuvensCalor, useNuvensOverlay, useNuvensTop, usePresos } from '../api/hooks'
-import type { CelulaCalor, EventoAbsorcao, EventoPresos, FluxoLiquidacoes, FundingAgregado, NuvensCategoria, NuvensOverlay, NuvensPonto, PressaoLivro } from '../api/types'
+import { useAbsorcao, useCandles, useFootprint, useFunding, useLiquidacoes, useLivroPerp, useNuvensCalor, useNuvensOverlay, useNuvensTop, usePresos } from '../api/hooks'
+import type { CelulaCalor, EventoAbsorcao, EventoPresos, FluxoLiquidacoes, FundingAgregado, LivroPerp, NuvensCategoria, NuvensOverlay, NuvensPonto, PressaoLivro } from '../api/types'
 import FootprintChart from '../components/chart/FootprintChart'
 import PriceChart from '../components/chart/PriceChart'
 import SubChart, { type SerieSub } from '../components/chart/SubChart'
@@ -203,7 +203,8 @@ const FMT_USD = (v: number) => `$${absK(v)}`
 const FMT_FUNDING = (v: number) => `${v.toFixed(4)}%`
 const FUNDING_ANUAL = 3 * 365     // três pagamentos por dia
 
-function paineisDeBaixo(tempos: number[], livro: NuvensOverlay | undefined, liq: FluxoLiquidacoes | undefined, funding: FundingAgregado | undefined) {
+function paineisDeBaixo(tempos: number[], livro: NuvensOverlay | undefined, perp: LivroPerp | undefined, liq: FluxoLiquidacoes | undefined,
+                        funding: FundingAgregado | undefined) {
   const saida: { titulo: string; nota?: string; series: SerieSub[]; formato: (v: number) => string; height?: number }[] = []
   if (livro) {
     const ks = livro.categorias.map((c, k) => (c.hi <= 0.05 + 1e-9 ? k : -1)).filter((k) => k >= 0)
@@ -213,10 +214,23 @@ function paineisDeBaixo(tempos: number[], livro: NuvensOverlay | undefined, liq:
     const b = soma(ult, 'bids') ?? 0, a = soma(ult, 'asks') ?? 0
     saida.push({
       titulo: 'Livro spot 0–5% (Coinbase + Binance)', formato: FMT_BTC,
-      nota: ult ? `agora ${fmt(b, 0)} BTC de compra × ${fmt(a, 0)} de venda (${fmt(100 * b / Math.max(1, a + b), 0)}% compra) · perpétuo não: nenhuma corretora pública mostra o livro dele até 5%` : undefined,
+      nota: ult ? `agora ${fmt(b, 0)} BTC de compra × ${fmt(a, 0)} de venda (${fmt(100 * b / Math.max(1, a + b), 0)}% compra)` : undefined,
       series: [
         { id: 'compra', tipo: 'barra', cor: 'rgba(46,204,132,0.75)', valores: tempos.map((t) => soma(porTs.get(t), 'bids')) },
         { id: 'venda', tipo: 'barra', cor: 'rgba(240,84,79,0.75)', valores: tempos.map((t) => { const v = soma(porTs.get(t), 'asks'); return v === null ? null : -v }) },
+      ],
+    })
+  }
+  if (perp) {
+    const porTs = new Map(perp.velas.map((v) => [v.ts, v]))
+    const ult = perp.velas[perp.velas.length - 1]
+    saida.push({
+      titulo: `Livro perpétuo 0–${fmt(perp.faixa_pct * 100, 1)}% (Binance + Bybit + OKX)`, formato: FMT_BTC, height: 100,
+      nota: ult ? `agora ${fmt(ult.bids, 0)} BTC de compra × ${fmt(ult.asks, 0)} de venda · só até ${fmt(perp.faixa_pct * 100, 1)}%: é o mais fundo que as três APIs públicas mostram (o TRDR vai a 5%)`
+        : 'gravando desde agora (o coletor do livro dos perpétuos acabou de ser ligado)',
+      series: [
+        { id: 'compra', tipo: 'barra', cor: 'rgba(46,204,132,0.75)', valores: tempos.map((t) => porTs.get(t)?.bids ?? null) },
+        { id: 'venda', tipo: 'barra', cor: 'rgba(240,84,79,0.75)', valores: tempos.map((t) => { const v = porTs.get(t); return v ? -v.asks : null }) },
       ],
     })
   }
@@ -248,6 +262,18 @@ function paineisDeBaixo(tempos: number[], livro: NuvensOverlay | undefined, liq:
       nota: `último ${agora.toFixed(4)}% a cada 8 h (≈ ${(agora * FUNDING_ANUAL).toFixed(1)}% ao ano) · positivo = comprado paga o vendido${Object.keys(funding.falhas).length ? ` · sem ${Object.keys(funding.falhas).join(', ')}` : ''}`,
       series: [{ id: 'funding', tipo: 'barra', cor: '#e0b45a', valores, cores: valores.map((v) => (v === null ? null : v >= 0 ? 'rgba(46,204,132,0.7)' : 'rgba(240,84,79,0.7)')) }],
     })
+    // o segundo painel de funding: uma linha por corretora, para ver quem está mais esticado
+    const CORES_EX: Record<string, string> = { bybit: '#f5a623', binance: '#f0d050', okx: '#9aa4b2' }
+    const linhas: SerieSub[] = Object.entries(funding.por_exchange).map(([ex, serie]) => {
+      let k = 0
+      return { id: ex, tipo: 'linha', cor: CORES_EX[ex] ?? '#e8ecf2', valores: tempos.map((t) => {
+        while (k + 1 < serie.length && serie[k + 1][0] <= t * 1000) k++
+        return serie.length && serie[k][0] <= t * 1000 ? serie[k][1] * 100 : null
+      }) }
+    })
+    const ultimos = Object.entries(funding.por_exchange).map(([ex, s]) => `${ex} ${s.length ? (s[s.length - 1][1] * 100).toFixed(4) : '—'}%`)
+    saida.push({ titulo: 'Funding por corretora', formato: FMT_FUNDING, height: 90, series: linhas,
+                 nota: `${ultimos.join(' · ')} · laranja Bybit, amarelo Binance, cinza OKX` })
   }
   return saida
 }
@@ -346,9 +372,10 @@ export default function Nuvens() {
   const qLivro = useNuvensOverlay(inicio, EXCHANGES_SPOT.join(','), PASSO_S)
   const qLiq = useLiquidacoes(inicio, PASSO_S)
   const qFunding = useFunding()
+  const qPerp = useLivroPerp(inicio, PASSO_S)
   const [range, setRange] = useState<LogicalRange | null>(null)
   const tempos = useMemo(() => dados.map((c) => c.time), [dados])
-  const paineis = useMemo(() => paineisDeBaixo(tempos, qLivro.data, qLiq.data, qFunding.data), [tempos, qLivro.data, qLiq.data, qFunding.data])
+  const paineis = useMemo(() => paineisDeBaixo(tempos, qLivro.data, qPerp.data, qLiq.data, qFunding.data), [tempos, qLivro.data, qPerp.data, qLiq.data, qFunding.data])
   const qPresos = usePresos(inicio, Number(tfPresos), verPresos)
   const qTop = useNuvensTop(exchanges)
   const d = qCalor.data

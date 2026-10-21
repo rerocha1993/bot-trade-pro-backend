@@ -46,6 +46,9 @@ def main(argv=None) -> int:
         # liquidações dos perpétuos (Bybit + OKX), para o painel de liquidações
         from conselho.coletor_liquidacoes import ColetorLiquidacoes
         ColetorLiquidacoes(parar=coletor.parar).iniciar()
+        # livro dos perpétuos perto do preço (Binance, Bybit, OKX), para o painel do livro perpétuo
+        from conselho.coletor_livro_perp import ColetorLivroPerp
+        ColetorLivroPerp(parar=coletor.parar).iniciar()
 
     def _parar(signum, frame):  # noqa: ARG001
         log.info("sinal %s recebido, parando...", signum)
