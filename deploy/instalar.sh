@@ -3,6 +3,7 @@
 #
 #   sudo bash instalar.sh                 # primeira vez: pede a senha do painel
 #   sudo bash instalar.sh --atualizar     # depois de enviar um pacote novo: só troca o código e reinicia
+#   sudo bash instalar.sh --sem-senha     # instala tudo com o painel fechado; a senha vem depois (deploy/senha.sh)
 #
 # O que faz:
 #   1. instala Python, Caddy (HTTPS automático) e o firewall;
@@ -18,7 +19,9 @@ DESTINO=/opt/conselho
 USUARIO=conselho
 PACOTE_DIR="$(cd "$(dirname "$0")/.." && pwd)"     # a pasta extraída do pacote (contém conselho/, api/, deploy/)
 ATUALIZAR=0
+SEM_SENHA=0
 [[ "${1:-}" == "--atualizar" ]] && ATUALIZAR=1
+[[ "${1:-}" == "--sem-senha" ]] && SEM_SENHA=1
 
 if [[ $EUID -ne 0 ]]; then echo "rode com sudo: sudo bash $0"; exit 1; fi
 
@@ -80,19 +83,11 @@ systemctl daemon-reload
 systemctl enable --now conselho-coletor conselho-api conselho-negocios.timer
 
 echo ">> 5/5 painel com HTTPS e senha"
-IP_PUBLICO="$(curl -4 -s https://api.ipify.org)"
-SITE="$(echo "$IP_PUBLICO" | tr '.' '-').sslip.io"
-read -r -p "   usuário do painel [conselho]: " USR
-USR="${USR:-conselho}"
-while true; do
-  read -r -s -p "   senha do painel (mínimo 10 caracteres): " SENHA; echo
-  [[ ${#SENHA} -ge 10 ]] && break
-  echo "   senha curta demais"
-done
-HASH="$(caddy hash-password --plaintext "$SENHA")"
-unset SENHA
-sed -e "s|__SITE__|$SITE|" -e "s|__USUARIO__|$USR|" -e "s|__HASH__|$HASH|" "$DESTINO/deploy/Caddyfile.modelo" > /etc/caddy/Caddyfile
-systemctl reload caddy || systemctl restart caddy
+if [[ $SEM_SENHA -eq 1 ]]; then
+  echo "   painel ainda FECHADO: rode depois  sudo bash $DESTINO/deploy/senha.sh  para escolher usuário e senha"
+else
+  bash "$DESTINO/deploy/senha.sh"
+fi
 
 ufw allow OpenSSH >/dev/null
 ufw allow 80/tcp >/dev/null
@@ -109,8 +104,7 @@ fi
 echo
 echo "================================================================"
 echo " Conselho BTC instalado."
-echo " Painel:   https://$SITE/painel/"
-echo " Usuário:  $USR   (a senha é a que você digitou)"
+echo " Painel:   https://$(curl -4 -s https://api.ipify.org | tr . -).sslip.io/painel/"
 echo
 echo " Telegram: edite $DESTINO/.env (TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID)"
 echo "           e rode: sudo systemctl restart conselho-api"
