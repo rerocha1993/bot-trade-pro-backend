@@ -91,3 +91,9 @@ def open_interest(simbolo: str, desde_ms: int, ate_ms: Optional[int] = None,
             break
         fim = menor - 1
     return [[k, vistos[k]] for k in sorted(vistos) if desde_ms <= k <= ate_ms]
+
+
+def funding(simbolo: str, sessao: Optional[requests.Session] = None) -> List[list]:
+    """Os últimos 200 pagamentos de funding (8 em 8 h, ~66 dias) da Bybit: [[ts_ms, taxa], ...] em ordem crescente."""
+    res = _get("/v5/market/funding/history", {"category": CATEGORIA, "symbol": simbolo, "limit": 200}, sessao)
+    return sorted([int(p["fundingRateTimestamp"]), float(p["fundingRate"])] for p in res.get("list") or [])

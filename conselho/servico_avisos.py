@@ -189,15 +189,9 @@ def get_avisos_service() -> AvisosService:
             return mercado.preco(PAR)
 
         def fluxo_agora(agora_s: float):
-            from conselho import fluxo, livro_historico as lh
-            exs = ("bybit", "binance", "coinbase")
-            ini = agora_s - 6 * 3600
-            v30 = fluxo.barras(fluxo.carregar_minutos(("bybit",), ini, agora_s), 1800, preco_de="bybit")
-            presos = fluxo.presos(v30, abandono_pct=0.005, passo_s=1800)
-            v5 = fluxo.barras(fluxo.carregar_minutos(exs, ini - fluxo.JANELA_DELTA_S, agora_s), 300, preco_de="bybit")
-            calor = lh.mapa_calor(ini, agora_s, passo_s=300)
-            oi = mercado.open_interest(PAR, int((ini - 3600) * 1000), int(agora_s * 1000))
-            return presos, fluxo.absorcao(v5, calor, oi, 300)
+            from conselho import fluxo
+            r = fluxo.leitura_recente(agora_s)
+            return r["presos"], r["absorcoes"]
 
         _service = AvisosService(candles, preco, telegram=TelegramAlertService(), obter_fluxo=fluxo_agora)
     return _service

@@ -187,3 +187,19 @@ def absorcao(velas: List[Dict], calor: Dict, oi: List[list], passo_s: int = 300,
                             "intensidade": inten, "parede_btc": btc, "delta_btc": round(b["delta"], 2),
                             "delta_z": round(z, 1), "oi_var_pct": round(var_oi, 2), "fechamento": fe})
     return eventos
+
+
+def leitura_recente(agora_s: float, horas: float = 6.0) -> Dict:
+    """
+    Presos (30 min, Bybit) e absorções (5 min, três corretoras) das últimas ``horas``, com o livro e o open interest
+    público da Bybit. Usada pelo serviço de avisos e pelos robôs (uma leitura só, o mesmo resultado).
+    """
+    from conselho import mercado
+
+    ini = agora_s - horas * 3600
+    v30 = barras(carregar_minutos(("bybit",), ini, agora_s), 1800, preco_de="bybit")
+    presos_30 = presos(v30, abandono_pct=0.005, passo_s=1800)
+    v5 = barras(carregar_minutos(("bybit", "binance", "coinbase"), ini - JANELA_DELTA_S, agora_s), 300, preco_de="bybit")
+    calor = lh.mapa_calor(ini, agora_s, passo_s=300)
+    oi = mercado.open_interest("BTCUSDT", int((ini - 3600) * 1000), int(agora_s * 1000))
+    return {"presos": presos_30, "absorcoes": absorcao(v5, calor, oi, 300), "calor": calor, "oi": oi}

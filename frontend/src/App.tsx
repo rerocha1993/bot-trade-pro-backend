@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { TopBar } from './components/Layout'
 import Avisos from './screens/Avisos'
 import Nuvens from './screens/Nuvens'
+import Robos from './screens/Robos'
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Avisos />} />
           <Route path="/nuvens" element={<Nuvens />} />
+          <Route path="/robos" element={<Robos />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

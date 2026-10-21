@@ -87,3 +87,22 @@ export interface VelaFootprint {
   presos: EventoPresos[]
 }
 export interface FluxoFootprint { passo_s: number; linha_usd: number; exchanges: string[]; velas: VelaFootprint[] }
+
+/** Robôs em simulação (GET /api/robos e /api/robos/trades). */
+export interface PosicaoRobo {
+  status: 'pendente' | 'aberta' | 'fechada' | 'expirada'; lado: 'compra' | 'venda'; fatias: [number, number][]
+  stop: number; stop_atual: number; alvo: number | null; medio: number | null; tomou_1r: boolean
+  criado_s: number; valido_ate_s: number; motivo: string
+}
+export interface Robo {
+  robo: string; nome: string; banca: number; trades: number; ganhos: number; resultado_r: number; media_r: number | null
+  posicao: PosicaoRobo | null
+}
+export interface RobosStatus {
+  ativo: boolean; ciclos: number; ultimo_erro: string | null; velas5: number; simulacao: boolean
+  risco_pct: number; banca_inicial: number; robos: Robo[]
+}
+export interface TradeRobo {
+  robo: string; lado: 'compra' | 'venda'; criado_s: number; entrada_s: number; saida_s: number; medio: number; stop: number
+  alvo: number | null; saida: string; tomou_1r: boolean; resultado_r: number; resultado_usdt: number; banca: number; motivo: string
+}

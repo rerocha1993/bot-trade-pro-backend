@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
-import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoPresos, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop } from './types'
+import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoPresos, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo } from './types'
 import { candlesDaApi } from './adapters'
 
 /** Candles públicos da Bybit, servidos pela API do conselho (timestamp em ms na API, em segundos no gráfico). */
@@ -49,4 +49,14 @@ export const useAbsorcao = (inicio: number | null) => useQuery({
 export const useFootprint = (passo: number, linha: number, ligado: boolean, n = 150) => useQuery({
   queryKey: ['footprint', passo, linha, n], enabled: ligado, refetchInterval: 30_000,
   queryFn: () => api.get<FluxoFootprint>('/api/fluxo/footprint', { passo, linha, n }),
+})
+
+export const useRobos = () => useQuery({
+  queryKey: ['robos'], refetchInterval: 15_000,
+  queryFn: () => api.get<RobosStatus>('/api/robos'),
+})
+
+export const useTradesRobos = () => useQuery({
+  queryKey: ['robos-trades'], refetchInterval: 30_000,
+  queryFn: () => api.get<{ trades: TradeRobo[] }>('/api/robos/trades', { n: 300 }),
 })
