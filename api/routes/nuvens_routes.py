@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from api import cache_dias
 from conselho import livro_historico as lh
 from conselho.coletor_livro import EXCHANGES
 from conselho.coletor_livro_perp import BUSCADORES as PERPS, FAIXA_PCT as FAIXA_PERP, PASTA_LIVRO_PERP
@@ -59,7 +60,9 @@ def overlay(inicio: Optional[int] = Query(None, description="epoch em segundos (
         raise HTTPException(status_code=400, detail="inicio depois do fim")
     if fim_s - inicio_s > PERIODO_MAXIMO_S:
         raise HTTPException(status_code=400, detail=f"período máximo de {PERIODO_MAXIMO_S // 86400} dias")
-    serie = lh.serie_overlay(inicio_s, fim_s, exs, passo_s=passo)
+    pedacos = cache_dias.por_dia(("overlay", tuple(exs), passo), inicio_s, fim_s,
+                                 lambda a, b: lh.serie_overlay(a, b, exs, passo_s=passo))
+    serie = juntar_overlay(pedacos, inicio_s)
     return {
         "inicio": inicio_s, "fim": fim_s, "exchanges": exs,
         **serie,
@@ -90,7 +93,7 @@ def calor(inicio: Optional[int] = Query(None, description="epoch em segundos (UT
         raise HTTPException(status_code=400, detail="inicio depois do fim")
     if fim_s - inicio_s > PERIODO_MAXIMO_S:
         raise HTTPException(status_code=400, detail=f"período máximo de {PERIODO_MAXIMO_S // 86400} dias")
-    mapa = lh.mapa_calor(inicio_s, fim_s, exs, passo_s=passo, fator_min=fator, btc_min=btc)
+    mapa = calor_por_dia(inicio_s, fim_s, exs, passo, fator, btc)
     return {"inicio": inicio_s, "fim": fim_s, **mapa, "limitacoes": {ex: LIMITACOES[ex] for ex in exs}}
 
 
@@ -113,3 +116,46 @@ def perp(inicio: Optional[int] = Query(None, description="epoch em segundos (UTC
                       "bids": round(sum(sum(r["bids"] for r in rs) / len(rs) for rs in exs.values()), 3),
                       "asks": round(sum(sum(r["asks"] for r in rs) / len(rs) for rs in exs.values()), 3)})
     return {"inicio": inicio_s, "fim": fim_s, "passo_s": passo, "faixa_pct": FAIXA_PERP, "exchanges": list(PERPS), "velas": velas}
+
+
+_grade = {"ts": 0.0, "usd": None}
+
+
+def grade_atual() -> float:
+    """A grade do mapa de calor (0,1% do preço, arredondado a US$ 10), a mesma para todos os dias do gráfico;
+    lida do último snapshot da Coinbase e guardada por 10 min."""
+    if _grade["usd"] is None or time.time() - _grade["ts"] > 600:
+        reg = lh.snapshot_mais_recente("coinbase", None) or {}
+        mid = float(reg.get("mid") or 0)
+        _grade.update(ts=time.time(), usd=max(10.0, round(mid * 0.001 / 10.0) * 10.0) if mid else 80.0)
+    return _grade["usd"]
+
+
+def calor_por_dia(inicio_s: int, fim_s: int, exs: List[str], passo: int, fator: float, btc: float) -> Dict:
+    """O mapa de calor de [inicio_s, fim_s] montado dia a dia (os dias fechados vêm do cache, ver api/cache_dias.py)."""
+    grade = grade_atual()
+    pedacos = cache_dias.por_dia(("calor", tuple(exs), passo, fator, btc, grade), inicio_s, fim_s,
+                                 lambda a, b: lh.mapa_calor(a, b, exs, passo_s=passo, fator_min=fator, btc_min=btc, grade_usd=grade))
+    base: Dict[str, int] = {}
+    for p in pedacos:
+        for ex, n in (p.get("base") or {}).items():
+            base[ex] = max(base.get(ex, 0), n)
+    return {"passo_s": passo, "grade_usd": grade if any(p.get("grade_usd") for p in pedacos) else None, "fator_min": fator,
+            "btc_min": btc, "exchanges": exs, "base": base,
+            "colunas": [c for p in pedacos for c in p.get("colunas", []) if c["ts"] >= inicio_s]}
+
+
+def juntar_overlay(pedacos: List[Dict], inicio_s: int) -> Dict:
+    fontes: Dict[str, Dict] = {}
+    for p in pedacos:
+        for ex, f in (p.get("fontes") or {}).items():
+            g = fontes.setdefault(ex, {**f, "snapshots": 0, "aproximados": 0})
+            g["snapshots"] += f.get("snapshots", 0)
+            g["aproximados"] += f.get("aproximados", 0)
+            if f.get("primeiro_ts") is not None and (g.get("primeiro_ts") is None or f["primeiro_ts"] < g["primeiro_ts"]):
+                g["primeiro_ts"] = f["primeiro_ts"]
+            if f.get("ultimo_ts") is not None:
+                g.update(ultimo_ts=f["ultimo_ts"], alcance_bids_pct=f.get("alcance_bids_pct"), alcance_asks_pct=f.get("alcance_asks_pct"))
+    return {"passo_s": pedacos[-1]["passo_s"] if pedacos else lh.PASSO_OVERLAY_S,
+            "categorias": pedacos[-1]["categorias"] if pedacos else [],
+            "pontos": [pt for p in pedacos for pt in p.get("pontos", []) if pt["ts"] >= inicio_s], "fontes": fontes}

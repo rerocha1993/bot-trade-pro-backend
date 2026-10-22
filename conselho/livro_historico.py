@@ -398,7 +398,7 @@ MIN_SNAPSHOTS_BASE = 20      # sem 20 snapshots de base, a exchange não entra (
 
 def mapa_calor(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EXCHANGES, raiz: str = PASTA_DADOS,
                passo_s: int = PASSO_OVERLAY_S, fator_min: float = FATOR_MIN_CALOR, btc_min: float = BTC_MIN_CALOR,
-               janela_base_s: float = JANELA_24H_S) -> Dict:
+               janela_base_s: float = JANELA_24H_S, grade_usd: Optional[float] = None) -> Dict:
     """
     Heatmap de liquidez do livro (estilo Bookmap/TRDR): só acende onde há ordens acima do normal.
 
@@ -415,6 +415,7 @@ def mapa_calor(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EXCHA
     intensidade = contra o histórico na mesma distância; intensidade_local = contra as faixas vizinhas no mesmo instante.
     Sai a célula que passa em qualquer uma das duas (``fator_min`` ou FATOR_LOCAL_MIN).
     Faixas que a exchange não alcança (quantidade sempre 0) não têm normal e nunca acendem.
+    ``grade_usd`` fixa a grade (o painel junta vários dias e precisa da mesma grade em todos).
     """
     exs = list(exchanges)
     passo = max(1, int(passo_s))
@@ -436,7 +437,7 @@ def mapa_calor(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EXCHA
 
     mids = np.concatenate([d["mid"] for d in dados.values() if len(d["mid"])]) if any(len(d["mid"]) for d in dados.values()) else np.array([])
     ref = float(np.median(mids)) if len(mids) else 0.0
-    grade = max(1.0, round(ref * 0.001 / 10.0) * 10.0) if ref else 1.0
+    grade = float(grade_usd) if grade_usd else (max(1.0, round(ref * 0.001 / 10.0) * 10.0) if ref else 1.0)
 
     # coluna -> lado -> bin da grade -> [btc, normal]
     colunas: Dict[int, Dict] = {}

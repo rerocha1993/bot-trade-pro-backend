@@ -16,7 +16,7 @@ router = APIRouter()
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PASTA_LIVRO = os.path.join(RAIZ, "dados", "livro")
-LIMITE_MAX = 2000
+LIMITE_MAX = 2100        # 7 dias de velas de 5 min (2016)
 CACHE_FUNDING_S = 600
 _funding_cache = {"ts": 0.0, "dados": None}
 

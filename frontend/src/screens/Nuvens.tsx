@@ -17,7 +17,9 @@ import { fmt, preco as fmtPreco } from '../lib/format'
 const EXCHANGES = ['coinbase', 'binance', 'bybit'] as const
 const NOME_EX: Record<string, string> = { coinbase: 'Coinbase', binance: 'Binance', bybit: 'Bybit' }
 const PASSO_S = 300
-const N_CANDLES = 288
+/** quantos dias o gráfico mostra (velas de 5 min: 288 por dia); os dias fechados vêm do cache da API */
+const PERIODOS = ['1', '3', '7'] as const
+const VELAS_POR_DIA = 288
 const FATORES = ['2', '3', '5'] as const
 const COR = { bids: '#2ecc84', asks: '#f0544f', presos: '#f5c04a' }
 const MODOS = ['absorcao', 'livro', 'paredes'] as const
@@ -294,8 +296,8 @@ function paineisDeBaixo(tempos: number[], livro: NuvensOverlay | undefined, perp
 }
 
 /**
- * A absorção no gráfico: só a nuvem e um rótulo curto em português ("compradores presos no topo"); eventos a menos
- * de 6 velas um do outro dividem o mesmo rótulo, para os textos não se atropelarem. Os números ficam na lista abaixo.
+ * A absorção no gráfico: só a nuvem e um rótulo curto ("presos no topo"); eventos a menos de 2 h um do outro dividem
+ * o mesmo rótulo, para os textos não se atropelarem com 3 ou 7 dias na tela. A cor diz o lado.
  */
 function nuvensAbsorcao(evs: EventoAbsorcao[]): { rects: ChartRect[]; labels: ChartLabel[] } {
   const rects: ChartRect[] = []
@@ -304,10 +306,10 @@ function nuvensAbsorcao(evs: EventoAbsorcao[]): { rects: ChartRect[]; labels: Ch
   for (const e of [...evs].sort((a, b) => a.ts - b.ts)) {
     const lado = e.tipo === 'venda' ? 1 : 0
     rects.push({ from: e.ts, to: Math.max(e.ate_ts, e.ts + 12 * 300), top: e.alto, bottom: e.baixo, color: 'rgba(0,0,0,0)', border: lado ? COR.asks : COR.bids })
-    if (e.ts - ultimoRotulo < 6 * 300) continue
+    if (e.ts - ultimoRotulo < 2 * 3600) continue
     ultimoRotulo = e.ts
     labels.push({ time: e.ts, price: lado ? e.alto : e.baixo, color: lado ? COR.asks : COR.bids,
-                  text: lado ? 'compradores presos no topo' : 'vendedores presos no fundo' })
+                  text: lado ? 'presos no topo' : 'presos no fundo' })
   }
   return { rects, labels }
 }
@@ -400,12 +402,13 @@ export default function Nuvens() {
   const [verPresos, setVerPresos] = useState(true)
   const [tfPresos, setTfPresos] = useState<(typeof TFS_PRESOS)[number]>('1800')
   const [vista, setVista] = useState<(typeof VISTAS)[number]>('velas')
+  const [periodo, setPeriodo] = useState<(typeof PERIODOS)[number]>('3')
   const [tfFp, setTfFp] = useState<(typeof TFS_FP)[number]>('1800')
   const [linhaFp, setLinhaFp] = useState<(typeof LINHAS_FP)[number]>('50')
   const qFp = useFootprint(Number(tfFp), Number(linhaFp), vista === 'footprint')
   const trocarTfFp = (tf: (typeof TFS_FP)[number]) => { setTfFp(tf); setLinhaFp(LINHA_PADRAO[tf]) }
   const exchanges = EXCHANGES.filter((e) => exs[e]).join(',')
-  const candles = useCandles('BTCUSDT', '5m', N_CANDLES)
+  const candles = useCandles('BTCUSDT', '5m', Number(periodo) * VELAS_POR_DIA)
   const dados = candles.data ?? []
   const inicio = dados.length ? dados[0].time : null
   const qCalor = useNuvensCalor(inicio, exchanges, Number(fator), PASSO_S)
@@ -466,6 +469,7 @@ export default function Nuvens() {
         <Card title={vista === 'footprint' ? `Footprint ${Number(tfFp) >= 3600 ? `${Number(tfFp) / 3600}h` : `${Number(tfFp) / 60} min`}` : 'Candles de 5 min com as nuvens'}
           right={<span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             <Seg value={vista} options={VISTAS} onChange={setVista} labels={{ velas: 'Velas', footprint: 'Footprint' }} />
+            {vista === 'velas' && <Seg value={periodo} options={PERIODOS} onChange={setPeriodo} labels={{ '1': '1 dia', '3': '3 dias', '7': '7 dias' }} />}
             <span style={{ width: 8 }} />
             {vista === 'footprint' ? <>
               <Seg value={tfFp} options={TFS_FP} onChange={trocarTfFp} labels={{ '300': '5m', '900': '15m', '1800': '30m', '3600': '1h', '14400': '4h' }} />
