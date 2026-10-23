@@ -1,8 +1,9 @@
 [Unit]
-Description=Conselho BTC - completa o footprint com os arquivos diários da Bybit (minutos que faltam)
+Description=Conselho BTC - completa o footprint: arquivos diários da Bybit e APIs de negociações da Binance e da Coinbase (minutos que faltam)
 
 [Service]
 Type=oneshot
 User=conselho
 WorkingDirectory=/opt/conselho
 ExecStart=/opt/conselho/.venv/bin/python scripts/baixar_negocios_bybit.py --dias 3
+ExecStart=/opt/conselho/.venv/bin/python scripts/preencher_negocios.py --horas 30
