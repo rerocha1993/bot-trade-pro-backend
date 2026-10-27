@@ -6,7 +6,24 @@ monta o mapa do dia pelo TPO, desenha as "nuvens" do livro de ordens agregado e 
 O sistema de robôs antigo foi substituído por este em 20/10/2026. O código dele está no histórico do git até o
 commit `017692d7`.
 
-## Como rodar
+## Instalar no PC (liga sozinho com o Windows)
+
+Dois cliques em **`instalar_windows.bat`**. Ele cria 4 tarefas no Agendador de Tarefas (nome começando com
+`ConselhoBTC`): coletor, API com os robôs em simulação, túnel do celular (ngrok) e o preenchimento diário dos negócios
+(06:30 e ao entrar no Windows). Tudo roda **sem janela** e cada parte **religa sozinha** 15 s depois de cair
+(`windows\manter_rodando.vbs`; quedas em `logs\vigia.log`). Cria o atalho **Conselho BTC** na área de trabalho.
+
+| Para | Faça |
+|---|---|
+| ver se está tudo rodando e o link do celular | `status_windows.bat` |
+| parar tudo agora (volta no próximo login) | `powershell -File windows\parar.ps1` |
+| tirar do início do Windows | `desinstalar_windows.bat` (não apaga os dados) |
+| link do celular fixo | pegue o domínio grátis em dashboard.ngrok.com → Domains, escreva em `windows\dominio_ngrok.txt` e rode o instalador de novo |
+
+O PC precisa ficar ligado e acordado (suspensão em "Nunca"): com ele desligado o livro daquele período se perde (os
+negócios o preenchimento recupera). Depois de atualizar o código, rode `instalar_windows.bat` de novo para religar.
+
+## Como rodar à mão
 
 ```bash
 # dependências (Python 3.12/3.13, venv em .venv)

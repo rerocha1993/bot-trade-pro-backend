@@ -1,3 +1,8 @@
 # o pacote do servidor roda no Linux: quebras de linha LF sempre
 deploy/** text eol=lf
 *.sh text eol=lf
+
+# scripts do Windows: CRLF; o .vbs fica em ANSI (o Windows Script Host não lê UTF-8)
+windows/*.ps1 text eol=crlf
+windows/*.vbs -text
+*_windows.bat text eol=crlf
