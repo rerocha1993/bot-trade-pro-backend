@@ -68,7 +68,8 @@ echo ">> 2/5 usuário e código"
 id -u "$USUARIO" >/dev/null 2>&1 || useradd --system --home "$DESTINO" --shell /usr/sbin/nologin "$USUARIO"
 copiar_codigo
 if [[ ! -f "$DESTINO/.env" ]]; then
-  cp "$DESTINO/.env.exemplo" "$DESTINO/.env"
+  # sem o \r do Windows: o systemd não tira e ele vai parar dentro dos valores
+  tr -d '\r' < "$DESTINO/.env.exemplo" > "$DESTINO/.env"
   chown "$USUARIO:$USUARIO" "$DESTINO/.env"
   chmod 600 "$DESTINO/.env"
 fi
@@ -107,8 +108,7 @@ echo "================================================================"
 echo " Conselho BTC instalado."
 echo " Painel:   https://$(curl -4 -s https://api.ipify.org | tr . -).sslip.io/painel/"
 echo
-echo " Telegram: edite $DESTINO/.env (TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID)"
-echo "           e rode: sudo systemctl restart conselho-api"
+echo " Telegram: sudo bash $DESTINO/deploy/telegram.sh  (cola o token do @BotFather e ele faz o resto)"
 echo " Logs:     journalctl -u conselho-api -f    |    journalctl -u conselho-coletor -f"
 echo " Oracle:   libere as portas 80 e 443 também na Security List da VCN (ver deploy/LEIAME.md)."
 echo "================================================================"

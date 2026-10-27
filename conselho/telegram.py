@@ -18,8 +18,9 @@ class TelegramAlertService:
     """
 
     def __init__(self, token: str = None, chat_id: str = None):
-        self.token = token or os.getenv("TELEGRAM_BOT_TOKEN")
-        self.chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID")
+        # strip: um .env salvo no Windows deixa um \r no fim de cada valor
+        self.token = (token or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+        self.chat_id = (chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip()
         self.ativo = bool(self.token and ":" in str(self.token) and self.chat_id and self.chat_id != "TELEGRAM_CHAT_ID")
         self._lock = threading.Lock()
         self.bot = None

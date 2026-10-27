@@ -75,12 +75,11 @@ Abra no celular, digite o usuário e a senha. O certificado HTTPS é emitido soz
 ## 4. Telegram (para os avisos chegarem no celular)
 
 1. No Telegram, fale com o **@BotFather**, mande `/newbot` e copie o token.
-2. Mande qualquer mensagem para o seu bot e depois fale com o **@userinfobot** para saber o seu chat_id.
-3. No servidor:
+2. No servidor, rode o script abaixo, cole o token (não aparece na tela) e, quando ele pedir, mande um "oi" para o
+   seu bot. Ele descobre o chat sozinho, grava no `.env`, religa a API e manda uma mensagem de teste.
 
 ```bash
-sudo nano /opt/conselho/.env          # preencha TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID
-sudo systemctl restart conselho-api
+sudo bash /opt/conselho/deploy/telegram.sh
 ```
 
 ## Dia a dia
