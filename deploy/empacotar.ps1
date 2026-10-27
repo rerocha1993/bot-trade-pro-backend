@@ -4,7 +4,7 @@
 #   powershell -ExecutionPolicy Bypass -File deploy\empacotar.ps1 -ComDados    # leva também o histórico do livro e dos negócios
 #
 # Depois: scp conselho.tar.gz root@IP:/root/  e siga o deploy\LEIAME.md.
-param([switch]$ComDados)
+param([switch]$ComDados, [int]$DiasNegocios = 14)
 $ErrorActionPreference = 'Stop'
 $raiz = Split-Path -Parent $PSScriptRoot
 Set-Location $raiz
@@ -24,8 +24,19 @@ Copy-Item -Recurse 'frontend\dist' "$dst\frontend\dist"
 Copy-Item 'README.md', '.env.exemplo' $dst
 Get-ChildItem -Recurse -Directory -Filter '__pycache__' $dst | Remove-Item -Recurse -Force
 if ($ComDados) {
-  New-Item -ItemType Directory -Force "$dst\dados" | Out-Null
-  foreach ($d in 'livro', 'negocios') { if (Test-Path "dados\$d") { Copy-Item -Recurse "dados\$d" "$dst\dados\$d" } }
+  # o livro, o livro dos perpétuos e as liquidações inteiros (pequenos e impossíveis de baixar de novo); dos negócios,
+  # só os últimos $DiasNegocios dias (o histórico de 2020 em diante é dos estudos, não do painel); e o estado e os
+  # trades dos robôs e os avisos, para a simulação continuar de onde está
+  New-Item -ItemType Directory -Force "$dst\dados", "$dst\data" | Out-Null
+  foreach ($d in 'livro', 'livro_perp', 'liquidacoes') { if (Test-Path "dados\$d") { Copy-Item -Recurse "dados\$d" "$dst\dados\$d" } }
+  $corte = (Get-Date).ToUniversalTime().AddDays(-$DiasNegocios).ToString('yyyy-MM-dd')
+  Get-ChildItem 'dados\negocios' -Recurse -File -Filter '*.jsonl.gz' | Where-Object { $_.BaseName.Substring(0, 10) -ge $corte } | ForEach-Object {
+    $rel = $_.FullName.Substring((Resolve-Path 'dados').Path.Length + 1)
+    New-Item -ItemType Directory -Force (Split-Path "$dst\dados\$rel") | Out-Null
+    Copy-Item $_.FullName "$dst\dados\$rel"
+  }
+  if (Test-Path 'data\robos') { Copy-Item -Recurse 'data\robos' "$dst\data\robos" }
+  if (Test-Path 'data\avisos.jsonl') { Copy-Item 'data\avisos.jsonl' "$dst\data\avisos.jsonl" }
 }
 
 $saida = Join-Path $raiz 'conselho.tar.gz'

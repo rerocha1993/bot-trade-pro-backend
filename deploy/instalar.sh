@@ -34,7 +34,7 @@ copiar_codigo() {
   for f in README.md .env.exemplo; do [[ -f "$PACOTE_DIR/$f" ]] && cp "$PACOTE_DIR/$f" "$DESTINO/$f"; done
   mkdir -p "$DESTINO"/{dados,data,logs}
   # dados que vieram no pacote (opcional) entram sem sobrescrever o que já existe no servidor
-  for d in dados data; do [[ -d "$PACOTE_DIR/$d" ]] && cp -rn "$PACOTE_DIR/$d/." "$DESTINO/$d/" || true; done
+  for d in dados data; do [[ -d "$PACOTE_DIR/$d" ]] && cp -r --update=none "$PACOTE_DIR/$d/." "$DESTINO/$d/" || true; done
   chown -R "$USUARIO:$USUARIO" "$DESTINO"
 }
 
@@ -75,7 +75,8 @@ fi
 
 echo ">> 3/5 ambiente Python (alguns minutos)"
 ambiente_python
-sudo -u "$USUARIO" "$DESTINO/.venv/bin/python" -m pytest -q -p no:cacheprovider "$DESTINO/tests" | tail -1
+# roda dentro de $DESTINO: o usuário de sistema não entra em /root, de onde o instalador costuma ser chamado
+( cd "$DESTINO" && sudo -u "$USUARIO" "$DESTINO/.venv/bin/python" -m pytest -q -p no:cacheprovider "$DESTINO/tests" | tail -1 ) || echo "   (atenção: algum teste falhou; o resto da instalação segue)"
 
 echo ">> 4/5 serviços"
 cp "$DESTINO"/deploy/systemd/*.service "$DESTINO"/deploy/systemd/*.timer /etc/systemd/system/
