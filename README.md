@@ -6,6 +6,13 @@ monta o mapa do dia pelo TPO, desenha as "nuvens" do livro de ordens agregado e 
 O sistema de robôs antigo foi substituído por este em 20/10/2026. O código dele está no histórico do git até o
 commit `017692d7`.
 
+## No servidor (desde 27/10/2026)
+
+Roda numa VPS (Hostinger KVM 1, Brasil): painel em **https://187-41-98-179.sslip.io/painel/** (usuário `conselho`,
+senha definida com `deploy/senha.sh`). Serviços `conselho-coletor`, `conselho-api` e `caddy`; o preenchimento dos
+negócios roda todo dia às 03:30 UTC. Para atualizar: `deploy\empacotar.ps1`, `scp` e `deploy/instalar.sh` (passo a
+passo em `deploy/LEIAME.md`). Não deixe o PC rodando junto: os robôs ficariam em dobro.
+
 ## Instalar no PC (liga sozinho com o Windows)
 
 Dois cliques em **`instalar_windows.bat`**. Ele cria 4 tarefas no Agendador de Tarefas (nome começando com
