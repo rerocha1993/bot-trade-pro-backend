@@ -2,7 +2,7 @@ import random
 
 import pytest
 
-from conselho.tpo import DIA_MS, Perfil, blocos_30m, merge
+from conselho.tpo import DIA_MS, Perfil, blocos_30m, expandir_area, merge
 from conselho.tpo_grafico import composto, juntar, perfis_por_dia, tick_grafico
 
 DIA = DIA_MS // 1000
@@ -34,7 +34,7 @@ def test_cada_dia_igual_ao_perfil_do_sistema():
     blocos = blocos_30m([[v[0] * 1000, *v[1:]] for v in velas])
     for k, d in enumerate(r["dias"]):
         p = Perfil([b for b in blocos if b[0] // DIA_MS == T0 // DIA + k], r["tick"])
-        val, vah = p.area_valor()
+        val, vah = p.area_valor(empate="tradingview")
         assert (d["poc"], d["val"], d["vah"]) == pytest.approx((p.poc(), val, vah))
         assert sum(d["contagens"]) == sum(f["tpo"] for f in p.perfil_por_faixa())
         assert d["base_i"] * r["tick"] == pytest.approx(p.perfil_por_faixa()[0]["lo"])
@@ -63,7 +63,7 @@ def test_juntar_igual_ao_merge_do_sistema():
     blocos = blocos_30m([[v[0] * 1000, *v[1:]] for v in velas])
     perfis = [Perfil([b for b in blocos if b[0] // DIA_MS == T0 // DIA + k], r["tick"]) for k in (1, 2, 3)]
     m = merge(perfis, r["tick"])
-    val, vah = m.area_valor()
+    val, vah = m.area_valor(empate="tradingview")
     assert (comp["poc"], comp["val"], comp["vah"]) == pytest.approx((m.poc(), val, vah))
 
 
@@ -87,3 +87,13 @@ def test_preco_na_borda_da_faixa_conta_com_tick_pequeno():
     p = Perfil([(T0 * 1000, 1.201, 1.202, 1.201, 1.202, 1.0)], 0.001)
     base, cont, _ = p._grade()
     assert round(base / 0.001) == 1201 and list(cont) == [1, 1]
+
+
+def test_empate_da_area_de_valor_como_a_tradingview():
+    cont = [0, 4, 10, 8, 4]       # POC na faixa 2; total 26, 70% = 18,2
+    # 1ª: acima 8 × abaixo 4 → acima (faixa 3), soma 18
+    # 2ª: acima 4 (faixa 4, a 2 do POC) = abaixo 4 (faixa 1, a 1 do POC): a TradingView pega a mais perto (abaixo)
+    assert expandir_area(cont, 2, 0.70, "tradingview") == (1, 3)
+    assert expandir_area(cont, 2, 0.70, "acima") == (2, 4)        # a regra antiga, que os robôs seguem usando
+    # mesma distância: a de cima
+    assert expandir_area([0, 5, 9, 5, 0], 2, 0.70, "tradingview") == (2, 3)

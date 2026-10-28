@@ -120,22 +120,11 @@ class Perfil:
         meio = (len(cont) - 1) / 2
         return self.preco_da_faixa(int(candidatas[np.argmin(np.abs(candidatas - meio))]))
 
-    def area_valor(self, pct: float = AREA_VALOR) -> Tuple[float, float]:
-        """(VAL, VAH): a partir do POC, soma o lado com mais blocos até cobrir `pct` do total."""
+    def area_valor(self, pct: float = AREA_VALOR, empate: str = "acima") -> Tuple[float, float]:
+        """(VAL, VAH): a partir do POC, soma o lado com mais blocos até cobrir `pct` do total (ver `expandir_area`)."""
         base, cont, _ = self._grade()
-        total = int(cont.sum())
         i_poc = int(round((self.poc() - base) / self.tick - 0.5))
-        lo = hi = i_poc
-        soma = int(cont[i_poc])
-        while soma < pct * total and (lo > 0 or hi < len(cont) - 1):
-            acima = int(cont[hi + 1]) if hi < len(cont) - 1 else -1
-            abaixo = int(cont[lo - 1]) if lo > 0 else -1
-            if acima >= abaixo:
-                hi += 1
-                soma += max(acima, 0)
-            else:
-                lo -= 1
-                soma += max(abaixo, 0)
+        lo, hi = expandir_area(cont, i_poc, pct, empate)
         return base + lo * self.tick, base + (hi + 1) * self.tick
 
     def niveis(self) -> Dict[str, float]:
@@ -186,6 +175,36 @@ def sessoes(perfil_dia: Perfil) -> Dict[str, Perfil]:
         if bl:
             out[nome] = Perfil(bl, perfil_dia.tick)
     return out
+
+
+def expandir_area(cont: Sequence[int], i_poc: int, pct: float = AREA_VALOR, empate: str = "acima") -> Tuple[int, int]:
+    """
+    Área de valor nas contagens por faixa: começa no POC e, uma faixa por vez, acrescenta a vizinha (logo acima da
+    mais alta ou logo abaixo da mais baixa) com mais blocos, até somar `pct` do total. Devolve (faixa mais baixa,
+    faixa mais alta).
+
+    Empate entre as duas vizinhas:
+      "acima"        sempre a de cima (regra antiga; os robôs e avisos usam esta, para não mudar o que já foi medido);
+      "tradingview"  a mais perto do POC e, na mesma distância, a de cima (a regra do TPO da TradingView).
+    """
+    n = len(cont)
+    total = int(sum(cont))
+    lo = hi = i_poc
+    soma = int(cont[i_poc])
+    while soma < pct * total and (lo > 0 or hi < n - 1):
+        acima = int(cont[hi + 1]) if hi < n - 1 else -1
+        abaixo = int(cont[lo - 1]) if lo > 0 else -1
+        if acima == abaixo and empate == "tradingview":
+            sobe = (hi + 1 - i_poc) <= (i_poc - (lo - 1))
+        else:
+            sobe = acima >= abaixo
+        if sobe:
+            hi += 1
+            soma += max(acima, 0)
+        else:
+            lo -= 1
+            soma += max(abaixo, 0)
+    return lo, hi
 
 
 def merge(perfis: Sequence[Perfil], tick: Optional[float] = None) -> Perfil:

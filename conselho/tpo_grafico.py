@@ -7,6 +7,9 @@ valor de 70% a partir do POC.
 Para o painel desenhar e JUNTAR dias (composto), cada dia vai com a contagem por faixa numa grade única: todas as
 faixas são múltiplos do mesmo `tick`, então somar dois dias é só somar as contagens na mesma posição.
 
+A área de valor usa o desempate da TradingView (a vizinha mais perto do POC; na mesma distância, a de cima), para
+o gráfico bater com o TPO dela. O resto do sistema (robôs e avisos) segue com a regra antiga.
+
 Além disso, para cada POC, VAH e VAL, a hora em que o preço voltou a tocar o nível depois do fim do dia (`toques`);
 None = ainda não voltou (nível virgem: a linha segue até agora).
 
@@ -18,9 +21,11 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional, Sequence
 
-from conselho.tpo import DIA_MS, Perfil, blocos_30m, tick_para
+from conselho.tpo import DIA_MS, Perfil, blocos_30m, expandir_area, tick_para
 
 PASSOS_BONITOS = (1.0, 2.0, 2.5, 5.0, 10.0)
+#: desempate da área de valor no gráfico (ver conselho.tpo.expandir_area)
+EMPATE = "tradingview"
 #: o composto aceita a faixa que o painel recebeu do /tpo, mesmo que o preço tenha andado; menor que 1/10 da atual, não
 TICK_MENOR_ACEITO = 10
 
@@ -67,7 +72,7 @@ def perfis_por_dia(velas_s: Sequence[Sequence[float]], agora_s: int, dias: int =
     for d in chaves:
         p = Perfil(por_dia[d], tick)
         base, cont, _ = p._grade()
-        val, vah = p.area_valor()
+        val, vah = p.area_valor(empate=EMPATE)
         poc = p.poc()
         fim_ms = (d + 1) * DIA_MS
         niveis = {"poc": poc, "vah": vah, "val": val}
@@ -86,7 +91,7 @@ def perfis_por_dia(velas_s: Sequence[Sequence[float]], agora_s: int, dias: int =
 
 def juntar(dias: Sequence[Dict], tick: float) -> Dict:
     """Composto de vários dias da resposta acima: soma as contagens na grade e recalcula POC e área de valor
-    (o mesmo que conselho.tpo.merge, mas a partir das contagens)."""
+    (o mesmo que conselho.tpo.merge, mas a partir das contagens e com o desempate da TradingView)."""
     if not dias:
         raise ValueError("nada para juntar")
     i0 = min(d["base_i"] for d in dias)
@@ -98,17 +103,7 @@ def juntar(dias: Sequence[Dict], tick: float) -> Dict:
     mx = max(cont)
     meio = (len(cont) - 1) / 2
     i_poc = min((i for i, c in enumerate(cont) if c == mx), key=lambda i: abs(i - meio))
-    lo = hi = i_poc
-    soma, total = cont[i_poc], sum(cont)
-    while soma < 0.70 * total and (lo > 0 or hi < len(cont) - 1):
-        acima = cont[hi + 1] if hi < len(cont) - 1 else -1
-        abaixo = cont[lo - 1] if lo > 0 else -1
-        if acima >= abaixo:
-            hi += 1
-            soma += max(acima, 0)
-        else:
-            lo -= 1
-            soma += max(abaixo, 0)
+    lo, hi = expandir_area(cont, i_poc, empate=EMPATE)
     return {"poc": (i0 + i_poc + 0.5) * tick, "val": (i0 + lo) * tick, "vah": (i0 + hi + 1) * tick,
             "base_i": i0, "contagens": cont}
 
