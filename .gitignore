@@ -79,3 +79,6 @@ data/estudo_*.csv
 
 # estado e trades dos robôs em simulação (conselho/servico_robos.py)
 data/robos/
+
+# carteira do Tradeiros em simulacao (conselho/servico_carteira.py)
+data/carteira/

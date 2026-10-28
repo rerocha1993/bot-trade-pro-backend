@@ -6,7 +6,7 @@ API do conselho de avisos (Bot Trade Pro, a partir de 20/10/2026).
 
 Não opera e não guarda nada em banco: lê dados públicos da Bybit e o livro gravado pelo coletor
 (dados/livro/), monta o mapa do dia, gera avisos (data/avisos.jsonl, e Telegram quando configurado) e serve o
-painel em /painel. SERVICO_AVISOS=0 no .env desliga o serviço de avisos e ROBOS=0 os 4 robôs em simulação
+painel em /painel. SERVICO_AVISOS=0 no .env desliga o serviço de avisos e ROBOS=0 os 4 robôs em simulação, CARTEIRA=0 a carteira do Tradeiros em simulação
 (os dois ligados por padrão).
 
 O sistema de robôs antigo foi apagado em 20/10/2026; está no histórico do git até o commit 017692d7.
@@ -25,7 +25,8 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-from api.routes import avisos_routes, fluxo_routes, grafico_routes, mercado_routes, nuvens_routes, robos_routes  # noqa: E402
+from api.routes import (avisos_routes, carteira_routes, fluxo_routes, grafico_routes, mercado_routes,  # noqa: E402
+                        nuvens_routes, robos_routes)
 from conselho.console import preparar_console_servidor  # noqa: E402
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -52,7 +53,17 @@ async def lifespan(app: FastAPI):
             robos.iniciar()
         except Exception as e:
             logger.exception("falha ao ligar os robôs: %s", e)
+    carteira = None
+    if os.getenv("CARTEIRA", "1") != "0":
+        try:
+            from conselho.servico_carteira import get_servico_carteira
+            carteira = get_servico_carteira()
+            carteira.iniciar()
+        except Exception as e:
+            logger.exception("falha ao ligar a carteira: %s", e)
     yield
+    if carteira is not None:
+        carteira.parar()
     if robos is not None:
         robos.parar()
     if avisos is not None:
@@ -80,6 +91,7 @@ app.include_router(nuvens_routes.router, prefix="/api/nuvens", tags=["Nuvens"])
 app.include_router(mercado_routes.router, prefix="/api/mercado", tags=["Mercado"])
 app.include_router(fluxo_routes.router, prefix="/api/fluxo", tags=["Fluxo"])
 app.include_router(robos_routes.router, prefix="/api/robos", tags=["Robôs"])
+app.include_router(carteira_routes.router, prefix="/api/carteira", tags=["Carteira"])
 app.include_router(grafico_routes.router, prefix="/api/grafico", tags=["Gráfico"])
 
 # painel (React + Lightweight Charts): `cd frontend && npm run build` gera frontend/dist, servido em /painel

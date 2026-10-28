@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import type { StatusConselho } from '../api/types'
 import { fmt, pctSigned } from '../lib/format'
 
-const NAV = [['/', 'Mapa e avisos'], ['/grafico', 'Gráfico'], ['/nuvens', 'Nuvens'], ['/robos', 'Robôs']] as const
+const NAV = [['/', 'Mapa e avisos'], ['/grafico', 'Gráfico'], ['/nuvens', 'Nuvens'], ['/robos', 'Robôs'], ['/carteira', 'Carteira']] as const
 
 /** Coletor parado há mais de 5 min = buraco no histórico das nuvens. */
 const COLETOR_ATRASO_S = 300

@@ -140,3 +140,31 @@ export interface TpoDia {
 export interface TpoGrafico { simbolo: string; tick: number; dias: TpoDia[] }
 /** junção de dias seguidos: o mesmo formato de um dia, de `inicio` (1º dia) a `fim` (fim do último) */
 export interface TpoComposto extends TpoDia { simbolo: string; tick: number; n_dias: number }
+
+/* ---- Carteira do Tradeiros em simulação (/api/carteira) ---- */
+export interface OrdemCarteira { preco: number; contratos_usd: number; feita: boolean }
+export interface EstadoCarteira {
+  preco: number; btc_patrimonio: number; hedge_pct: number
+  hedge: { contratos_usd: number; entrada: number; stop: number | null }[]
+  escadas: { tipo: string; regras: string[]; stop: number | null; ordens: OrdemCarteira[] }[]
+  trades: { lado: string; regras: string[]; zona: [number, number] | null; stop: number; alvo: number; armado: boolean
+            contratos_usd: number; medio: number | null; risco_tirado: boolean; ordens: OrdemCarteira[] }[]
+}
+export interface DecisaoCarteira {
+  ts: number; tipo: string; regras: string[]; motivo: string; zona: [number, number] | null
+  stop: number | null; alvo: number | null; risco: number; fracao_hedge: number; hedge_alvo: number
+}
+export interface OperadorCarteira {
+  operador: string; erro?: string; inicio: number; fim: number
+  btc_final: number; ganho_btc_pct: number; retorno_usd_pct: number; hodl_usd_pct: number
+  dd_btc_pct: number; dd_usd_pct: number; dd_hodl_pct: number; hedge_medio_pct: number; hedge_final_pct: number
+  stops_hedge: number; funding_btc: number; taxas_btc: number; trades: number; r_total: number
+  log: DecisaoCarteira[] | null; estado: EstadoCarteira | null
+  lista_trades: { lado: number; dia: number; medio: number; stop: number; alvo: number; saida: string; r: number | null; regras: string[] }[]
+}
+export interface PeriodoBacktest { anos: number[]; btc: number; fixo: number; p95_sorteio: number; percentil: number; vantagem: boolean }
+export interface CarteiraStatus {
+  ultimo: { atualizado_ms: number; inicio_ms: number; fim_ms: number; falhas: string[]; operadores: Record<string, OperadorCarteira> } | null
+  erro: string | null; intervalo_s: number; ativo: boolean
+  backtest: { periodos: Record<string, Record<string, PeriodoBacktest>>; gerado_em: number } | null
+}

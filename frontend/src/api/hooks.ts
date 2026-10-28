@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
-import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoLiquidacoes, FluxoPresos, FundingAgregado, LivroPerp, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo } from './types'
+import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoLiquidacoes, FluxoPresos, FundingAgregado, LivroPerp, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo, CarteiraStatus } from './types'
 import { candlesDaApi } from './adapters'
 
 /** Candles públicos da Bybit, servidos pela API do conselho (timestamp em ms na API, em segundos no gráfico). */
@@ -77,4 +77,9 @@ export const useFunding = () => useQuery({
 export const useLivroPerp = (inicio: number | null, passo = 300) => useQuery({
   queryKey: ['livro-perp', inicio, passo], enabled: inicio !== null, refetchInterval: 60_000,
   queryFn: () => api.get<LivroPerp>('/api/nuvens/perp', { inicio: inicio as number, passo }),
+})
+
+export const useCarteira = () => useQuery({
+  queryKey: ['carteira'], refetchInterval: 60_000,
+  queryFn: () => api.get<CarteiraStatus>('/api/carteira'),
 })

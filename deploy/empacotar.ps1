@@ -23,6 +23,15 @@ foreach ($d in 'conselho', 'api', 'scripts', 'tests', 'deploy') { Copy-Item -Rec
 Copy-Item -Recurse 'frontend\dist' "$dst\frontend\dist"
 Copy-Item 'README.md', '.env.exemplo' $dst
 Get-ChildItem -Recurse -Directory -Filter '__pycache__' $dst | Remove-Item -Recurse -Force
+# a carteira do Tradeiros (conselho/servico_carteira.py) precisa do histórico longo: diário e 4 h da Binance, diário da
+# Bitstamp desde 2011 (graus maiores de Elliott e o topo histórico) e os derivativos; vai junto o resultado do backtest
+New-Item -ItemType Directory -Force "$dst\data\historico" | Out-Null
+foreach ($f in 'BTCUSDT_binance_1d.csv', 'BTCUSDT_binance_4h.csv', 'BTCUSD_bitstamp_1d.csv', 'fear_greed.csv',
+               'funding_bybit.json', 'oi_bybit_1h.json', 'lsr_bybit_1h.json') {
+  if (Test-Path "data\historico\$f") { Copy-Item "data\historico\$f" "$dst\data\historico\$f" }
+}
+if (Test-Path 'data\estudo_tradeiros.json') { Copy-Item 'data\estudo_tradeiros.json' "$dst\data\estudo_tradeiros.json" }
+
 if ($ComDados) {
   # o livro, o livro dos perpétuos e as liquidações inteiros (pequenos e impossíveis de baixar de novo); dos negócios,
   # só os últimos $DiasNegocios dias (o histórico de 2020 em diante é dos estudos, não do painel); e o estado e os

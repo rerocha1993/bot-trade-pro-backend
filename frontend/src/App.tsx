@@ -3,6 +3,7 @@ import { TopBar } from './components/Layout'
 import Avisos from './screens/Avisos'
 import Grafico from './screens/Grafico'
 import Nuvens from './screens/Nuvens'
+import Carteira from './screens/Carteira'
 import Robos from './screens/Robos'
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/grafico" element={<Grafico />} />
           <Route path="/nuvens" element={<Nuvens />} />
           <Route path="/robos" element={<Robos />} />
+          <Route path="/carteira" element={<Carteira />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
