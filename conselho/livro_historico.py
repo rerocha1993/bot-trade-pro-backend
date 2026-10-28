@@ -232,13 +232,14 @@ def _media(valores: List[float]) -> float:
 
 
 def serie_overlay(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EXCHANGES,
-                  raiz: str = PASTA_DADOS, passo_s: int = PASSO_OVERLAY_S) -> Dict:
+                  raiz: str = PASTA_DADOS, passo_s: int = PASSO_OVERLAY_S, amostra: str = "media") -> Dict:
     """
     Série do Order Book Depth Overlay num período, somando as ``exchanges`` escolhidas.
 
     Os snapshots são agrupados em passos de ``passo_s`` segundos (``ts // passo_s * passo_s``, alinhado ao
-    início do candle); dentro de um passo, cada exchange entra com a MÉDIA dos seus snapshots; entre
-    exchanges, soma. Para cada ponto:
+    início do candle); dentro de um passo, cada exchange entra com a MÉDIA dos seus snapshots (``amostra="media"``)
+    ou só com o ÚLTIMO, o do fechamento do candle (``amostra="fechamento"``, como o TRDR: a razão só vale se ficou
+    até o fechamento, o que filtra ordem que aparece e some); entre exchanges, soma. Para cada ponto:
         ts, mid (média dos mids das exchanges presentes), bids[5], asks[5] (BTC por categoria),
         razao[5] (bids/asks; None sem asks), forca[5] ((b-a)/(b+a) em [-1, 1]; 0 sem nada),
         vantagem[5] ('bids' | 'asks' | None), cobertura[5] (exchanges que alcançam a categoria nos dois lados),
@@ -282,6 +283,8 @@ def serie_overlay(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EX
             itens = por_ex.get(ex)
             if not itens:
                 continue
+            if amostra == "fechamento":
+                itens = itens[-1:]
             mids.append(_media([i["mid"] for i in itens]))
             aproximado = aproximado or any(i["aproximado"] for i in itens)
             for k in range(N_CATEGORIAS):

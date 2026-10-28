@@ -138,6 +138,12 @@ def test_serie_overlay_mistura_antigo_e_novo_e_soma_exchanges(tmp_path):
     assert f["coinbase"]["snapshots"] == 2 and f["coinbase"]["aproximados"] == 0 and f["coinbase"]["alcance_bids_pct"] == 0.30
     assert f["binance"]["aproximados"] == 2 and f["binance"]["alcance_asks_pct"] == pytest.approx(0.012)
     assert f["bybit"]["snapshots"] == 1 and f["bybit"]["ultimo_ts"] == T0 + 300
+    # regra do TRDR: só o snapshot do fechamento do candle (o último do passo) conta
+    cl.gravar_snapshot(registro_novo(T0 + 290, "coinbase", 100_000.0, [7, 7, 7, 7, 7], [1, 2, 3, 4, 5]), raiz)
+    fe = lh.serie_overlay(T0, T0 + 600, ("coinbase",), raiz, passo_s=300, amostra="fechamento")["pontos"][0]
+    assert fe["bids"] == pytest.approx([7] * 5) and fe["asks"] == pytest.approx([1, 2, 3, 4, 5])
+    me = lh.serie_overlay(T0, T0 + 600, ("coinbase",), raiz, passo_s=300)["pontos"][0]
+    assert me["bids"][0] == pytest.approx((10 + 10 + 7) / 3)
     # exchange escolhida sem dados no período: ponto não a lista, fonte zerada
     s2 = lh.serie_overlay(T0, T0 + 100, ("bybit",), raiz)
     assert s2["pontos"] == [] and s2["fontes"]["bybit"]["snapshots"] == 0 and s2["fontes"]["bybit"]["alcance_bids_pct"] is None

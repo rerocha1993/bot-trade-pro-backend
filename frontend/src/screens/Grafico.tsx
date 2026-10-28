@@ -9,13 +9,16 @@
  * Juntar dias: com "Juntar dias" ligado (ou segurando Shift), clicar no perfil de um dia e depois no de outro junta
  * todos os dias entre os dois num perfil só (o composto), com POC, VAH e VAL próprios. Fica no endereço como
  * `&j=<início do 1º dia>-<início do último>` (segundos UTC).
+ *
+ * Nuvens (só no COINBASE:BTC-USD): o Order Book Depth Overlay do TRDR desenhado em cada vela, com o livro da Coinbase
+ * (padrão) ou Coinbase + Binance à vista (`&n=spot`, como o "Spot" do TRDR); `&n=0` desliga.
  */
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
-import GraficoTV, { casas, type InfoGrafico } from '../components/chart/GraficoTV'
+import type { NuvensOverlay, SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
+import GraficoTV, { casas, SEGUNDOS, type InfoGrafico } from '../components/chart/GraficoTV'
 import { COR_TPO, type Selecao } from '../components/chart/tpoDesenho'
 
 const PADRAO = { s: 'COINBASE:BTC-USD', t: '30m' }
@@ -29,6 +32,15 @@ const ATALHOS = ['COINBASE:BTC-USD', 'BINANCE:BTC-USDT', 'BINANCE:BTC-USDT:PERP'
 const GUARDADO = 'grafico.ultimo'
 const MOSTRAR_NA_LISTA = 150
 const DIAS_TPO = ['5', '10', '20', '30'] as const
+const COM_NUVEM = 'COINBASE:BTC-USD'
+const LIVROS: Record<string, { exchanges: string; nome: string }> = {
+  cb: { exchanges: 'coinbase', nome: 'Coinbase' }, spot: { exchanges: 'coinbase,binance', nome: 'Coinbase + Binance' },
+}
+/** quanto de livro pedir por tempo gráfico (a API vai até 7 dias) */
+const JANELA_NUVENS_S: Record<string, number> = { '1m': 86400, '5m': 3 * 86400 }
+const SETE_DIAS_S = 7 * 86400
+/** livro mais velho que isso = coletor parado */
+const LIVRO_ATRASADO_S = 300
 /** nesses tempos o dia tem velas demais de largas para o perfil caber: ligar o TPO passa para 30 min */
 const TEMPO_LARGO = ['4h', '1d']
 
@@ -133,8 +145,25 @@ export default function Grafico() {
     try { localStorage.setItem(GUARDADO, JSON.stringify({ s: simbolo, t: tempo })) } catch { /* modo privado */ }
   }, [simbolo, tempo])
 
-  const ir = (s: string, t: string, tpo: string | null = diasTpo, j: Selecao | null = s === simbolo ? selecao : null) =>
-    setParams(!tpo ? { s, t } : j ? { s, t, tpo, j: `${j.de}-${j.ate}` } : { s, t, tpo }, { replace: true })
+  const nuvemParam = params.get('n')
+  const ir = (s: string, t: string, tpo: string | null = diasTpo, j: Selecao | null = s === simbolo ? selecao : null,
+              n: string | null = nuvemParam) => {
+    const novo: Record<string, string> = { s, t }
+    if (tpo) { novo.tpo = tpo; if (j) novo.j = `${j.de}-${j.ate}` }
+    if (n) novo.n = n
+    setParams(novo, { replace: true })
+  }
+  const temNuvem = simbolo === COM_NUVEM
+  const livro = nuvemParam === '0' ? null : LIVROS[nuvemParam ?? 'cb'] ?? LIVROS.cb
+  const nuvensQ = useQuery({
+    queryKey: ['grafico-nuvens', tempo, livro?.exchanges], enabled: temNuvem && !!livro, refetchInterval: 60_000,
+    queryFn: () => api.get<NuvensOverlay>('/api/nuvens/overlay', {
+      inicio: Math.floor(Date.now() / 1000) - (JANELA_NUVENS_S[tempo] ?? SETE_DIAS_S),
+      exchanges: livro!.exchanges, passo: SEGUNDOS[tempo], amostra: 'fechamento',
+    }),
+  })
+  const nuvens = temNuvem && livro && nuvensQ.data?.passo_s === SEGUNDOS[tempo] ? nuvensQ.data : null
+  const atrasoLivro = nuvens?.ultimo_ts ? Math.floor(Date.now() / 1000) - nuvens.ultimo_ts : null
   const tpoQ = useQuery({
     queryKey: ['grafico-tpo', simbolo, diasTpo], enabled: !!diasTpo, refetchInterval: 60_000,
     queryFn: () => api.get<TpoGrafico>('/api/grafico/tpo', { simbolo, dias: diasTpo as string }),
@@ -203,6 +232,16 @@ export default function Grafico() {
               title="Clique no perfil de um dia e depois no de outro para juntar os dias entre eles (ou segure Shift)">Juntar dias</button>
           )}
           {selecao && <button type="button" className="gbotao" onClick={desfazer} title="Desfazer a junção (Esc)">✕ junção</button>}
+          {temNuvem && (
+            <button type="button" className={'gbotao' + (livro ? ' on' : '')} onClick={() => ir(simbolo, tempo, diasTpo, selecao, livro ? '0' : null)}
+              title="Nuvens do livro: o Order Book Depth Overlay do TRDR em cada vela">Nuvens</button>
+          )}
+          {temNuvem && livro && (
+            <select className="gselect" value={nuvemParam === 'spot' ? 'spot' : 'cb'} aria-label="Livro das nuvens"
+              onChange={(e) => ir(simbolo, tempo, diasTpo, selecao, e.target.value === 'cb' ? null : e.target.value)}>
+              {Object.entries(LIVROS).map(([k, v]) => <option key={k} value={k}>{v.nome}</option>)}
+            </select>
+          )}
         </div>
         {ult && (
           <span className="mono gpreco">
@@ -210,7 +249,7 @@ export default function Grafico() {
             {variacao !== null && <span style={{ color: variacao >= 0 ? '#26a69a' : '#ef5350' }}> {variacao >= 0 ? '+' : ''}{(variacao * 100).toFixed(2)}%</span>}
           </span>
         )}
-        <span className="gnota muted">{info?.nuvem ? 'nuvens do livro disponíveis neste par (em breve no gráfico)' : 'sem nuvens: só no BTC-USD da Coinbase'}</span>
+        {!temNuvem && <span className="gnota muted">sem nuvens: só no BTC-USD da Coinbase</span>}
       </div>
       <div className="gatalhos">
         {ATALHOS.map((s) => (
@@ -219,6 +258,18 @@ export default function Grafico() {
           </button>
         ))}
       </div>
+      {temNuvem && livro && (
+        <div className="glegenda-tpo">
+          <span><b style={{ color: 'rgb(38,166,154)' }}>▮ verde abaixo</b>: naquela faixa do livro há 40% ou mais de compra que venda</span>
+          <span><b style={{ color: 'rgb(239,83,80)' }}>▮ vermelho acima</b>: o mesmo para a venda; mais forte = perto do dobro</span>
+          <span className="muted">faixas de 1–2,5%, 2,5–5% e 5–10% do preço · livro {livro.nome} no fechamento de cada vela (regra do TRDR)</span>
+          {nuvensQ.isPending && <span className="muted">lendo o livro…</span>}
+          {nuvensQ.isError && <span className="warn-txt">não deu para ler o livro agora</span>}
+          {nuvens && !nuvens.pontos.length && <span className="warn-txt">sem livro gravado neste período</span>}
+          {atrasoLivro !== null && atrasoLivro > LIVRO_ATRASADO_S && <span className="warn-txt">último livro gravado há {Math.round(atrasoLivro / 60)} min: coletor parado?</span>}
+          {['1m', '5m', '15m'].includes(tempo) && <span className="muted">em tempo curto as faixas ficam fora da tela: arraste a escala de preço (à direita) para ver</span>}
+        </div>
+      )}
       {diasTpo && (
         <div className="glegenda-tpo">
           {tpoQ.isPending && <span className="muted">montando o TPO…</span>}
@@ -242,7 +293,7 @@ export default function Grafico() {
         </div>
       )}
       <div className="card gcaixa">
-        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} onDia={escolherDia} />
+        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} nuvens={nuvens} onDia={escolherDia} />
       </div>
       {escolhendo && <Seletor atual={simbolo} onFechar={() => setEscolhendo(false)} onEscolher={(s) => { setEscolhendo(false); ir(s, tempo) }} />}
     </div>

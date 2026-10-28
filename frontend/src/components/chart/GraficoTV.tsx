@@ -11,7 +11,8 @@ import {
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
-import type { TpoComposto, TpoDia, TpoGrafico, VelasGrafico } from '../../api/types'
+import type { NuvensOverlay, TpoComposto, TpoDia, TpoGrafico, VelasGrafico } from '../../api/types'
+import { NuvensDesenho } from './nuvensDesenho'
 import { TpoDesenho, type Selecao } from './tpoDesenho'
 
 export type Vela = { t: number; o: number; h: number; l: number; c: number; v: number }
@@ -56,6 +57,8 @@ interface Props {
   /** dias escolhidos para juntar e o composto deles (quando já chegou) */
   selecao?: Selecao | null
   composto?: TpoComposto | null
+  /** nuvens do livro (Order Book Depth Overlay do TRDR), um ponto por vela; null = desligadas */
+  nuvens?: NuvensOverlay | null
   /** clique em cima do perfil de um dia (com Shift ou não) */
   onDia?: (dia: TpoDia, shift: boolean) => void
 }
@@ -72,13 +75,14 @@ function indiceDe(d: Vela[], t: number, passo: number): number | null {
   return a + (t - d[a].t) / (d[b].t - d[a].t)
 }
 
-export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, onDia }: Props) {
+export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const vols = useRef<ISeriesApi<'Histogram'> | null>(null)
   const dados = useRef<Vela[]>([])
   const desenhoTpo = useRef<TpoDesenho | null>(null)
+  const desenhoNuvens = useRef<NuvensDesenho | null>(null)
   const passoAtual = useRef(SEGUNDOS[tempo] ?? 60)
   passoAtual.current = SEGUNDOS[tempo] ?? 60
   const estado = useRef({ geracao: 0, buscandoAntigas: false, fimDoHistorico: false, nuvem: false })
@@ -111,7 +115,11 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     const v = c.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false })
     c.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
     const formatar = (p: number) => { const u = dados.current[dados.current.length - 1]; const k = casas(u ? u.c : p); return p.toLocaleString('pt-BR', { minimumFractionDigits: k, maximumFractionDigits: k }) }
-    const tpoDesenho = new TpoDesenho((t) => indiceDe(dados.current, t, passoAtual.current), formatar)
+    const logico = (t: number) => indiceDe(dados.current, t, passoAtual.current)
+    const nuvensDesenho = new NuvensDesenho(logico)
+    s.attachPrimitive(nuvensDesenho)                     // antes do TPO: fica atrás dele
+    desenhoNuvens.current = nuvensDesenho
+    const tpoDesenho = new TpoDesenho(logico, formatar)
     s.attachPrimitive(tpoDesenho)
     desenhoTpo.current = tpoDesenho
     chart.current = c; velas.current = s; vols.current = v
@@ -196,6 +204,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
   }, [simbolo, tempo])
 
   useEffect(() => { desenhoTpo.current?.set(tpo) }, [tpo])
+  useEffect(() => { desenhoNuvens.current?.set(nuvens) }, [nuvens])
   useEffect(() => { desenhoTpo.current?.setJuncao(selecao, composto) }, [selecao, composto])
 
   // vela aberta: pergunta as 2 últimas e atualiza (ou acrescenta quando abre uma nova)

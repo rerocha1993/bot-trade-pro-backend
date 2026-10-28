@@ -9,6 +9,7 @@ import { Header, Page } from '../components/Layout'
 import { Card, Chip, Empty, Err, Estado, Loading, Seg } from '../components/ui'
 import type { ChartHeatmap, ChartLabel, ChartLevel, ChartMarker, ChartRect } from '../lib/chart-tipos'
 import { fmt, preco as fmtPreco } from '../lib/format'
+import { bandasDoPonto, LIVRO_TRDR, RGB_LADO } from '../lib/livroTrdr'
 
 /**
  * Nuvens: mapa de calor do livro agregado (Coinbase + Binance + Bybit) sobre o candle de 5 min.
@@ -117,35 +118,19 @@ function colunasDoModoAbsorcao(ps: PressaoLivro[], evs: EventoAbsorcao[], passo:
   return [...por.entries()].sort((a, b) => a[0] - b[0]).map(([ts, celulas]) => ({ ts, celulas }))
 }
 
-/**
- * Livro inteiro: o Order Book Depth Overlay do TRDR, com as configurações do usuário (vistas no TRDR em 21/10/2026):
- * profundidade de 1% (inclusive) a 10%, só spot (Coinbase + Binance), Ratio Minimum Bids/Asks 40, Opacity Cap 100,
- * escala fixa. Cada faixa de distância (1–2,5%, 2,5–5%, 5–10%) é desenhada sozinha, na sua distância do preço:
- * a verde (compra) aparece abaixo quando há pelo menos 40% MAIS compra que venda naquela faixa; a vermelha (venda),
- * acima, no espelho. A cor tem 20 níveis (como no Style do TRDR): 40% a mais = nível 8, o dobro (100%) ou mais = 20.
- * As paredes de `minimo`x o normal ou mais entram por cima, como as linhas do heatmap.
- */
-const LIVRO = { de: 0.01, ate: 0.10, teto: 100, minCompra: 40, minVenda: 40, niveis: 20, alfaMax: 0.85 }
+/** Livro inteiro: o Order Book Depth Overlay do TRDR (regra em lib/livroTrdr.ts). As paredes de `minimo`x o normal
+ *  ou mais entram por cima, como as linhas do heatmap. */
 const EXCHANGES_SPOT = ['coinbase', 'binance']
 const PAREDE_LIVRO = 8, PAREDE_LIVRO_LONGE = 0.003   // colada no preço vira mancha sobre as velas
-const RGB_LADO = [[38, 166, 154], [239, 83, 80]] as const
-/** quanto um lado passa o outro (em %) → opacidade em 20 degraus; abaixo do mínimo, nada */
-const opacidadeLivro = (aMais: number, minimo: number) => {
-  if (aMais < minimo) return 0
-  const nivel = Math.max(1, Math.ceil(LIVRO.niveis * Math.min(aMais, LIVRO.teto) / LIVRO.teto))
-  return LIVRO.alfaMax * nivel / LIVRO.niveis
-}
 
 function imagemLivro(pontos: NuvensPonto[], categorias: NuvensCategoria[], colunas: { ts: number; mid: number; celulas: CelulaCalor[] }[],
                      passo: number, grade: number, minimo: number): ChartHeatmap | null {
-  const cats = categorias.filter((c) => c.lo >= LIVRO.de - 1e-9 && c.hi <= LIVRO.ate + 1e-9)
-  const ks = cats.map((c) => categorias.indexOf(c))
-  if (!pontos.length || !ks.length || !grade) return null
+  if (!pontos.length || !grade) return null
   const t0 = Math.min(pontos[0].ts, colunas[0]?.ts ?? Infinity)
   const tFim = Math.max(pontos[pontos.length - 1].ts, colunas[colunas.length - 1]?.ts ?? -Infinity)
   const nCols = Math.round((tFim - t0) / passo) + 1
   let pMin = Infinity, pMax = -Infinity
-  for (const p of pontos) { pMin = Math.min(pMin, p.mid * (1 - LIVRO.ate)); pMax = Math.max(pMax, p.mid * (1 + LIVRO.ate)) }
+  for (const p of pontos) { pMin = Math.min(pMin, p.mid * (1 - LIVRO_TRDR.ate)); pMax = Math.max(pMax, p.mid * (1 + LIVRO_TRDR.ate)) }
   const pBase = Math.floor(pMin / grade) * grade
   const nRows = Math.max(1, Math.ceil((pMax - pBase) / grade))
   if (nCols * nRows > 4_000_000) return null
@@ -158,19 +143,10 @@ function imagemLivro(pontos: NuvensPonto[], categorias: NuvensCategoria[], colun
   }
   for (const p of pontos) {
     const ci = Math.round((p.ts - t0) / passo)
-    ks.forEach((k, i) => {
-      const b = p.bids[k] ?? 0, a = p.asks[k] ?? 0
-      if (b <= 0 || a <= 0) return
-      const c = cats[i]
-      for (const lado of [0, 1] as const) {
-        const alfa = lado === 0 ? opacidadeLivro(100 * (b / a - 1), LIVRO.minCompra) : opacidadeLivro(100 * (a / b - 1), LIVRO.minVenda)
-        if (alfa <= 0) continue
-        const [r, g, bl] = RGB_LADO[lado]
-        const lo = lado === 0 ? p.mid * (1 - c.hi) : p.mid * (1 + c.lo)
-        const hi = lado === 0 ? p.mid * (1 - c.lo) : p.mid * (1 + c.hi)
-        for (let preco = Math.ceil(lo / grade) * grade; preco < hi; preco += grade) pinta(ci, preco, r, g, bl, alfa)
-      }
-    })
+    for (const f of bandasDoPonto(p, categorias)) {
+      const [r, g, bl] = RGB_LADO[f.lado]
+      for (let preco = Math.ceil(f.lo / grade) * grade; preco < f.hi; preco += grade) pinta(ci, preco, r, g, bl, f.alfa)
+    }
   }
   for (const c of colunas) {
     const ci = Math.round((c.ts - t0) / passo)
