@@ -2,16 +2,64 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "api",
-      "runtimeExecutable": "C:/Users/Usuario/source/repos/bot_trade/bot_trade/trading_bot_corrigido/.venv/Scripts/python.exe",
-      "runtimeArgs": ["-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000"],
-      "port": 8000
+      "name": "painel-local-sem-robos",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set ROBOS=0&& set SERVICO_AVISOS=0&& .venv\\Scripts\\python -m uvicorn api.main:app --host 127.0.0.1 --port 8020"
+      ],
+      "port": 8020
     },
     {
-      "name": "painel",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1"],
-      "port": 5173
+      "name": "verif-tradeiros-api",
+      "runtimeExecutable": "C:\\Users\\Usuario\\source\\repos\\bot_trade\\bot_trade\\trading_bot_corrigido\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "C:\\Users\\Usuario\\AppData\\Local\\Temp\\claude\\C--Users-Usuario-source-repos-bot-trade-bot-trade-trading-bot-corrigido\\f6c2d38a-6e4c-4208-a595-164509f68250\\scratchpad\\verif_tradeiros_api.py"
+      ],
+      "port": 8010
+    },
+    {
+      "name": "verif-painel",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_API_URL=http://127.0.0.1:8010&& npm --prefix frontend run dev -- --port 5174 --strictPort"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "verif-avisos-api",
+      "runtimeExecutable": "C:\\Users\\Usuario\\source\\repos\\bot_trade\\bot_trade\\trading_bot_corrigido\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "C:\\Users\\Usuario\\AppData\\Local\\Temp\\claude\\C--Users-Usuario-source-repos-bot-trade-bot-trade-trading-bot-corrigido\\2113dffe-7864-448a-b05f-5601da5d6010\\scratchpad\\verif_avisos_api.py"
+      ],
+      "port": 8011
+    },
+    {
+      "name": "verif-painel-avisos",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_API_URL=http://127.0.0.1:8011&& npm --prefix frontend run dev -- --port 5175 --strictPort"
+      ],
+      "port": 5175
+    },
+    {
+      "name": "verif-nuvens-api",
+      "runtimeExecutable": "C:\\Users\\Usuario\\source\\repos\\bot_trade\\bot_trade\\trading_bot_corrigido\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "C:\\Users\\Usuario\\AppData\\Local\\Temp\\claude\\C--Users-Usuario-source-repos-bot-trade-bot-trade-trading-bot-corrigido\\63f1174c-1174-4c9b-8106-8860c0b21a6a\\scratchpad\\verif_nuvens_api.py"
+      ],
+      "port": 8012
+    },
+    {
+      "name": "verif-painel-nuvens",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_API_URL=http://127.0.0.1:8012&& npm --prefix frontend run dev -- --port 5176 --strictPort"
+      ],
+      "port": 5176
     }
   ]
 }

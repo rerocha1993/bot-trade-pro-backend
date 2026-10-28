@@ -275,3 +275,9 @@ button { cursor: pointer; }
   .gatalhos .chip { flex: 0 0 auto; }
   .gsel-fundo { padding-top: 20px; }
 }
+.gferramentas { display: flex; align-items: center; gap: 6px; }
+.gbotao { padding: 7px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.12); background: transparent; color: var(--muted-2); font-family: var(--mono); font-size: 12px; }
+.gbotao:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.24); }
+.gbotao.on { color: #f5c04a; border-color: rgba(245, 192, 74, 0.55); background: rgba(245, 192, 74, 0.08); }
+.gselect { width: auto; padding: 6px 10px; border-radius: 10px; font-size: 12px; }
+.glegenda-tpo { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 11.5px; }

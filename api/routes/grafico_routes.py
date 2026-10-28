@@ -1,6 +1,7 @@
 # api/routes/grafico_routes.py
 """
-Tela Gráfico: velas de qualquer moeda em Coinbase, Binance, Bybit e OKX (conselho/velas.py) e a lista de pares.
+Tela Gráfico: velas de qualquer moeda em Coinbase, Binance, Bybit e OKX (conselho/velas.py), a lista de pares e o
+TPO de 30 min por dia (conselho/tpo_grafico.py).
 
 Velas que já fecharam não mudam: guardadas 30 min. A janela que termina agora vale 2 s, para o painel poder perguntar
 a vela aberta a cada poucos segundos sem martelar a corretora. A lista de pares vale 12 h.
@@ -12,6 +13,7 @@ from collections import OrderedDict
 import requests
 from fastapi import APIRouter, HTTPException, Query
 
+from conselho import tpo_grafico
 from conselho import velas as V
 
 router = APIRouter()
@@ -19,6 +21,8 @@ router = APIRouter()
 CACHE_FECHADAS_S = 1800
 CACHE_AO_VIVO_S = 2
 CACHE_LISTA_S = 12 * 3600
+CACHE_TPO_S = 30
+DIAS_TPO_MAX = 30
 MAX_ITENS = 256
 
 _http = requests.Session()
@@ -81,6 +85,28 @@ def velas(simbolo: str = Query("COINBASE:BTC-USD"), tempo: str = Query("30m"),
     except (requests.RequestException, ValueError) as e:
         raise HTTPException(502, f"{s.corretora} indisponível: {e}")
     return {"simbolo": s.texto, "tempo": tempo, "nuvem": V.tem_nuvem(s), "velas": dados}
+
+
+@router.get("/tpo")
+def tpo(simbolo: str = Query("COINBASE:BTC-USD"), dias: int = Query(10, ge=1, le=DIAS_TPO_MAX)):
+    """TPO de 30 min dos últimos `dias` dias e de hoje: contagem por faixa, POC/VAH/VAL e quando cada nível foi tocado."""
+    try:
+        s = V.ler_simbolo(simbolo)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    def calcular():
+        velas_30m = V.velas(s.texto, "30m", None, (dias + 2) * 48, _http)
+        return tpo_grafico.perfis_por_dia(velas_30m, int(time.time()), dias)
+
+    try:
+        perfis = _guardado(("tpo", s.texto, dias), CACHE_TPO_S, calcular)
+    except requests.HTTPError as e:
+        codigo = e.response.status_code if e.response is not None else 502
+        raise HTTPException(404 if codigo in (400, 404) else 502, f"{s.corretora} recusou {s.texto}: {e}")
+    except (requests.RequestException, ValueError) as e:
+        raise HTTPException(502, f"{s.corretora} indisponível: {e}")
+    return {"simbolo": s.texto, **perfis}
 
 
 @router.get("/simbolos")

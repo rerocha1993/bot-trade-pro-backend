@@ -2,13 +2,17 @@
  * Tela Gráfico: o gráfico no jeito da TradingView para qualquer moeda em Coinbase, Binance, Bybit e OKX (à vista e
  * perpétuo). A moeda e o tempo ficam no endereço (#/grafico?s=COINBASE:BTC-USD&t=30m), então dá para salvar o link.
  * As nuvens do livro só existem no COINBASE:BTC-USD.
+ *
+ * Botão TPO: o perfil de 30 min de cada dia (UTC) no gráfico, com POC, VAH e VAL seguindo até o preço voltar a
+ * tocar; `&tpo=10` no endereço = ligado com 10 dias.
  */
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { SimbolosGrafico } from '../api/types'
+import type { SimbolosGrafico, TpoGrafico } from '../api/types'
 import GraficoTV, { casas, type InfoGrafico } from '../components/chart/GraficoTV'
+import { COR_TPO } from '../components/chart/tpoDesenho'
 
 const PADRAO = { s: 'COINBASE:BTC-USD', t: '30m' }
 const TEMPOS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const
@@ -20,6 +24,9 @@ const CORRETORAS: { id: string; nome: string; perp: boolean }[] = [
 const ATALHOS = ['COINBASE:BTC-USD', 'BINANCE:BTC-USDT', 'BINANCE:BTC-USDT:PERP', 'BYBIT:BTC-USDT:PERP', 'COINBASE:ETH-USD', 'BINANCE:SOL-USDT']
 const GUARDADO = 'grafico.ultimo'
 const MOSTRAR_NA_LISTA = 150
+const DIAS_TPO = ['5', '10', '20', '30'] as const
+/** nesses tempos o dia tem velas demais de largas para o perfil caber: ligar o TPO passa para 30 min */
+const TEMPO_LARGO = ['4h', '1d']
 
 function partes(simbolo: string) {
   const [corretora = '', par = '', perp] = simbolo.split(':')
@@ -103,6 +110,7 @@ export default function Grafico() {
   const guardado = lerGuardado()
   const simbolo = (params.get('s') || guardado?.s || PADRAO.s).toUpperCase()
   const tempo = params.get('t') || guardado?.t || PADRAO.t
+  const diasTpo = params.get('tpo')
   const [escolhendo, setEscolhendo] = useState(false)
   const [info, setInfo] = useState<InfoGrafico | null>(null)
 
@@ -110,7 +118,16 @@ export default function Grafico() {
     try { localStorage.setItem(GUARDADO, JSON.stringify({ s: simbolo, t: tempo })) } catch { /* modo privado */ }
   }, [simbolo, tempo])
 
-  const ir = (s: string, t: string) => setParams({ s, t }, { replace: true })
+  const ir = (s: string, t: string, tpo: string | null = diasTpo) => setParams(tpo ? { s, t, tpo } : { s, t }, { replace: true })
+  const tpoQ = useQuery({
+    queryKey: ['grafico-tpo', simbolo, diasTpo], enabled: !!diasTpo, refetchInterval: 60_000,
+    queryFn: () => api.get<TpoGrafico>('/api/grafico/tpo', { simbolo, dias: diasTpo as string }),
+  })
+  const tpo = diasTpo && tpoQ.data?.simbolo === simbolo ? tpoQ.data : null
+  const ligarTpo = () => {
+    if (diasTpo) ir(simbolo, tempo, null)
+    else ir(simbolo, TEMPO_LARGO.includes(tempo) ? '30m' : tempo, '10')
+  }
   const { corretora, par, perp } = partes(simbolo)
   const ult = info?.ultimo, ant = info?.anterior
   const variacao = ult && ant ? ult.c / ant.c - 1 : null
@@ -129,6 +146,15 @@ export default function Grafico() {
             <button key={t} type="button" className={t === tempo ? 'on' : ''} onClick={() => ir(simbolo, t)}>{ROTULO_TEMPO[t] ?? t}</button>
           ))}
         </div>
+        <div className="gferramentas">
+          <button type="button" className={'gbotao' + (diasTpo ? ' on' : '')} onClick={ligarTpo}
+            title="Perfil de 30 min de cada dia com POC, VAH e VAL">TPO 30m</button>
+          {diasTpo && (
+            <select className="gselect" value={diasTpo} onChange={(e) => ir(simbolo, tempo, e.target.value)} aria-label="Dias de TPO">
+              {DIAS_TPO.map((d) => <option key={d} value={d}>{d} dias</option>)}
+            </select>
+          )}
+        </div>
         {ult && (
           <span className="mono gpreco">
             {ult.c.toLocaleString('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec })}
@@ -144,8 +170,20 @@ export default function Grafico() {
           </button>
         ))}
       </div>
+      {diasTpo && (
+        <div className="glegenda-tpo">
+          {tpoQ.isPending && <span className="muted">montando o TPO…</span>}
+          {tpoQ.isError && <span className="warn-txt">não deu para montar o TPO agora</span>}
+          {tpo && <>
+            <span><b style={{ color: COR_TPO.poc }}>━ POC</b> (onde o preço passou mais tempo)</span>
+            <span><b style={{ color: COR_TPO.borda }}>━ VAH / VAL</b> (topo e fundo dos 70% do tempo)</span>
+            <span className="muted">tracejado = o nível seguindo até o preço voltar; com nome na direita = ainda virgem</span>
+            <span className="muted">faixa de {tpo.tick.toLocaleString('pt-BR', { maximumFractionDigits: 10 })} · dias em UTC (21h de Brasília)</span>
+          </>}
+        </div>
+      )}
       <div className="card gcaixa">
-        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} />
+        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} />
       </div>
       {escolhendo && <Seletor atual={simbolo} onFechar={() => setEscolhendo(false)} onEscolher={(s) => { setEscolhendo(false); ir(s, tempo) }} />}
     </div>

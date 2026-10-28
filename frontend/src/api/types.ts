@@ -129,3 +129,12 @@ export interface LivroPerp {
 export interface VelasGrafico { simbolo: string; tempo: string; nuvem: boolean; velas: number[][] }
 export interface SimboloGrafico { simbolo: string; base: string; cotacao: string }
 export interface SimbolosGrafico { corretora: string; mercado: 'spot' | 'perp'; simbolos: SimboloGrafico[] }
+
+/** TPO de 30 min de um dia UTC na grade do `tick`: faixa k vai de (base_i+k)*tick a (base_i+k+1)*tick.
+ *  `toques`: início (s) da vela de 30 min em que o preço voltou ao nível depois do dia; null = virgem. */
+export interface TpoDia {
+  inicio: number; fim: number; aberto: boolean; base_i: number; contagens: number[]
+  poc: number; vah: number; val: number; maxima: number; minima: number
+  toques: { poc: number | null; vah: number | null; val: number | null }
+}
+export interface TpoGrafico { simbolo: string; tick: number; dias: TpoDia[] }

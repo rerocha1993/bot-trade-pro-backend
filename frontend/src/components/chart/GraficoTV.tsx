@@ -11,7 +11,8 @@ import {
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
-import type { VelasGrafico } from '../../api/types'
+import type { TpoGrafico, VelasGrafico } from '../../api/types'
+import { TpoDesenho } from './tpoDesenho'
 
 export type Vela = { t: number; o: number; h: number; l: number; c: number; v: number }
 
@@ -50,14 +51,31 @@ interface Props {
   onInfo?: (i: InfoGrafico) => void
   /** a vela aberta é perguntada de tanto em tanto (ms) */
   vivoMs?: number
+  /** TPO de 30 min por dia para desenhar no gráfico (null = desligado) */
+  tpo?: TpoGrafico | null
 }
 
-export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000 }: Props) {
+/** Índice de vela (fracionário) do instante t: entre duas velas interpola; antes ou depois dos dados, extrapola pelo
+ *  tamanho da vela. É o que deixa o TPO de um dia desenhar mesmo começando fora do que foi carregado. */
+function indiceDe(d: Vela[], t: number, passo: number): number | null {
+  if (!d.length) return null
+  if (t <= d[0].t) return (t - d[0].t) / passo
+  const n = d.length - 1
+  if (t >= d[n].t) return n + (t - d[n].t) / passo
+  let a = 0, b = n
+  while (b - a > 1) { const m = (a + b) >> 1; if (d[m].t <= t) a = m; else b = m }
+  return a + (t - d[a].t) / (d[b].t - d[a].t)
+}
+
+export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const vols = useRef<ISeriesApi<'Histogram'> | null>(null)
   const dados = useRef<Vela[]>([])
+  const desenhoTpo = useRef<TpoDesenho | null>(null)
+  const passoAtual = useRef(SEGUNDOS[tempo] ?? 60)
+  passoAtual.current = SEGUNDOS[tempo] ?? 60
   const estado = useRef({ geracao: 0, buscandoAntigas: false, fimDoHistorico: false, nuvem: false })
   const avisar = useRef(onInfo)
   avisar.current = onInfo
@@ -85,6 +103,10 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000 }: Pro
     const s = c.addCandlestickSeries({ upColor: ALTA, downColor: BAIXA, borderVisible: false, wickUpColor: ALTA, wickDownColor: BAIXA, priceLineStyle: LineStyle.Dotted })
     const v = c.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false })
     c.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
+    const formatar = (p: number) => { const u = dados.current[dados.current.length - 1]; const k = casas(u ? u.c : p); return p.toLocaleString('pt-BR', { minimumFractionDigits: k, maximumFractionDigits: k }) }
+    const tpoDesenho = new TpoDesenho((t) => indiceDe(dados.current, t, passoAtual.current), formatar)
+    s.attachPrimitive(tpoDesenho)
+    desenhoTpo.current = tpoDesenho
     chart.current = c; velas.current = s; vols.current = v
 
     const aoMover = (p: MouseEventParams<Time>) => {
@@ -160,6 +182,8 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000 }: Pro
     c.timeScale().subscribeVisibleLogicalRangeChange(aoRolar)
     return () => c.timeScale().unsubscribeVisibleLogicalRangeChange(aoRolar)
   }, [simbolo, tempo])
+
+  useEffect(() => { desenhoTpo.current?.set(tpo) }, [tpo])
 
   // vela aberta: pergunta as 2 últimas e atualiza (ou acrescenta quando abre uma nova)
   useEffect(() => {
