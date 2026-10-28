@@ -124,3 +124,8 @@ export interface LivroPerp {
   inicio: number; fim: number; passo_s: number; faixa_pct: number; exchanges: string[]
   velas: { ts: number; exchanges: string[]; bids: number; asks: number }[]
 }
+
+/** Tela Gráfico: velas [início_s, o, h, l, c, v] de qualquer corretora; `nuvem` só no COINBASE:BTC-USD. */
+export interface VelasGrafico { simbolo: string; tempo: string; nuvem: boolean; velas: number[][] }
+export interface SimboloGrafico { simbolo: string; base: string; cotacao: string }
+export interface SimbolosGrafico { corretora: string; mercado: 'spot' | 'perp'; simbolos: SimboloGrafico[] }

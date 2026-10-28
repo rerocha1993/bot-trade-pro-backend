@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { TopBar } from './components/Layout'
 import Avisos from './screens/Avisos'
+import Grafico from './screens/Grafico'
 import Nuvens from './screens/Nuvens'
 import Robos from './screens/Robos'
 
@@ -11,6 +12,7 @@ export default function App() {
       <main className="main">
         <Routes>
           <Route path="/" element={<Avisos />} />
+          <Route path="/grafico" element={<Grafico />} />
           <Route path="/nuvens" element={<Nuvens />} />
           <Route path="/robos" element={<Robos />} />
           <Route path="*" element={<Navigate to="/" replace />} />
