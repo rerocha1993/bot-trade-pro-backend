@@ -281,8 +281,8 @@ export default function Grafico() {
       </div>
       {temNuvem && livro && (
         <div className="glegenda-tpo">
-          <span><b style={{ color: 'rgb(38,166,154)' }}>▮ verde abaixo</b>: naquela faixa do livro há 40% ou mais de compra que venda</span>
-          <span><b style={{ color: 'rgb(239,83,80)' }}>▮ vermelho acima</b>: o mesmo para a venda; mais forte = perto do dobro</span>
+          <span><b style={{ color: 'rgb(38,166,154)' }}>▮ verde abaixo</b>: naquela faixa do livro a compra tem 70% ou mais (ratio 40 do TRDR)</span>
+          <span><b style={{ color: 'rgb(239,83,80)' }}>▮ vermelho acima</b>: o mesmo para a venda; mais forte = mais perto de só um lado</span>
           <span className="muted">faixas de 1–2,5%, 2,5–5% e 5–10% do preço · livro da Coinbase no fechamento de cada vela (regra do TRDR; a Binance não alcança essas faixas)</span>
           {nuvensQ.isPending && <span className="muted">lendo o livro…</span>}
           {nuvensQ.isError && <span className="warn-txt">não deu para ler o livro agora</span>}
