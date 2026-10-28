@@ -22,7 +22,7 @@ export const useAvisosUltimos = (n = 50) => useQuery({
 /** Nuvens do TRDR: overlay por categoria a partir do primeiro candle do gráfico (segundos) e os top levels de agora. */
 export const useNuvensOverlay = (inicio: number | null, exchanges: string, passo = 300) => useQuery({
   queryKey: ['nuvens-overlay', inicio, exchanges, passo], enabled: inicio !== null, refetchInterval: 60_000,
-  queryFn: () => api.get<NuvensOverlay>('/api/nuvens/overlay', { inicio: inicio as number, exchanges, passo }),
+  queryFn: () => api.get<NuvensOverlay>('/api/nuvens/overlay', { inicio: inicio as number, exchanges, passo, alcance: true }),
 })
 
 export const useNuvensTop = (exchanges: string) => useQuery({

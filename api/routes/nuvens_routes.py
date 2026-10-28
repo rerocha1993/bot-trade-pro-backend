@@ -2,7 +2,7 @@
 """
 As "nuvens" do TRDR no painel (conselho/coletor_livro.py grava, conselho/livro_historico.py agrega).
 
-    GET /api/nuvens/overlay?inicio&fim&exchanges&passo&amostra   Order Book Depth Overlay: por passo de tempo, BTC por
+    GET /api/nuvens/overlay?inicio&fim&exchanges&passo&amostra&alcance   Order Book Depth Overlay: por passo de tempo, BTC por
                                                         categoria de distância (0–1%, 1–2,5%, 2,5–5%, 5–10%,
                                                         10–25%) somando as exchanges, razão bids/asks e o lado
                                                         com vantagem; `inicio`/`fim` em segundos (epoch, UTC)
@@ -54,16 +54,19 @@ def overlay(inicio: Optional[int] = Query(None, description="epoch em segundos (
             exchanges: str = Query("coinbase,binance,bybit"),
             passo: int = Query(lh.PASSO_OVERLAY_S, ge=30, le=86400, description="segundos por ponto (300 = candle de 5 min)"),
             amostra: str = Query("media", pattern="^(media|fechamento)$",
-                                 description="media dos snapshots do candle, ou só o do fechamento (regra do TRDR)")) -> Dict:
+                                 description="media dos snapshots do candle, ou só o do fechamento (regra do TRDR)"),
+            alcance: bool = Query(False, description="cada exchange só entra nas faixas que o livro dela alcança")) -> Dict:
     exs = _exchanges(exchanges)
+    if 86400 % passo:
+        raise HTTPException(status_code=400, detail="o passo tem de dividir o dia (60, 300, 900, 1800, 3600, 14400, 86400…)")
     fim_s = int(fim) if fim is not None else int(time.time())
     inicio_s = int(inicio) if inicio is not None else fim_s - 86400
     if inicio_s > fim_s:
         raise HTTPException(status_code=400, detail="inicio depois do fim")
     if fim_s - inicio_s > PERIODO_MAXIMO_S:
         raise HTTPException(status_code=400, detail=f"período máximo de {PERIODO_MAXIMO_S // 86400} dias")
-    pedacos = cache_dias.por_dia(("overlay", tuple(exs), passo, amostra), inicio_s, fim_s,
-                                 lambda a, b: lh.serie_overlay(a, b, exs, passo_s=passo, amostra=amostra))
+    pedacos = cache_dias.por_dia(("overlay", tuple(exs), passo, amostra, alcance), inicio_s, fim_s,
+                                 lambda a, b: lh.serie_overlay(a, b, exs, passo_s=passo, amostra=amostra, so_alcance=alcance))
     serie = juntar_overlay(pedacos, inicio_s)
     return {
         "inicio": inicio_s, "fim": fim_s, "exchanges": exs,
@@ -160,4 +163,4 @@ def juntar_overlay(pedacos: List[Dict], inicio_s: int) -> Dict:
                 g.update(ultimo_ts=f["ultimo_ts"], alcance_bids_pct=f.get("alcance_bids_pct"), alcance_asks_pct=f.get("alcance_asks_pct"))
     return {"passo_s": pedacos[-1]["passo_s"] if pedacos else lh.PASSO_OVERLAY_S,
             "categorias": pedacos[-1]["categorias"] if pedacos else [],
-            "pontos": [pt for p in pedacos for pt in p.get("pontos", []) if pt["ts"] >= inicio_s], "fontes": fontes}
+            "pontos": [pt for p in pedacos for pt in p.get("pontos", []) if pt["ts"] + p["passo_s"] > inicio_s], "fontes": fontes}

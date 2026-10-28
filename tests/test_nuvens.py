@@ -252,3 +252,15 @@ def test_rota_calor(cliente):
     d = r.json()
     assert d["fator_min"] == 3 and d["exchanges"] == ["coinbase"] and d["colunas"] == []   # 3 snapshots: sem base
     assert cliente.get("/api/nuvens/calor", params={"fator": 0.5}).status_code == 422
+
+
+def test_so_alcance_tira_a_exchange_das_faixas_que_o_livro_dela_nao_alcanca(tmp_path):
+    raiz = str(tmp_path)
+    cl.gravar_snapshot(registro_novo(T0, "coinbase", 100_000.0, [10, 20, 30, 40, 50], [5, 20, 10, 40, 10]), raiz)
+    # binance antiga: bids até 1,2%... asks só até 1,2%: alcança só a faixa 0–1% nos dois lados
+    cl.gravar_snapshot(registro_falso(T0, "binance", 100_000.0, [1.0] * 12 + [0.0] * 38, [2.0] * 12 + [0.0] * 38), raiz)
+    todos = lh.serie_overlay(T0, T0 + 300, ("coinbase", "binance"), raiz, passo_s=300)["pontos"][0]
+    so = lh.serie_overlay(T0, T0 + 300, ("coinbase", "binance"), raiz, passo_s=300, so_alcance=True)["pontos"][0]
+    assert todos["bids"][1] == pytest.approx(22) and so["bids"][1] == pytest.approx(20)
+    assert so["bids"][0] == pytest.approx(todos["bids"][0])           # na faixa que ela alcança, continua somando
+    assert so["cobertura"] == todos["cobertura"]

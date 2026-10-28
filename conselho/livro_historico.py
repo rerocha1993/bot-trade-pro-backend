@@ -232,14 +232,17 @@ def _media(valores: List[float]) -> float:
 
 
 def serie_overlay(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EXCHANGES,
-                  raiz: str = PASTA_DADOS, passo_s: int = PASSO_OVERLAY_S, amostra: str = "media") -> Dict:
+                  raiz: str = PASTA_DADOS, passo_s: int = PASSO_OVERLAY_S, amostra: str = "media",
+                  so_alcance: bool = False) -> Dict:
     """
     Série do Order Book Depth Overlay num período, somando as ``exchanges`` escolhidas.
 
     Os snapshots são agrupados em passos de ``passo_s`` segundos (``ts // passo_s * passo_s``, alinhado ao
     início do candle); dentro de um passo, cada exchange entra com a MÉDIA dos seus snapshots (``amostra="media"``)
     ou só com o ÚLTIMO, o do fechamento do candle (``amostra="fechamento"``, como o TRDR: a razão só vale se ficou
-    até o fechamento, o que filtra ordem que aparece e some); entre exchanges, soma. Para cada ponto:
+    até o fechamento, o que filtra ordem que aparece e some); entre exchanges, soma. Com ``so_alcance``, uma
+    exchange só entra na categoria que o livro dela alcança nos dois lados (a Binance pára perto de 1%: sem isso, a
+    faixa de 1–2,5% recebe um pedaço cortado e desigual dela). Para cada ponto:
         ts, mid (média dos mids das exchanges presentes), bids[5], asks[5] (BTC por categoria),
         razao[5] (bids/asks; None sem asks), forca[5] ((b-a)/(b+a) em [-1, 1]; 0 sem nada),
         vantagem[5] ('bids' | 'asks' | None), cobertura[5] (exchanges que alcançam a categoria nos dois lados),
@@ -288,10 +291,13 @@ def serie_overlay(ts_inicio: float, ts_fim: float, exchanges: Iterable[str] = EX
             mids.append(_media([i["mid"] for i in itens]))
             aproximado = aproximado or any(i["aproximado"] for i in itens)
             for k in range(N_CATEGORIAS):
+                alcanca = all(i["alcance"]["bids"][k] and i["alcance"]["asks"][k] for i in itens)
+                if alcanca:
+                    cobertura[k].append(ex)
+                elif so_alcance:
+                    continue
                 bids[k] += _media([i["bids"][k] for i in itens])
                 asks[k] += _media([i["asks"][k] for i in itens])
-                if all(i["alcance"]["bids"][k] and i["alcance"]["asks"][k] for i in itens):
-                    cobertura[k].append(ex)
         razao = [(bids[k] / asks[k]) if asks[k] > 0 else None for k in range(N_CATEGORIAS)]
         forca = [((bids[k] - asks[k]) / (bids[k] + asks[k])) if (bids[k] + asks[k]) > 0 else 0.0
                  for k in range(N_CATEGORIAS)]

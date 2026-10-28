@@ -21,6 +21,8 @@ from typing import Dict, List, Optional, Sequence
 from conselho.tpo import DIA_MS, Perfil, blocos_30m, tick_para
 
 PASSOS_BONITOS = (1.0, 2.0, 2.5, 5.0, 10.0)
+#: o composto aceita a faixa que o painel recebeu do /tpo, mesmo que o preço tenha andado; menor que 1/10 da atual, não
+TICK_MENOR_ACEITO = 10
 
 
 def tick_grafico(preco: float) -> float:
@@ -116,6 +118,8 @@ def composto(velas_s: Sequence[Sequence[float]], agora_s: int, de_s: int, ate_s:
              tick: Optional[float] = None) -> Dict:
     """Junta os dias que começam entre `de_s` e `ate_s` (inclusive). Mesmo formato de um dia de `perfis_por_dia`,
     mais `n_dias`; `inicio`/`fim` vão do começo do primeiro ao fim do último."""
+    if tick is not None and velas_s and tick < tick_grafico(float(velas_s[-1][4])) / TICK_MENOR_ACEITO:
+        raise ValueError("faixa pequena demais para esse preço")       # milhões de faixas por dia: estoura a memória
     r = perfis_por_dia(velas_s, agora_s, dias=len(velas_s), tick=tick)
     escolhidos = [d for d in r["dias"] if de_s <= d["inicio"] <= ate_s]
     if not escolhidos:

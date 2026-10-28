@@ -87,15 +87,21 @@ class Perfil:
     def minima(self) -> float:
         return min(b[3] for b in self.blocos)
 
+    def _faixa(self, preco: float) -> int:
+        """Índice absoluto da faixa (preço // tick). A folga de 1e-9 segura o preço que cai exatamente na borda:
+        com tick < 1 (altcoins), 1,201 / 0,001 dá 1200,9999999999998 e a faixa 1201 se perdia."""
+        return int(np.floor(preco / self.tick + 1e-9))
+
     def _grade(self):
         if "grade" not in self._cache:
-            base = np.floor(self.minima / self.tick) * self.tick
-            n = int(np.floor((self.maxima - base) / self.tick)) + 1
+            i0 = self._faixa(self.minima)
+            base = i0 * self.tick
+            n = self._faixa(self.maxima) - i0 + 1
             cont = np.zeros(n, dtype=int)
             vol = np.zeros(n, dtype=float)
             for _, _, h, l, _, v in self.blocos:
-                a = int(np.floor((l - base) / self.tick))
-                z = int(np.floor((h - base) / self.tick))
+                a = self._faixa(l) - i0
+                z = self._faixa(h) - i0
                 cont[a:z + 1] += 1
                 vol[a:z + 1] += v / (z - a + 1)
             self._cache["grade"] = (base, cont, vol)

@@ -269,13 +269,13 @@ button { cursor: pointer; }
 .gsel-item .gsel-ex { margin-left: auto; font-size: 11px; }
 .gsel-item .tag + .gsel-ex { margin-left: 0; }
 @media (max-width: 900px) {
-  .gtv { height: calc(100vh - 260px); min-height: 360px; }
+  .gtv { height: 70vh; min-height: 360px; }
   .gnota { margin-left: 0; width: 100%; }
   .gatalhos { flex-wrap: nowrap; overflow-x: auto; }
   .gatalhos .chip { flex: 0 0 auto; }
   .gsel-fundo { padding-top: 20px; }
 }
-.gferramentas { display: flex; align-items: center; gap: 6px; }
+.gferramentas { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .gbotao { padding: 7px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.12); background: transparent; color: var(--muted-2); font-family: var(--mono); font-size: 12px; }
 .gbotao:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.24); }
 .gbotao.on { color: #f5c04a; border-color: rgba(245, 192, 74, 0.55); background: rgba(245, 192, 74, 0.08); }

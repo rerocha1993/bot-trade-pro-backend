@@ -163,7 +163,7 @@ function LegendaLivro({ q }: { q: NuvensOverlay | undefined }) {
   const n = q?.pontos.length ?? 0
   return (
     <div style={{ display: 'grid', gap: 6, maxWidth: 640, fontSize: 12 }}>
-      <span>Igual ao <b>Order Book Depth Overlay</b> do TRDR com as suas configurações: livro spot (Coinbase + Binance), faixas de 1–2,5%, 2,5–5% e 5–10% do preço, mínimo de 40, teto de 100, escala fixa.</span>
+      <span>Igual ao <b>Order Book Depth Overlay</b> do TRDR com as suas configurações: livro spot (Coinbase + Binance, cada uma só nas faixas que o livro dela alcança), faixas de 1–2,5%, 2,5–5% e 5–10% do preço, mínimo de 40, teto de 100, escala fixa.</span>
       <span><b style={{ color: 'rgb(38,166,154)' }}>Verde-água abaixo</b>: naquela faixa há pelo menos 40% mais compra que venda; quanto mais forte, mais perto do dobro. <b style={{ color: COR.asks }}>Vermelho acima</b>: o mesmo para a venda. Sem nuvem = livro equilibrado.</span>
       <span><b>Linhas fortes</b>: paredes de {PAREDE_LIVRO}x o normal ou mais, a mais de 0,3% do preço. Para ver todas, use "Todas as paredes".</span>
       <span className="muted">{!q ? 'lendo o livro…' : `${n} velas com livro gravado · `}O livro mostra intenção, não execução: ordem parada pode sumir (spoof). De 1% a 10% quem alcança é a Coinbase; a Binance pára perto de 1%.</span>

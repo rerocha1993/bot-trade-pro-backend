@@ -13,10 +13,13 @@ export const LIVRO_TRDR = { de: 0.01, ate: 0.10, teto: 100, minCompra: 40, minVe
 /** verde-água (compra) e vermelho (venda), as cores das velas */
 export const RGB_LADO = [[38, 166, 154], [239, 83, 80]] as const
 
+/** folga para o ponto flutuante: 100 * (140 / 100 - 1) dá 39,99999999999999 e os 40% exatos não acendiam */
+const FOLGA = 1e-9
+
 /** quanto um lado passa o outro (em %) → opacidade em 20 degraus; abaixo do mínimo, nada */
 export const opacidadeLivro = (aMais: number, minimo: number) => {
-  if (aMais < minimo) return 0
-  const nivel = Math.max(1, Math.ceil(LIVRO_TRDR.niveis * Math.min(aMais, LIVRO_TRDR.teto) / LIVRO_TRDR.teto))
+  if (aMais < minimo - FOLGA) return 0
+  const nivel = Math.max(1, Math.ceil(LIVRO_TRDR.niveis * Math.min(aMais, LIVRO_TRDR.teto) / LIVRO_TRDR.teto - FOLGA))
   return LIVRO_TRDR.alfaMax * nivel / LIVRO_TRDR.niveis
 }
 

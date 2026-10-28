@@ -80,3 +80,10 @@ def test_composto_junta_os_dias_do_intervalo_e_conta_toques_depois_do_ultimo():
         assert t == (depois[0][0] if depois else None)
     with pytest.raises(ValueError):
         composto(velas, agora, T0 + 20 * DIA, T0 + 21 * DIA, r["tick"])
+
+
+def test_preco_na_borda_da_faixa_conta_com_tick_pequeno():
+    # tick 0,001: 1,201 / 0,001 dá 1200,9999999999998 em ponto flutuante; a faixa 1201 tem de contar
+    p = Perfil([(T0 * 1000, 1.201, 1.202, 1.201, 1.202, 1.0)], 0.001)
+    base, cont, _ = p._grade()
+    assert round(base / 0.001) == 1201 and list(cont) == [1, 1]

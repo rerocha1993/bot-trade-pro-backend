@@ -25,6 +25,9 @@ const N_INICIAL = 800
 const N_ANTIGAS = 600
 const VELAS_NA_TELA = 160
 const CARREGAR_QUANDO_FALTAM = 30
+/** o ponteiro andou menos que isso entre apertar e soltar: é clique */
+const ARRASTO_PX = 5
+const N_MAX_API = 2000
 const ALTA = '#26a69a', BAIXA = '#ef5350'
 
 /** Casas decimais pelo tamanho do preço: BTC com 2, moedas de centavos com 4 a 6, memecoins com até 10. */
@@ -132,14 +135,25 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       setLegenda({ t, o: k.open, h: k.high, l: k.low, c: k.close, v: achada?.v ?? 0 })
     }
     c.subscribeCrosshairMove(aoMover)
-    const aoClicar = (p: MouseEventParams<Time>) => {
-      const dia = p.point ? tpoDesenho.diaEm(p.point.x) : null
-      if (dia) aoEscolherDia.current?.(dia, !!p.sourceEvent?.shiftKey)
+    // clique pelo ponteiro, não pelo subscribeClick: a biblioteca descarta o 2º clique se vier em menos de 0,5 s
+    // (vira duplo clique), e juntar dois dias é justamente clicar num e logo no outro
+    const caixa = el.current
+    let apertou: { x: number; y: number } | null = null
+    const aoApertar = (e: PointerEvent) => { apertou = e.button === 0 ? { x: e.clientX, y: e.clientY } : null }
+    const aoSoltar = (e: PointerEvent) => {
+      const a = apertou
+      apertou = null
+      if (!a || Math.hypot(e.clientX - a.x, e.clientY - a.y) > ARRASTO_PX) return     // foi arrasto, não clique
+      const x = e.clientX - caixa.getBoundingClientRect().left
+      if (x > c.timeScale().width()) return                                            // em cima da escala de preço
+      const dia = tpoDesenho.diaEm(x)
+      if (dia) aoEscolherDia.current?.(dia, e.shiftKey)
     }
-    c.subscribeClick(aoClicar)
+    caixa.addEventListener('pointerdown', aoApertar)
+    caixa.addEventListener('pointerup', aoSoltar)
     const ro = new ResizeObserver(() => { if (el.current) c.applyOptions({ width: el.current.clientWidth, height: el.current.clientHeight }) })
     ro.observe(el.current)
-    return () => { ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); c.unsubscribeClick(aoClicar); c.remove(); chart.current = null; velas.current = null; vols.current = null }
+    return () => { ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); caixa.removeEventListener('pointerdown', aoApertar); caixa.removeEventListener('pointerup', aoSoltar); c.remove(); chart.current = null; velas.current = null; vols.current = null }
   }, [])
 
   // trocar de moeda ou de tempo: zera e busca de novo
@@ -151,6 +165,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     estado.current.fimDoHistorico = false
     dados.current = []
     s.setData([]); v.setData([])
+    s.priceScale().applyOptions({ autoScale: true })      // arrastar a escala desliga; moeda nova começa ajustada
     setErro(null); setCarregando(true); setLegenda(null)
     avisar.current?.({ ultimo: null, anterior: null, nuvem: false, erro: null, carregando: true })
 
@@ -212,7 +227,11 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     const id = setInterval(() => {
       const geracao = estado.current.geracao
       if (!dados.current.length || document.hidden) return
-      buscar(simbolo, tempo, 2).then((r) => {
+      const passo = SEGUNDOS[tempo]
+      const ultima = dados.current[dados.current.length - 1].t
+      // aba escondida, PC dormindo ou rede fora: pede todas as velas desde a última conhecida, senão o vão some
+      const faltam = Math.min(N_MAX_API, Math.ceil((Date.now() / 1000 - ultima) / passo) + 1)
+      buscar(simbolo, tempo, Math.max(2, faltam)).then((r) => {
         if (geracao !== estado.current.geracao) return
         for (const k of r.velas.map(daApi)) {
           const d = dados.current, ult = d[d.length - 1]
