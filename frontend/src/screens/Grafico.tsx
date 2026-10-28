@@ -5,14 +5,18 @@
  *
  * Botão TPO: o perfil de 30 min de cada dia (UTC) no gráfico, com POC, VAH e VAL seguindo até o preço voltar a
  * tocar; `&tpo=10` no endereço = ligado com 10 dias.
+ *
+ * Juntar dias: com "Juntar dias" ligado (ou segurando Shift), clicar no perfil de um dia e depois no de outro junta
+ * todos os dias entre os dois num perfil só (o composto), com POC, VAH e VAL próprios. Fica no endereço como
+ * `&j=<início do 1º dia>-<início do último>` (segundos UTC).
  */
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { SimbolosGrafico, TpoGrafico } from '../api/types'
+import type { SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
 import GraficoTV, { casas, type InfoGrafico } from '../components/chart/GraficoTV'
-import { COR_TPO } from '../components/chart/tpoDesenho'
+import { COR_TPO, type Selecao } from '../components/chart/tpoDesenho'
 
 const PADRAO = { s: 'COINBASE:BTC-USD', t: '30m' }
 const TEMPOS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const
@@ -32,6 +36,15 @@ function partes(simbolo: string) {
   const [corretora = '', par = '', perp] = simbolo.split(':')
   return { corretora, par, perp: perp === 'PERP' }
 }
+
+function lerJuncao(j: string | null): Selecao | null {
+  const m = j?.match(/^(\d+)-(\d+)$/)
+  if (!m) return null
+  const a = Number(m[1]), b = Number(m[2])
+  return { de: Math.min(a, b), ate: Math.max(a, b) }
+}
+
+const ddmm = (t: number) => { const d = new Date(t * 1000); return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}` }
 
 function lerGuardado(): { s: string; t: string } | null {
   try { const v = JSON.parse(localStorage.getItem(GUARDADO) || 'null'); return v?.s && v?.t ? v : null } catch { return null }
@@ -111,27 +124,58 @@ export default function Grafico() {
   const simbolo = (params.get('s') || guardado?.s || PADRAO.s).toUpperCase()
   const tempo = params.get('t') || guardado?.t || PADRAO.t
   const diasTpo = params.get('tpo')
+  const selecao = useMemo(() => (diasTpo ? lerJuncao(params.get('j')) : null), [diasTpo, params])
   const [escolhendo, setEscolhendo] = useState(false)
+  const [juntando, setJuntando] = useState(false)
   const [info, setInfo] = useState<InfoGrafico | null>(null)
 
   useEffect(() => {
     try { localStorage.setItem(GUARDADO, JSON.stringify({ s: simbolo, t: tempo })) } catch { /* modo privado */ }
   }, [simbolo, tempo])
 
-  const ir = (s: string, t: string, tpo: string | null = diasTpo) => setParams(tpo ? { s, t, tpo } : { s, t }, { replace: true })
+  const ir = (s: string, t: string, tpo: string | null = diasTpo, j: Selecao | null = s === simbolo ? selecao : null) =>
+    setParams(!tpo ? { s, t } : j ? { s, t, tpo, j: `${j.de}-${j.ate}` } : { s, t, tpo }, { replace: true })
   const tpoQ = useQuery({
     queryKey: ['grafico-tpo', simbolo, diasTpo], enabled: !!diasTpo, refetchInterval: 60_000,
     queryFn: () => api.get<TpoGrafico>('/api/grafico/tpo', { simbolo, dias: diasTpo as string }),
   })
   const tpo = diasTpo && tpoQ.data?.simbolo === simbolo ? tpoQ.data : null
+  const umDiaSo = !selecao || selecao.de === selecao.ate
+  const compQ = useQuery({
+    queryKey: ['grafico-tpo-composto', simbolo, selecao?.de, selecao?.ate, tpo?.tick],
+    enabled: !!tpo && !umDiaSo, refetchInterval: 60_000,
+    queryFn: () => api.get<TpoComposto>('/api/grafico/tpo/composto',
+      { simbolo, de: selecao!.de, ate: selecao!.ate, tick: tpo!.tick }),
+  })
+  const composto = !umDiaSo && compQ.data?.simbolo === simbolo && compQ.data.inicio === selecao!.de ? compQ.data : null
+
+  // 1º clique marca o dia; o 2º junta tudo entre os dois; clicar de novo no mesmo dia desmarca
+  const escolherDia = (d: TpoDia, shift: boolean) => {
+    if (!juntando && !shift) return
+    if (selecao && umDiaSo) {
+      if (d.inicio === selecao.de) ir(simbolo, tempo, diasTpo, null)
+      else { ir(simbolo, tempo, diasTpo, { de: Math.min(d.inicio, selecao.de), ate: Math.max(d.inicio, selecao.de) }); setJuntando(false) }
+    } else ir(simbolo, tempo, diasTpo, { de: d.inicio, ate: d.inicio })
+  }
+  const desfazer = useCallback(() => {
+    setJuntando(false)
+    setParams((p) => { const n = new URLSearchParams(p); n.delete('j'); return n }, { replace: true })
+  }, [setParams])
+  useEffect(() => {
+    if (!selecao && !juntando) return
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !escolhendo) desfazer() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [selecao, juntando, escolhendo, desfazer])
   const ligarTpo = () => {
-    if (diasTpo) ir(simbolo, tempo, null)
+    if (diasTpo) { setJuntando(false); ir(simbolo, tempo, null) }
     else ir(simbolo, TEMPO_LARGO.includes(tempo) ? '30m' : tempo, '10')
   }
   const { corretora, par, perp } = partes(simbolo)
   const ult = info?.ultimo, ant = info?.anterior
   const variacao = ult && ant ? ult.c / ant.c - 1 : null
   const dec = ult ? casas(ult.c) : 2
+  const fmt = (p: number) => p.toLocaleString('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec })
 
   return (
     <div className="gpag">
@@ -154,6 +198,11 @@ export default function Grafico() {
               {DIAS_TPO.map((d) => <option key={d} value={d}>{d} dias</option>)}
             </select>
           )}
+          {diasTpo && (
+            <button type="button" className={'gbotao' + (juntando ? ' on' : '')} onClick={() => setJuntando((v) => !v)}
+              title="Clique no perfil de um dia e depois no de outro para juntar os dias entre eles (ou segure Shift)">Juntar dias</button>
+          )}
+          {selecao && <button type="button" className="gbotao" onClick={desfazer} title="Desfazer a junção (Esc)">✕ junção</button>}
         </div>
         {ult && (
           <span className="mono gpreco">
@@ -174,6 +223,16 @@ export default function Grafico() {
         <div className="glegenda-tpo">
           {tpoQ.isPending && <span className="muted">montando o TPO…</span>}
           {tpoQ.isError && <span className="warn-txt">não deu para montar o TPO agora</span>}
+          {tpo && selecao && umDiaSo && <span className="gjuncao">dia {ddmm(selecao.de)} marcado: clique no perfil do outro dia para juntar</span>}
+          {tpo && !selecao && juntando && <span className="gjuncao">clique no perfil do primeiro dia</span>}
+          {!umDiaSo && compQ.isError && <span className="warn-txt">não deu para juntar esses dias agora</span>}
+          {composto && (
+            <span className="gjuncao mono">
+              Junção {ddmm(composto.inicio)}–{ddmm(composto.fim - 1)} ({composto.n_dias} dias):{' '}
+              <b style={{ color: COR_TPO.poc }}>POC {fmt(composto.poc)}</b> · <b style={{ color: COR_TPO.borda }}>VAH {fmt(composto.vah)}</b>{' '}
+              · <b style={{ color: COR_TPO.borda }}>VAL {fmt(composto.val)}</b>
+            </span>
+          )}
           {tpo && <>
             <span><b style={{ color: COR_TPO.poc }}>━ POC</b> (onde o preço passou mais tempo)</span>
             <span><b style={{ color: COR_TPO.borda }}>━ VAH / VAL</b> (topo e fundo dos 70% do tempo)</span>
@@ -183,7 +242,7 @@ export default function Grafico() {
         </div>
       )}
       <div className="card gcaixa">
-        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} />
+        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} onDia={escolherDia} />
       </div>
       {escolhendo && <Seletor atual={simbolo} onFechar={() => setEscolhendo(false)} onEscolher={(s) => { setEscolhendo(false); ir(s, tempo) }} />}
     </div>

@@ -3,7 +3,7 @@ import random
 import pytest
 
 from conselho.tpo import DIA_MS, Perfil, blocos_30m, merge
-from conselho.tpo_grafico import juntar, perfis_por_dia, tick_grafico
+from conselho.tpo_grafico import composto, juntar, perfis_por_dia, tick_grafico
 
 DIA = DIA_MS // 1000
 T0 = 1_792_800_000 - 1_792_800_000 % DIA          # meia-noite UTC
@@ -65,3 +65,18 @@ def test_juntar_igual_ao_merge_do_sistema():
     m = merge(perfis, r["tick"])
     val, vah = m.area_valor()
     assert (comp["poc"], comp["val"], comp["vah"]) == pytest.approx((m.poc(), val, vah))
+
+
+def test_composto_junta_os_dias_do_intervalo_e_conta_toques_depois_do_ultimo():
+    velas = _velas(6, semente=3)
+    agora = T0 + 6 * DIA - 60
+    r = perfis_por_dia(velas, agora_s=agora, dias=10)
+    c = composto(velas, agora, T0 + DIA, T0 + 3 * DIA, r["tick"])
+    esperado = juntar(r["dias"][1:4], r["tick"])
+    assert c["n_dias"] == 3 and (c["inicio"], c["fim"]) == (T0 + DIA, T0 + 4 * DIA) and not c["aberto"]
+    assert (c["poc"], c["val"], c["vah"]) == pytest.approx((esperado["poc"], esperado["val"], esperado["vah"]))
+    for nome, t in c["toques"].items():
+        depois = [v for v in velas if v[0] >= c["fim"] and v[3] <= c[nome] <= v[2]]
+        assert t == (depois[0][0] if depois else None)
+    with pytest.raises(ValueError):
+        composto(velas, agora, T0 + 20 * DIA, T0 + 21 * DIA, r["tick"])

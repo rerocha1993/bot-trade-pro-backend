@@ -3,12 +3,15 @@
  * o perfil de cada dia encostado no começo do dia, a área de valor mais clara, a faixa do POC em amarelo, e as linhas
  * de POC, VAH e VAL atravessando o dia e seguindo (tracejadas) até o preço voltar a tocar. Nível que ninguém tocou
  * ainda (virgem) vai até a borda direita, com o nome e a data.
+ *
+ * Junção: os dias escolhidos (`selecao`) ficam marcados; quando o composto deles chega, os perfis desses dias somem e
+ * no lugar entra um perfil só, do começo do primeiro ao fim do último, com POC, VAH e VAL próprios.
  */
 import type {
   IChartApi, ISeriesApi, ISeriesPrimitive, ISeriesPrimitivePaneRenderer, ISeriesPrimitivePaneView, Logical,
   SeriesAttachedParameter, Time,
 } from 'lightweight-charts'
-import type { TpoDia, TpoGrafico } from '../../api/types'
+import type { TpoComposto, TpoDia, TpoGrafico } from '../../api/types'
 
 type Alvo = Parameters<ISeriesPrimitivePaneRenderer['draw']>[0]
 
@@ -18,7 +21,12 @@ export const COR_TPO = {
   valor: 'rgba(127,216,222,0.30)',
   fora: 'rgba(127,216,222,0.11)',
   pocFaixa: 'rgba(245,192,74,0.70)',
+  selecao: 'rgba(245,192,74,0.06)',
+  selecaoBorda: 'rgba(245,192,74,0.55)',
 }
+/** dias escolhidos para juntar: início (s) do primeiro e do último */
+export type Selecao = { de: number; ate: number }
+type Rotulo = { y: number; texto: string; cor: string }
 /** o perfil ocupa no máximo esta fração da largura do dia */
 const LARGURA_PERFIL = 0.82
 const FONTE = "10.5px 'DM Mono', monospace"
@@ -30,6 +38,8 @@ export class TpoDesenho implements ISeriesPrimitive<Time> {
   private series: ISeriesApi<'Candlestick'> | null = null
   private pedirDesenho: (() => void) | null = null
   private dados: TpoGrafico | null = null
+  private selecao: Selecao | null = null
+  private composto: TpoComposto | null = null
   private view: ISeriesPrimitivePaneView = {
     zOrder: () => 'bottom',
     renderer: () => ({ draw: (alvo: Alvo) => this.desenhar(alvo) }),
@@ -53,6 +63,20 @@ export class TpoDesenho implements ISeriesPrimitive<Time> {
   paneViews() { return [this.view] }
   updateAllViews() { /* desenha direto no draw */ }
   set(d: TpoGrafico | null) { this.dados = d; this.pedirDesenho?.() }
+  setJuncao(selecao: Selecao | null, composto: TpoComposto | null) {
+    this.selecao = selecao; this.composto = composto; this.pedirDesenho?.()
+  }
+
+  /** o dia cujo perfil está na coluna x (coordenada do gráfico), para o clique escolher o dia */
+  diaEm(x: number): TpoDia | null {
+    if (!this.dados || !this.chart) return null
+    const meia = this.chart.timeScale().options().barSpacing / 2
+    for (const d of this.dados.dias) {
+      const xi = this.x(d.inicio), xf = this.x(d.fim)
+      if (xi !== null && xf !== null && x >= xi - meia && x < xf - meia) return d
+    }
+    return null
+  }
 
   private x(t: number): number | null {
     const l = this.logico(t)
@@ -72,14 +96,27 @@ export class TpoDesenho implements ISeriesPrimitive<Time> {
       const W = mediaSize.width
       ctx.save()
       ctx.beginPath(); ctx.rect(0, 0, W, mediaSize.height); ctx.clip()
-      const maxCont = Math.max(1, ...tpo.dias.map((d) => Math.max(...d.contagens)))
-      const rotulos: { y: number; texto: string; cor: string }[] = []
-      for (const d of tpo.dias) {
+      const sel = this.selecao
+      const dentro = (d: TpoDia) => !!sel && d.inicio >= sel.de && d.inicio <= sel.ate
+      const comp = sel && this.composto && this.composto.inicio === sel.de && this.composto.n_dias > 1 ? this.composto : null
+      const soltos = comp ? tpo.dias.filter((d) => !dentro(d)) : tpo.dias
+      const maxCont = Math.max(1, ...soltos.map((d) => Math.max(...d.contagens)))
+      const rotulos: Rotulo[] = []
+      if (sel) this.marcarSelecao(ctx, sel, tpo.dias, meia, mediaSize.height)
+      for (const d of soltos) {
         const xi = this.x(d.inicio), xf = this.x(d.fim)
         if (xi === null || xf === null) continue
         const x0 = xi - meia, x1 = xf - meia
         if (x0 < W && x1 > 0) this.perfil(ctx, d, tpo.tick, x0, x1, maxCont)
-        this.linhas(ctx, d, x0, x1, W, rotulos)
+        this.linhas(ctx, d, x0, x1, W, rotulos, ddmm(d.inicio))
+      }
+      if (comp) {
+        const xi = this.x(comp.inicio), xf = this.x(comp.fim)
+        if (xi !== null && xf !== null) {
+          const x0 = xi - meia, x1 = xf - meia
+          if (x0 < W && x1 > 0) this.perfil(ctx, comp, tpo.tick, x0, x1, Math.max(1, ...comp.contagens))
+          this.linhas(ctx, comp, x0, x1, W, rotulos, `${ddmm(comp.inicio)}–${ddmm(comp.fim - 1)}`)
+        }
       }
       // nome dos níveis virgens na borda direita, sem um em cima do outro
       ctx.font = FONTE; ctx.textBaseline = 'middle'; ctx.textAlign = 'right'
@@ -97,6 +134,19 @@ export class TpoDesenho implements ISeriesPrimitive<Time> {
     })
   }
 
+  /** faixa clara com borda tracejada em volta dos dias escolhidos */
+  private marcarSelecao(ctx: CanvasRenderingContext2D, sel: Selecao, dias: TpoDia[], meia: number, H: number) {
+    const ultimo = dias.filter((d) => d.inicio <= sel.ate).pop()
+    const xi = this.x(sel.de), xf = ultimo ? this.x(ultimo.fim) : null
+    if (xi === null || xf === null) return
+    const x0 = xi - meia, x1 = xf - meia
+    ctx.fillStyle = COR_TPO.selecao
+    ctx.fillRect(x0, 0, x1 - x0, H)
+    ctx.strokeStyle = COR_TPO.selecaoBorda; ctx.lineWidth = 1; ctx.setLineDash([3, 4])
+    ctx.beginPath(); ctx.moveTo(x0 + 0.5, 0); ctx.lineTo(x0 + 0.5, H); ctx.moveTo(x1 - 0.5, 0); ctx.lineTo(x1 - 0.5, H); ctx.stroke()
+    ctx.setLineDash([])
+  }
+
   private perfil(ctx: CanvasRenderingContext2D, d: TpoDia, tick: number, x0: number, x1: number, maxCont: number) {
     const porTpo = ((x1 - x0) * LARGURA_PERFIL) / maxCont
     const iPoc = Math.floor(d.poc / tick + 1e-9) - d.base_i
@@ -112,8 +162,7 @@ export class TpoDesenho implements ISeriesPrimitive<Time> {
     })
   }
 
-  private linhas(ctx: CanvasRenderingContext2D, d: TpoDia, x0: number, x1: number, W: number,
-    rotulos: { y: number; texto: string; cor: string }[]) {
+  private linhas(ctx: CanvasRenderingContext2D, d: TpoDia, x0: number, x1: number, W: number, rotulos: Rotulo[], quando: string) {
     for (const nome of ['vah', 'val', 'poc'] as const) {
       const y = this.y(d[nome])
       if (y === null) continue
@@ -129,7 +178,7 @@ export class TpoDesenho implements ISeriesPrimitive<Time> {
       ctx.globalAlpha = 0.75; ctx.lineWidth = 1; ctx.setLineDash([4, 4])
       ctx.beginPath(); ctx.moveTo(Math.max(x1, -10), y); ctx.lineTo(Math.min(xt, W), y); ctx.stroke()
       ctx.globalAlpha = 1; ctx.setLineDash([])
-      if (toque === null) rotulos.push({ y, cor, texto: `${nome.toUpperCase()} ${ddmm(d.inicio)} ${this.formatar(d[nome])}` })
+      if (toque === null) rotulos.push({ y, cor, texto: `${nome.toUpperCase()} ${quando} ${this.formatar(d[nome])}` })
     }
   }
 }

@@ -1,7 +1,7 @@
 # api/routes/grafico_routes.py
 """
 Tela Gráfico: velas de qualquer moeda em Coinbase, Binance, Bybit e OKX (conselho/velas.py), a lista de pares e o
-TPO de 30 min por dia (conselho/tpo_grafico.py).
+TPO de 30 min por dia e a junção de dias escolhidos no gráfico (conselho/tpo_grafico.py).
 
 Velas que já fecharam não mudam: guardadas 30 min. A janela que termina agora vale 2 s, para o painel poder perguntar
 a vela aberta a cada poucos segundos sem martelar a corretora. A lista de pares vale 12 h.
@@ -107,6 +107,37 @@ def tpo(simbolo: str = Query("COINBASE:BTC-USD"), dias: int = Query(10, ge=1, le
     except (requests.RequestException, ValueError) as e:
         raise HTTPException(502, f"{s.corretora} indisponível: {e}")
     return {"simbolo": s.texto, **perfis}
+
+
+@router.get("/tpo/composto")
+def tpo_composto(simbolo: str = Query("COINBASE:BTC-USD"),
+                 de: int = Query(..., description="início (s, 00:00 UTC) do primeiro dia"),
+                 ate: int = Query(..., description="início (s, 00:00 UTC) do último dia"),
+                 tick: float = Query(None, gt=0, description="a mesma faixa do /tpo, para a grade bater")):
+    """Junção (composto) dos dias de `de` até `ate`: contagem somada, POC/VAH/VAL próprios e toques depois do fim."""
+    try:
+        s = V.ler_simbolo(simbolo)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    agora = int(time.time())
+    de, ate = min(de, ate), max(de, ate)
+    if agora - de > (DIAS_TPO_MAX + 1) * 86400:
+        raise HTTPException(400, f"só dá para juntar dias dos últimos {DIAS_TPO_MAX}")
+
+    def calcular():
+        n = (agora - de) // 1800 + 96
+        velas_30m = V.velas(s.texto, "30m", None, n, _http)
+        return tpo_grafico.composto(velas_30m, agora, de, ate, tick)
+
+    try:
+        return {"simbolo": s.texto, **_guardado(("composto", s.texto, de, ate, tick), CACHE_TPO_S, calcular)}
+    except requests.HTTPError as e:
+        codigo = e.response.status_code if e.response is not None else 502
+        raise HTTPException(404 if codigo in (400, 404) else 502, f"{s.corretora} recusou {s.texto}: {e}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except requests.RequestException as e:
+        raise HTTPException(502, f"{s.corretora} indisponível: {e}")
 
 
 @router.get("/simbolos")

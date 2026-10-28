@@ -138,3 +138,5 @@ export interface TpoDia {
   toques: { poc: number | null; vah: number | null; val: number | null }
 }
 export interface TpoGrafico { simbolo: string; tick: number; dias: TpoDia[] }
+/** junção de dias seguidos: o mesmo formato de um dia, de `inicio` (1º dia) a `fim` (fim do último) */
+export interface TpoComposto extends TpoDia { simbolo: string; tick: number; n_dias: number }

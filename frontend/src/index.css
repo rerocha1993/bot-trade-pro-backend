@@ -281,3 +281,4 @@ button { cursor: pointer; }
 .gbotao.on { color: #f5c04a; border-color: rgba(245, 192, 74, 0.55); background: rgba(245, 192, 74, 0.08); }
 .gselect { width: auto; padding: 6px 10px; border-radius: 10px; font-size: 12px; }
 .glegenda-tpo { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 11.5px; }
+.glegenda-tpo .gjuncao { color: #f5c04a; flex-basis: 100%; }

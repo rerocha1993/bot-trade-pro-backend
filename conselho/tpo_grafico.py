@@ -9,6 +9,9 @@ faixas são múltiplos do mesmo `tick`, então somar dois dias é só somar as c
 
 Além disso, para cada POC, VAH e VAL, a hora em que o preço voltou a tocar o nível depois do fim do dia (`toques`);
 None = ainda não voltou (nível virgem: a linha segue até agora).
+
+`composto()` junta dias seguidos escolhidos no gráfico (o "merge" do Tradeiros) e devolve o mesmo formato de um dia,
+com os toques contados depois do último dia da junção.
 """
 from __future__ import annotations
 
@@ -107,3 +110,31 @@ def juntar(dias: Sequence[Dict], tick: float) -> Dict:
     return {"poc": (i0 + i_poc + 0.5) * tick, "val": (i0 + lo) * tick, "vah": (i0 + hi + 1) * tick,
             "base_i": i0, "contagens": cont}
 
+
+
+def composto(velas_s: Sequence[Sequence[float]], agora_s: int, de_s: int, ate_s: int,
+             tick: Optional[float] = None) -> Dict:
+    """Junta os dias que começam entre `de_s` e `ate_s` (inclusive). Mesmo formato de um dia de `perfis_por_dia`,
+    mais `n_dias`; `inicio`/`fim` vão do começo do primeiro ao fim do último."""
+    r = perfis_por_dia(velas_s, agora_s, dias=len(velas_s), tick=tick)
+    escolhidos = [d for d in r["dias"] if de_s <= d["inicio"] <= ate_s]
+    if not escolhidos:
+        raise ValueError("nenhum dia nesse intervalo")
+    tick = r["tick"]
+    c = juntar(escolhidos, tick)
+    fim_ms = escolhidos[-1]["fim"] * 1000
+    blocos = blocos_30m([[int(v[0]) * 1000, *v[1:6]] for v in velas_s])
+    niveis = {k: c[k] for k in ("poc", "vah", "val")}
+    return {
+        "tick": tick,
+        "n_dias": len(escolhidos),
+        "inicio": escolhidos[0]["inicio"],
+        "fim": escolhidos[-1]["fim"],
+        "aberto": escolhidos[-1]["aberto"],
+        "base_i": c["base_i"],
+        "contagens": c["contagens"],
+        **niveis,
+        "maxima": max(d["maxima"] for d in escolhidos),
+        "minima": min(d["minima"] for d in escolhidos),
+        "toques": {k: _primeiro_toque(v, blocos, fim_ms) for k, v in niveis.items()},
+    }

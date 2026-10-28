@@ -11,8 +11,8 @@ import {
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
-import type { TpoGrafico, VelasGrafico } from '../../api/types'
-import { TpoDesenho } from './tpoDesenho'
+import type { TpoComposto, TpoDia, TpoGrafico, VelasGrafico } from '../../api/types'
+import { TpoDesenho, type Selecao } from './tpoDesenho'
 
 export type Vela = { t: number; o: number; h: number; l: number; c: number; v: number }
 
@@ -53,6 +53,11 @@ interface Props {
   vivoMs?: number
   /** TPO de 30 min por dia para desenhar no gráfico (null = desligado) */
   tpo?: TpoGrafico | null
+  /** dias escolhidos para juntar e o composto deles (quando já chegou) */
+  selecao?: Selecao | null
+  composto?: TpoComposto | null
+  /** clique em cima do perfil de um dia (com Shift ou não) */
+  onDia?: (dia: TpoDia, shift: boolean) => void
 }
 
 /** Índice de vela (fracionário) do instante t: entre duas velas interpola; antes ou depois dos dados, extrapola pelo
@@ -67,7 +72,7 @@ function indiceDe(d: Vela[], t: number, passo: number): number | null {
   return a + (t - d[a].t) / (d[b].t - d[a].t)
 }
 
-export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null }: Props) {
+export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, onDia }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -79,6 +84,8 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
   const estado = useRef({ geracao: 0, buscandoAntigas: false, fimDoHistorico: false, nuvem: false })
   const avisar = useRef(onInfo)
   avisar.current = onInfo
+  const aoEscolherDia = useRef(onDia)
+  aoEscolherDia.current = onDia
   const [legenda, setLegenda] = useState<Vela | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(true)
@@ -117,9 +124,14 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       setLegenda({ t, o: k.open, h: k.high, l: k.low, c: k.close, v: achada?.v ?? 0 })
     }
     c.subscribeCrosshairMove(aoMover)
+    const aoClicar = (p: MouseEventParams<Time>) => {
+      const dia = p.point ? tpoDesenho.diaEm(p.point.x) : null
+      if (dia) aoEscolherDia.current?.(dia, !!p.sourceEvent?.shiftKey)
+    }
+    c.subscribeClick(aoClicar)
     const ro = new ResizeObserver(() => { if (el.current) c.applyOptions({ width: el.current.clientWidth, height: el.current.clientHeight }) })
     ro.observe(el.current)
-    return () => { ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); c.remove(); chart.current = null; velas.current = null; vols.current = null }
+    return () => { ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); c.unsubscribeClick(aoClicar); c.remove(); chart.current = null; velas.current = null; vols.current = null }
   }, [])
 
   // trocar de moeda ou de tempo: zera e busca de novo
@@ -184,6 +196,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
   }, [simbolo, tempo])
 
   useEffect(() => { desenhoTpo.current?.set(tpo) }, [tpo])
+  useEffect(() => { desenhoTpo.current?.setJuncao(selecao, composto) }, [selecao, composto])
 
   // vela aberta: pergunta as 2 últimas e atualiza (ou acrescenta quando abre uma nova)
   useEffect(() => {
