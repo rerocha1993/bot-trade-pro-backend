@@ -7,13 +7,15 @@
  */
 import {
   ColorType, CrosshairMode, LineStyle, createChart,
-  type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams, type Time, type UTCTimestamp,
+  type IChartApi, type IPriceLine, type ISeriesApi, type LogicalRange, type MouseEventParams, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import type { NuvensOverlay, TpoComposto, TpoDia, TpoGrafico, VelasGrafico } from '../../api/types'
+import type { ChartLevel, ChartMarker } from '../../lib/chart-tipos'
+import { CamadasDesenho, type Camadas } from './camadasDesenho'
 import { NuvensDesenho } from './nuvensDesenho'
-import { LARGURA_ESCALA } from './PriceChart'
+import { LARGURA_ESCALA } from './SubChart'
 import { TpoDesenho, type Selecao } from './tpoDesenho'
 
 export type Vela = { t: number; o: number; h: number; l: number; c: number; v: number }
@@ -65,8 +67,14 @@ interface Props {
   nuvens?: NuvensOverlay | null
   /** clique em cima do perfil de um dia (com Shift ou não) */
   onDia?: (dia: TpoDia, shift: boolean) => void
-  /** o início (s) de cada vela carregada, em ordem: os painéis de baixo põem um valor por vela */
-  onTempos?: (tempos: number[]) => void
+  /** as velas carregadas, em ordem: os painéis de baixo põem um valor por vela e os presos procuram a saída */
+  onVelas?: (velas: Vela[]) => void
+  /** camadas de order flow: mapa de calor atrás das velas, contornos, faixas e rótulos na frente */
+  camadas?: Camadas | null
+  /** setas em cima/embaixo das velas (presos) */
+  marcadores?: ChartMarker[]
+  /** linhas horizontais com rótulo na escala (maiores níveis do livro) */
+  niveis?: ChartLevel[]
   /** arrasto e zoom: os painéis de baixo seguem o mesmo intervalo */
   onRange?: (r: LogicalRange | null) => void
 }
@@ -83,7 +91,7 @@ function indiceDe(d: Vela[], t: number, passo: number): number | null {
   return a + (t - d[a].t) / (d[b].t - d[a].t)
 }
 
-export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia, onTempos, onRange }: Props) {
+export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia, onVelas, onRange, camadas = null, marcadores, niveis }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -98,11 +106,24 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
   avisar.current = onInfo
   const aoEscolherDia = useRef(onDia)
   aoEscolherDia.current = onDia
-  const avisarTempos = useRef(onTempos)
-  avisarTempos.current = onTempos
+  const avisarVelas = useRef(onVelas)
+  avisarVelas.current = onVelas
   const avisarRange = useRef(onRange)
   avisarRange.current = onRange
-  const tempos = () => avisarTempos.current?.(dados.current.map((k) => k.t))
+  const marcas = useRef<ChartMarker[]>([])
+  const linhas = useRef<IPriceLine[]>([])
+  const desenhoCamadas = useRef<CamadasDesenho | null>(null)
+  /** setas só em velas que existem no gráfico (a biblioteca exige o tempo exato de uma vela) */
+  const aplicarMarcas = () => {
+    const s = velas.current
+    if (!s) return
+    const existe = new Set(dados.current.map((k) => k.t))
+    s.setMarkers(marcas.current.filter((m) => existe.has(m.time)).sort((a, b) => a.time - b.time).map((m) => ({
+      time: m.time as UTCTimestamp, position: m.side === 'sell' ? 'aboveBar' as const : 'belowBar' as const,
+      color: '#f5c04a', shape: m.side === 'sell' ? 'arrowDown' as const : 'arrowUp' as const, text: m.text,
+    })))
+  }
+  const tempos = () => { avisarVelas.current?.([...dados.current]); aplicarMarcas() }
   const [legenda, setLegenda] = useState<Vela | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(true)
@@ -133,6 +154,9 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     const nuvensDesenho = new NuvensDesenho(logico)
     s.attachPrimitive(nuvensDesenho)                     // antes do TPO: fica atrás dele
     desenhoNuvens.current = nuvensDesenho
+    const camadasDesenho = new CamadasDesenho(logico)
+    s.attachPrimitive(camadasDesenho)
+    desenhoCamadas.current = camadasDesenho
     const tpoDesenho = new TpoDesenho(logico, formatar)
     s.attachPrimitive(tpoDesenho)
     desenhoTpo.current = tpoDesenho
@@ -166,7 +190,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     caixa.addEventListener('pointerup', aoSoltar)
     const ro = new ResizeObserver(() => { if (el.current) c.applyOptions({ width: el.current.clientWidth, height: el.current.clientHeight }) })
     ro.observe(el.current)
-    return () => { ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); caixa.removeEventListener('pointerdown', aoApertar); caixa.removeEventListener('pointerup', aoSoltar); c.remove(); chart.current = null; velas.current = null; vols.current = null }
+    return () => { ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); caixa.removeEventListener('pointerdown', aoApertar); caixa.removeEventListener('pointerup', aoSoltar); c.remove(); chart.current = null; velas.current = null; vols.current = null; linhas.current = []; desenhoCamadas.current = null }
   }, [])
 
   // trocar de moeda ou de tempo: zera e busca de novo
@@ -236,6 +260,15 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
 
   useEffect(() => { desenhoTpo.current?.set(tpo) }, [tpo])
   useEffect(() => { desenhoNuvens.current?.set(nuvens) }, [nuvens])
+  useEffect(() => { desenhoCamadas.current?.set(camadas ?? { heatmap: null, rects: [], labels: [] }) }, [camadas])
+  useEffect(() => { marcas.current = marcadores ?? []; aplicarMarcas() }, [marcadores])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const s = velas.current
+    if (!s) return
+    for (const l of linhas.current) s.removePriceLine(l)
+    linhas.current = (niveis ?? []).map((n) => s.createPriceLine({ price: n.price, color: n.color, lineWidth: 1,
+      lineStyle: n.dashed ? LineStyle.Dashed : LineStyle.Solid, axisLabelVisible: true, title: n.label }))
+  }, [niveis])
   useEffect(() => { desenhoTpo.current?.setJuncao(selecao, composto) }, [selecao, composto])
 
   // vela aberta: pergunta as 2 últimas e atualiza (ou acrescenta quando abre uma nova)

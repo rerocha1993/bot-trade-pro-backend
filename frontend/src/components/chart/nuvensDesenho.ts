@@ -4,11 +4,12 @@
  * vão entre velas vizinhas. Fica atrás das velas e do TPO.
  */
 import type {
-  IChartApi, ISeriesApi, ISeriesPrimitive, ISeriesPrimitivePaneRenderer, ISeriesPrimitivePaneView, Logical,
+  IChartApi, ISeriesApi, ISeriesPrimitive, ISeriesPrimitivePaneRenderer, ISeriesPrimitivePaneView,
   SeriesAttachedParameter, Time,
 } from 'lightweight-charts'
 import type { NuvensOverlay } from '../../api/types'
 import { bandasDoPonto, RGB_LADO, type BandaLivro } from '../../lib/livroTrdr'
+import { xDoIndice } from './coordenada'
 
 type Alvo = Parameters<ISeriesPrimitivePaneRenderer['draw']>[0]
 
@@ -45,15 +46,15 @@ export class NuvensDesenho implements ISeriesPrimitive<Time> {
 
   private desenhar(alvo: Alvo) {
     if (!this.colunas.length || !this.chart || !this.series) return
-    const ts = this.chart.timeScale()
-    const largura = ts.options().barSpacing
+    const chart = this.chart
+    const largura = chart.timeScale().options().barSpacing
     const s = this.series
     alvo.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       const W = mediaSize.width
       for (const c of this.colunas) {
         const l = this.logico(c.ts)
         if (l === null) continue
-        const x = ts.logicalToCoordinate(l as Logical)
+        const x = xDoIndice(chart, l, largura)
         if (x === null || x + largura < 0 || x - largura > W) continue
         // arredonda as bordas no pixel para colunas vizinhas encostarem sem vão nem sobreposição
         const x0 = Math.round(x - largura / 2), x1 = Math.round(x + largura / 2)

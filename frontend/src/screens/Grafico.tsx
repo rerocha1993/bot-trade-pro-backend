@@ -17,12 +17,16 @@ import { useQuery } from '@tanstack/react-query'
 import type { LogicalRange } from 'lightweight-charts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useAbsorcao, useFootprint, useNuvensCalor, useNuvensTop, usePresos } from '../api/hooks'
 import { api } from '../api/client'
 import type { NuvensOverlay, SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
-import GraficoTV, { casas, SEGUNDOS, type InfoGrafico } from '../components/chart/GraficoTV'
+import FootprintChart from '../components/chart/FootprintChart'
+import GraficoTV, { casas, SEGUNDOS, type InfoGrafico, type Vela } from '../components/chart/GraficoTV'
 import PaineisFluxo, { PASSO_MAX_PAINEIS } from '../components/chart/PaineisFluxo'
 import { COR_TPO, type Selecao } from '../components/chart/tpoDesenho'
 import ParedesAgora from '../components/ParedesAgora'
+import { COR_FLUXO, colunasDaAbsorcao, imagemCalor, marcasAbsorcao, marcasPresos } from '../lib/camadasFluxo'
+import type { ChartLevel } from '../lib/chart-tipos'
 
 const PADRAO = { s: 'COINBASE:BTC-USD', t: '30m' }
 const TEMPOS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const
@@ -45,6 +49,24 @@ const JANELA_NUVENS_S: Record<string, number> = { '1m': 86400, '5m': 3 * 86400 }
 const SETE_DIAS_S = 7 * 86400
 /** livro mais velho que isso = coletor parado */
 const LIVRO_ATRASADO_S = 300
+/** camadas de order flow do BTC (vieram da antiga aba Nuvens); sem `&c=` no endereço valem as do padrão */
+const CAMADAS = [
+  { id: 'abs', nome: 'Absorção', dica: 'Nuvem quente onde a agressão alavancada bateu numa parede e o preço não passou ("presos no topo/fundo")' },
+  { id: 'pre', nome: 'Presos', dica: 'Seta e faixa amarela onde ficou gente presa no footprint (entrou forte e o preço fechou do outro lado)' },
+  { id: 'par', nome: 'Paredes', dica: 'Mapa de calor: todo o livro acima de 3x o normal (Coinbase + Binance + Bybit)' },
+  { id: 'niv', nome: 'Níveis', dica: 'Linhas dos 5 maiores níveis de compra e de venda no livro agora' },
+] as const
+const CAMADAS_PADRAO = 'abs,pre'
+/** o que `ir` (trocar tempo, moeda ou TPO) leva junto no endereço */
+const MANTER_NO_ENDERECO = ['p', 'c', 'pt', 'v', 'fpt', 'fpl']
+const PASSO_FLUXO = 300
+const SETE_DIAS_FLUXO = 7 * 86400 - 600
+const DIAS_PAREDES = 3
+const TFS_PRESOS = [['300', '5 min'], ['1800', '30 min']] as const
+const TFS_FP = [['300', '5m'], ['900', '15m'], ['1800', '30m'], ['3600', '1h'], ['14400', '4h']] as const
+const LINHAS_FP = ['10', '20', '50', '100', '250', '500'] as const
+/** a grade do livro do servidor: 0,1% do preço arredondado a US$ 10 (api/routes/nuvens_routes.py) */
+const gradeLivro = (preco: number) => Math.max(10, Math.round((preco * 0.001) / 10) * 10)
 /** nesses tempos o dia tem velas demais de largas para o perfil caber: ligar o TPO passa para 30 min */
 const TEMPO_LARGO = ['4h', '1d']
 
@@ -160,15 +182,43 @@ export default function Grafico() {
     const novo: Record<string, string> = { s, t }
     if (tpo) { novo.tpo = tpo; if (j) novo.j = `${j.de}-${j.ate}` }
     if (n) novo.n = n
-    const p = params.get('p')
-    if (p) novo.p = p
+    // painéis, camadas, presos e footprint seguem iguais ao trocar de tempo, de moeda ou o TPO
+    for (const k of MANTER_NO_ENDERECO) { const v = params.get(k); if (v) novo[k] = v }
     setParams(novo, { replace: true })
   }
   // painéis de baixo (livro, liquidações, funding) e paredes de agora: dados do BTC, em velas de até 4 h; &p=0 esconde
-  const ehBtc = partes(simbolo).par.startsWith('BTC-')
+  // camadas de fluxo só no BTC cotado em dólar: os dados (livro, presos, níveis) são todos em USD
+  const ehBtc = /^BTC-(USD|USDT|USDC|FDUSD)$/.test(partes(simbolo).par)
   const fluxoLigado = params.get('p') !== '0'
   const fluxoCabe = (SEGUNDOS[tempo] ?? 0) <= PASSO_MAX_PAINEIS
-  const [tempos, setTempos] = useState<number[]>([])
+  const [velasG, setVelasG] = useState<Vela[]>([])
+  const tempos = useMemo(() => velasG.map((k) => k.t), [velasG])
+  // camadas de order flow (&c=abs,pre,par,niv), presos de 5 ou 30 min (&pt=) e a vista de footprint (&v=fp)
+  // "-" no endereço = todas desligadas (sem `c` valeria o padrão)
+  const camadasOn = useMemo(() => new Set((params.get('c') ?? CAMADAS_PADRAO).split(',').filter((c) => c && c !== '-')), [params])
+  const trocarParam = (chave: string, valor: string | null) =>
+    setParams((q) => { const n = new URLSearchParams(q); if (valor === null) n.delete(chave); else n.set(chave, valor); return n }, { replace: true })
+  const alternarCamada = (id: string) => {
+    const n = new Set(camadasOn)
+    if (n.has(id)) n.delete(id); else n.add(id)
+    trocarParam('c', [...n].join(',') || '-')
+  }
+  const tfPresos = params.get('pt') === '300' ? 300 : 1800
+  const vistaFp = ehBtc && params.get('v') === 'fp'
+  const tfFp = TFS_FP.some(([v]) => v === params.get('fpt')) ? Number(params.get('fpt')) : 1800
+  const linhaFp = (LINHAS_FP as readonly string[]).includes(params.get('fpl') ?? '') ? Number(params.get('fpl')) : 50
+  // os dados de fluxo vão até 7 dias atrás (arredondado a 5 min para a chave do pedido não mudar a cada render)
+  const inicioFluxo = ehBtc && !vistaFp && velasG.length
+    ? Math.max(Math.floor(velasG[0].t / PASSO_FLUXO) * PASSO_FLUXO, Math.floor((Date.now() / 1000 - SETE_DIAS_FLUXO) / PASSO_FLUXO) * PASSO_FLUXO)
+    : null
+  const qAbs = useAbsorcao(camadasOn.has('abs') ? inicioFluxo : null)
+  const qPresos = usePresos(inicioFluxo, tfPresos, camadasOn.has('pre'))
+  // o mapa de paredes é o cálculo mais pesado (mediana de 24 h por faixa): só os últimos 3 dias, como na antiga aba Nuvens
+  const inicioParedes = inicioFluxo === null ? null
+    : Math.max(inicioFluxo, Math.floor((Date.now() / 1000 - DIAS_PAREDES * 86400) / PASSO_FLUXO) * PASSO_FLUXO)
+  const qCalor = useNuvensCalor(camadasOn.has('par') ? inicioParedes : null, 'coinbase,binance,bybit', 3, PASSO_FLUXO)
+  const qTop = useNuvensTop('coinbase,binance,bybit', ehBtc && camadasOn.has('niv'))
+  const qFp = useFootprint(tfFp, linhaFp, vistaFp)
   const [range, setRange] = useState<LogicalRange | null>(null)
   const ligarFluxo = () => setParams((q) => { const n = new URLSearchParams(q); if (fluxoLigado) n.set('p', '0'); else n.delete('p'); return n }, { replace: true })
   const temNuvem = simbolo === COM_NUVEM
@@ -228,6 +278,31 @@ export default function Grafico() {
   const dec = ult ? casas(ult.c) : 2
   const fmt = (p: number) => p.toLocaleString('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec })
 
+  // as camadas de order flow viram o que o gráfico desenha (só nos pares de BTC)
+  const precoRef = ult?.c ?? null
+  const absorcao = useMemo(() => (ehBtc && camadasOn.has('abs') && qAbs.data ? marcasAbsorcao(qAbs.data.eventos) : null), [ehBtc, camadasOn, qAbs.data])
+  const presos = useMemo(() => (ehBtc && camadasOn.has('pre') && qPresos.data
+    ? marcasPresos(qPresos.data.eventos, tfPresos, velasG, SEGUNDOS[tempo]) : null), [ehBtc, camadasOn, qPresos.data, tfPresos, velasG, tempo])
+  // a grade fica a mesma enquanto a moeda não muda (com o preço perto de US$ 105 mil ela alternaria entre 100 e 110)
+  const gradeFixa = useRef<{ s: string; g: number } | null>(null)
+  if (precoRef && gradeFixa.current?.s !== simbolo) gradeFixa.current = { s: simbolo, g: gradeLivro(precoRef) }
+  const gradeAbs = qCalor.data?.grade_usd ?? (gradeFixa.current?.s === simbolo ? gradeFixa.current.g : null)
+  const heatmap = useMemo(() => {
+    if (!ehBtc) return null
+    const d = qCalor.data
+    const abs = camadasOn.has('abs') && qAbs.data?.eventos.length && gradeAbs
+      ? colunasDaAbsorcao(qAbs.data.eventos, PASSO_FLUXO, gradeAbs) : []
+    // paredes e absorção juntas: uma imagem só, com as duas nuvens (no mesmo pixel fica a mais forte)
+    if (camadasOn.has('par') && d?.grade_usd) return imagemCalor([...d.colunas, ...abs].sort((a, b) => a.ts - b.ts), d.passo_s, d.grade_usd, 1, 2)
+    return abs.length && gradeAbs ? imagemCalor(abs, PASSO_FLUXO, gradeAbs) : null
+  }, [ehBtc, camadasOn, qCalor.data, qAbs.data, gradeAbs])
+  const camadas = useMemo(() => ({ heatmap, rects: [...(absorcao?.rects ?? []), ...(presos?.rects ?? [])], labels: absorcao?.labels ?? [] }),
+    [heatmap, absorcao, presos])
+  const niveis = useMemo<ChartLevel[]>(() => (ehBtc && camadasOn.has('niv') && qTop.data ? [
+    ...qTop.data.bids.slice(0, 5).map((n) => ({ price: n.preco, label: `${Math.round(n.qtd)} BTC`, color: COR_FLUXO.bids, dashed: true })),
+    ...qTop.data.asks.slice(0, 5).map((n) => ({ price: n.preco, label: `${Math.round(n.qtd)} BTC`, color: COR_FLUXO.asks, dashed: true })),
+  ] : []), [ehBtc, camadasOn, qTop.data])
+
   return (
     <div className="gpag">
       <div className="gbarra">
@@ -258,6 +333,19 @@ export default function Grafico() {
           {temNuvem && (
             <button type="button" className={'gbotao' + (livro ? ' on' : '')} onClick={() => ir(simbolo, tempo, diasTpo, selecao, livro ? '0' : null)}
               title="Nuvens do livro: o Order Book Depth Overlay do TRDR em cada vela">Nuvens</button>
+          )}
+          {ehBtc && CAMADAS.map((c) => (
+            <button key={c.id} type="button" className={'gbotao' + (camadasOn.has(c.id) ? ' on' : '')} title={c.dica}
+              onClick={() => alternarCamada(c.id)} disabled={vistaFp}>{c.nome}</button>
+          ))}
+          {ehBtc && camadasOn.has('pre') && !vistaFp && (
+            <select className="gselect" value={String(tfPresos)} onChange={(e) => trocarParam('pt', e.target.value === '1800' ? null : e.target.value)} aria-label="Bloco dos presos">
+              {TFS_PRESOS.map(([v, n]) => <option key={v} value={v}>presos {n}</option>)}
+            </select>
+          )}
+          {ehBtc && (
+            <button type="button" className={'gbotao' + (vistaFp ? ' on' : '')} onClick={() => trocarParam('v', vistaFp ? null : 'fp')}
+              title="Footprint: compra e venda a mercado em cada preço de cada vela (Bybit perpétuo)">Footprint</button>
           )}
           {ehBtc && (
             <button type="button" className={'gbotao' + (fluxoLigado ? ' on' : '')} onClick={ligarFluxo}
@@ -313,12 +401,47 @@ export default function Grafico() {
           </>}
         </div>
       )}
+      {ehBtc && !vistaFp && CAMADAS.some((c) => camadasOn.has(c.id)) && (
+        <div className="glegenda-tpo">
+          {camadasOn.has('abs') && <span><b style={{ color: COR_FLUXO.asks }}>Absorção</b>: nuvem quente com contorno onde compra agressiva (top 10% do dia, OI subindo) bateu numa parede e o preço não passou; verde = o espelho no fundo
+            {qAbs.data && <span className="muted"> · {qAbs.data.velas_com_livro_e_negocios < 24 ? 'ainda juntando ~2 h de livro e negócios' : `${qAbs.data.eventos.length} no período`}</span>}</span>}
+          {camadasOn.has('pre') && <span><b style={{ color: COR_FLUXO.presos }}>Presos</b>: seta e faixa amarela no preço de quem ficou preso; "presos?" ainda espera as próximas velas
+            {qPresos.data && <span className="muted"> · {qPresos.data.eventos.filter((e) => e.confirmado !== false).length} no período</span>}</span>}
+          {camadasOn.has('par') && <span><b style={{ color: '#ece86e' }}>Paredes</b>: livro acima de 3x o normal nos últimos 3 dias; esquenta (até amarelo) com 12x ou mais{qCalor.isPending && <span className="muted"> · lendo o livro…</span>}</span>}
+          {camadasOn.has('niv') && <span><b>Níveis</b>: os 5 maiores níveis de compra (verde) e de venda (vermelho) no livro agora, em BTC</span>}
+          <span className="muted">leitura, não sinal: nada disso passou no teste contra sorteio</span>
+        </div>
+      )}
       <div className="card gcaixa">
+        {vistaFp ? (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div className="gferramentas">
+              <span className="muted" style={{ fontSize: 12 }}>vela</span>
+              <select className="gselect" value={String(tfFp)} onChange={(e) => trocarParam('fpt', e.target.value)} aria-label="Tempo do footprint">
+                {TFS_FP.map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>linha de</span>
+              <select className="gselect" value={String(linhaFp)} onChange={(e) => trocarParam('fpl', e.target.value)} aria-label="Altura da linha">
+                {LINHAS_FP.map((v) => <option key={v} value={v}>US$ {v}</option>)}
+              </select>
+            </div>
+            {qFp.isPending ? <div className="muted">montando o footprint…</div>
+              : qFp.isError ? <div className="warn-txt">não deu para montar o footprint agora</div>
+              : !qFp.data?.velas.length ? <div className="muted">ainda sem negócios gravados para o footprint</div>
+              : <FootprintChart velas={qFp.data.velas} linha={qFp.data.linha_usd} />}
+            <div className="muted" style={{ fontSize: 12 }}>
+              Arraste para os lados e use a roda do mouse para o zoom. Chegando perto, cada linha mostra a <b style={{ color: COR_FLUXO.asks }}>venda a mercado</b> à
+              esquerda e a <b style={{ color: '#3d8bfd' }}>compra a mercado</b> à direita (BTC, Bybit perpétuo). Contorno branco = POC da vela; negrito = desequilíbrio de 3
+              para 1; <b style={{ color: COR_FLUXO.presos }}>contorno amarelo</b> = presos; Δ embaixo = compra menos venda da vela.
+            </div>
+          </div>
+        ) : <>
         <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} nuvens={nuvens} onDia={escolherDia}
-          onTempos={setTempos} onRange={setRange} />
+          onVelas={setVelasG} onRange={setRange} camadas={camadas} marcadores={presos?.markers} niveis={niveis} />
         {ehBtc && fluxoLigado && (fluxoCabe
           ? tempos.length > 0 && <PaineisFluxo tempos={tempos} range={range} passo={SEGUNDOS[tempo]} />
           : <div className="muted" style={{ fontSize: 12, padding: '10px 0' }}>os painéis de livro, liquidações e funding vão até velas de 4 h: escolha um tempo menor para vê-los</div>)}
+        </>}
       </div>
       {ehBtc && fluxoLigado && <ParedesAgora preco={ult?.c ?? null} />}
       {escolhendo && <Seletor atual={simbolo} onFechar={() => setEscolhendo(false)} onEscolher={(s) => { setEscolhendo(false); ir(s, tempo) }} />}

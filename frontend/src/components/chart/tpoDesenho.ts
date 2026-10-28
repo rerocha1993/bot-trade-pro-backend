@@ -8,10 +8,11 @@
  * no lugar entra um perfil só, do começo do primeiro ao fim do último, com POC, VAH e VAL próprios.
  */
 import type {
-  IChartApi, ISeriesApi, ISeriesPrimitive, ISeriesPrimitivePaneRenderer, ISeriesPrimitivePaneView, Logical,
+  IChartApi, ISeriesApi, ISeriesPrimitive, ISeriesPrimitivePaneRenderer, ISeriesPrimitivePaneView,
   SeriesAttachedParameter, Time,
 } from 'lightweight-charts'
 import type { TpoComposto, TpoDia, TpoGrafico } from '../../api/types'
+import { xDoIndice } from './coordenada'
 
 type Alvo = Parameters<ISeriesPrimitivePaneRenderer['draw']>[0]
 
@@ -81,7 +82,7 @@ export class TpoDesenho implements ISeriesPrimitive<Time> {
   private x(t: number): number | null {
     const l = this.logico(t)
     if (l === null || !this.chart) return null
-    return this.chart.timeScale().logicalToCoordinate(l as Logical)
+    return xDoIndice(this.chart, l)
   }
   private y(p: number): number | null {
     const c = this.series?.priceToCoordinate(p)

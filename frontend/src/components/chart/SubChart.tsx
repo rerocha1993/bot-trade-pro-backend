@@ -6,7 +6,9 @@
  */
 import { ColorType, CrosshairMode, createChart, type IChartApi, type ISeriesApi, type LogicalRange, type UTCTimestamp } from 'lightweight-charts'
 import { useEffect, useRef } from 'react'
-import { LARGURA_ESCALA } from './PriceChart'
+
+/** largura fixa da escala de preço, a mesma do gráfico de cima, para as velas ficarem alinhadas */
+export const LARGURA_ESCALA = 72
 
 export interface SerieSub {
   id: string
