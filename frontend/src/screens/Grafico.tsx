@@ -14,12 +14,15 @@
  * `&n=0` desliga.
  */
 import { useQuery } from '@tanstack/react-query'
+import type { LogicalRange } from 'lightweight-charts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { NuvensOverlay, SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
 import GraficoTV, { casas, SEGUNDOS, type InfoGrafico } from '../components/chart/GraficoTV'
+import PaineisFluxo, { PASSO_MAX_PAINEIS } from '../components/chart/PaineisFluxo'
 import { COR_TPO, type Selecao } from '../components/chart/tpoDesenho'
+import ParedesAgora from '../components/ParedesAgora'
 
 const PADRAO = { s: 'COINBASE:BTC-USD', t: '30m' }
 const TEMPOS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const
@@ -157,8 +160,17 @@ export default function Grafico() {
     const novo: Record<string, string> = { s, t }
     if (tpo) { novo.tpo = tpo; if (j) novo.j = `${j.de}-${j.ate}` }
     if (n) novo.n = n
+    const p = params.get('p')
+    if (p) novo.p = p
     setParams(novo, { replace: true })
   }
+  // painéis de baixo (livro, liquidações, funding) e paredes de agora: dados do BTC, em velas de até 4 h; &p=0 esconde
+  const ehBtc = partes(simbolo).par.startsWith('BTC-')
+  const fluxoLigado = params.get('p') !== '0'
+  const fluxoCabe = (SEGUNDOS[tempo] ?? 0) <= PASSO_MAX_PAINEIS
+  const [tempos, setTempos] = useState<number[]>([])
+  const [range, setRange] = useState<LogicalRange | null>(null)
+  const ligarFluxo = () => setParams((q) => { const n = new URLSearchParams(q); if (fluxoLigado) n.set('p', '0'); else n.delete('p'); return n }, { replace: true })
   const temNuvem = simbolo === COM_NUVEM
   const livro = nuvemParam === '0' ? null : LIVRO
   const nuvensQ = useQuery({
@@ -247,6 +259,10 @@ export default function Grafico() {
             <button type="button" className={'gbotao' + (livro ? ' on' : '')} onClick={() => ir(simbolo, tempo, diasTpo, selecao, livro ? '0' : null)}
               title="Nuvens do livro: o Order Book Depth Overlay do TRDR em cada vela">Nuvens</button>
           )}
+          {ehBtc && (
+            <button type="button" className={'gbotao' + (fluxoLigado ? ' on' : '')} onClick={ligarFluxo}
+              title="Painéis embaixo do gráfico: livro à vista e alavancado, liquidações e funding do BTC, e as paredes de agora">Fluxo</button>
+          )}
         </div>
         {ult && (
           <span className="mono gpreco">
@@ -298,8 +314,13 @@ export default function Grafico() {
         </div>
       )}
       <div className="card gcaixa">
-        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} nuvens={nuvens} onDia={escolherDia} />
+        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} nuvens={nuvens} onDia={escolherDia}
+          onTempos={setTempos} onRange={setRange} />
+        {ehBtc && fluxoLigado && (fluxoCabe
+          ? tempos.length > 0 && <PaineisFluxo tempos={tempos} range={range} passo={SEGUNDOS[tempo]} />
+          : <div className="muted" style={{ fontSize: 12, padding: '10px 0' }}>os painéis de livro, liquidações e funding vão até velas de 4 h: escolha um tempo menor para vê-los</div>)}
       </div>
+      {ehBtc && fluxoLigado && <ParedesAgora preco={ult?.c ?? null} />}
       {escolhendo && <Seletor atual={simbolo} onFechar={() => setEscolhendo(false)} onEscolher={(s) => { setEscolhendo(false); ir(s, tempo) }} />}
     </div>
   )

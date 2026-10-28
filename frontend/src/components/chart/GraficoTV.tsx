@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import type { NuvensOverlay, TpoComposto, TpoDia, TpoGrafico, VelasGrafico } from '../../api/types'
 import { NuvensDesenho } from './nuvensDesenho'
+import { LARGURA_ESCALA } from './PriceChart'
 import { TpoDesenho, type Selecao } from './tpoDesenho'
 
 export type Vela = { t: number; o: number; h: number; l: number; c: number; v: number }
@@ -64,6 +65,10 @@ interface Props {
   nuvens?: NuvensOverlay | null
   /** clique em cima do perfil de um dia (com Shift ou não) */
   onDia?: (dia: TpoDia, shift: boolean) => void
+  /** o início (s) de cada vela carregada, em ordem: os painéis de baixo põem um valor por vela */
+  onTempos?: (tempos: number[]) => void
+  /** arrasto e zoom: os painéis de baixo seguem o mesmo intervalo */
+  onRange?: (r: LogicalRange | null) => void
 }
 
 /** Índice de vela (fracionário) do instante t: entre duas velas interpola; antes ou depois dos dados, extrapola pelo
@@ -78,7 +83,7 @@ function indiceDe(d: Vela[], t: number, passo: number): number | null {
   return a + (t - d[a].t) / (d[b].t - d[a].t)
 }
 
-export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia }: Props) {
+export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia, onTempos, onRange }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -93,6 +98,11 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
   avisar.current = onInfo
   const aoEscolherDia = useRef(onDia)
   aoEscolherDia.current = onDia
+  const avisarTempos = useRef(onTempos)
+  avisarTempos.current = onTempos
+  const avisarRange = useRef(onRange)
+  avisarRange.current = onRange
+  const tempos = () => avisarTempos.current?.(dados.current.map((k) => k.t))
   const [legenda, setLegenda] = useState<Vela | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(true)
@@ -109,7 +119,8 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     const c = createChart(el.current, {
       layout: { background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' }, textColor: '#8b95a5', fontFamily: "'DM Mono', monospace", fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: 'rgba(255,255,255,0.035)' }, horzLines: { color: 'rgba(255,255,255,0.045)' } },
-      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)', scaleMargins: { top: 0.06, bottom: 0.22 } },
+      // a mesma largura de escala dos painéis de baixo, para as velas ficarem uma em cima da outra
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)', scaleMargins: { top: 0.06, bottom: 0.22 }, minimumWidth: LARGURA_ESCALA },
       timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false, rightOffset: 8 },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(232,236,242,0.3)', labelBackgroundColor: '#2a2e39' }, horzLine: { color: 'rgba(232,236,242,0.3)', labelBackgroundColor: '#2a2e39' } },
       localization: { locale: 'pt-BR' },
@@ -135,6 +146,8 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       setLegenda({ t, o: k.open, h: k.high, l: k.low, c: k.close, v: achada?.v ?? 0 })
     }
     c.subscribeCrosshairMove(aoMover)
+    const aoMudarVista = (r: LogicalRange | null) => avisarRange.current?.(r)
+    c.timeScale().subscribeVisibleLogicalRangeChange(aoMudarVista)
     // clique pelo ponteiro, não pelo subscribeClick: a biblioteca descarta o 2º clique se vier em menos de 0,5 s
     // (vira duplo clique), e juntar dois dias é justamente clicar num e logo no outro
     const caixa = el.current
@@ -165,6 +178,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     estado.current.fimDoHistorico = false
     dados.current = []
     s.setData([]); v.setData([])
+    tempos()
     s.priceScale().applyOptions({ autoScale: true })      // arrastar a escala desliga; moeda nova começa ajustada
     setErro(null); setCarregando(true); setLegenda(null)
     avisar.current?.({ ultimo: null, anterior: null, nuvem: false, erro: null, carregando: true })
@@ -180,6 +194,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
         s.applyOptions({ priceFormat: { type: 'price', precision: dec, minMove: 10 ** -dec } })
       }
       s.setData(d.map(vela)); v.setData(d.map(volume))
+      tempos()
       c.timeScale().setVisibleLogicalRange({ from: d.length - VELAS_NA_TELA, to: d.length + 8 })
       setCarregando(false)
       info()
@@ -209,6 +224,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
         const vista = c.timeScale().getVisibleLogicalRange()
         dados.current = [...antigas, ...dados.current]
         velas.current?.setData(dados.current.map(vela)); vols.current?.setData(dados.current.map(volume))
+        tempos()
         if (vista) c.timeScale().setVisibleLogicalRange({ from: vista.from + antigas.length, to: vista.to + antigas.length })
       }).catch(() => { /* tenta de novo no próximo arrasto */ }).finally(() => {
         if (geracao === st.geracao) st.buscandoAntigas = false
@@ -233,13 +249,15 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       const faltam = Math.min(N_MAX_API, Math.ceil((Date.now() / 1000 - ultima) / passo) + 1)
       buscar(simbolo, tempo, Math.max(2, faltam)).then((r) => {
         if (geracao !== estado.current.geracao) return
+        let novas = false
         for (const k of r.velas.map(daApi)) {
           const d = dados.current, ult = d[d.length - 1]
           if (!ult || k.t < ult.t) continue
           if (k.t === ult.t) d[d.length - 1] = k
-          else d.push(k)
+          else { d.push(k); novas = true }
           velas.current?.update(vela(k)); vols.current?.update(volume(k))
         }
+        if (novas) tempos()
         info()
       }).catch(() => { /* a próxima volta tenta de novo */ })
     }, vivoMs)
