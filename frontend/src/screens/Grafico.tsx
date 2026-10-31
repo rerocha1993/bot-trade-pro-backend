@@ -17,9 +17,9 @@ import { useQuery } from '@tanstack/react-query'
 import type { LogicalRange } from 'lightweight-charts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useAbsorcao, useFootprint, useNuvensCalor, useNuvensTop, usePresos } from '../api/hooks'
+import { useAbsorcao, useAvisosMapa, useFootprint, useNuvensCalor, useNuvensTop, usePresos } from '../api/hooks'
 import { api } from '../api/client'
-import type { NuvensOverlay, SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
+import type { NakedLongo, NuvensOverlay, SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
 import FootprintChart from '../components/chart/FootprintChart'
 import GraficoTV, { casas, SEGUNDOS, type InfoGrafico, type Vela } from '../components/chart/GraficoTV'
 import PaineisFluxo, { PASSO_MAX_PAINEIS } from '../components/chart/PaineisFluxo'
@@ -54,7 +54,7 @@ const CAMADAS = [
   { id: 'abs', nome: 'Absorção', dica: 'Nuvem quente onde a agressão alavancada bateu numa parede e o preço não passou ("presos no topo/fundo")' },
   { id: 'pre', nome: 'Presos', dica: 'Seta e faixa amarela onde ficou gente presa no footprint (entrou forte e o preço fechou do outro lado)' },
   { id: 'par', nome: 'Paredes', dica: 'Mapa de calor: todo o livro acima de 3x o normal (Coinbase + Binance + Bybit)' },
-  { id: 'niv', nome: 'Níveis', dica: 'Linhas dos 5 maiores níveis de compra e de venda no livro agora' },
+  { id: 'niv', nome: 'Níveis', dica: 'Linhas dos 5 maiores níveis de compra e de venda no livro agora e dos naked POCs de dia, semana e mês' },
 ] as const
 const CAMADAS_PADRAO = 'abs,pre'
 /** o que `ir` (trocar tempo, moeda ou TPO) leva junto no endereço */
@@ -157,6 +157,16 @@ function Seletor({ atual, onEscolher, onFechar }: { atual: string; onEscolher: (
       </div>
     </div>
   )
+}
+
+const COR_NAKED = '#f5c04a'
+
+/** rótulo curto do naked POC na escala: período e data de início (o rótulo inteiro fica na tela Mapa e avisos) */
+function rotuloNaked(n: NakedLongo): string {
+  const d = new Date(n.inicio_ms)
+  const dd = String(d.getUTCDate()).padStart(2, '0'), mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const quando = n.periodo === 'mes' ? `mês ${mm}/${String(d.getUTCFullYear()).slice(2)}` : `${n.periodo === 'semana' ? 'sem. ' : ''}${dd}/${mm}`
+  return `naked ${quando}`
 }
 
 export default function Grafico() {
@@ -298,10 +308,12 @@ export default function Grafico() {
   }, [ehBtc, camadasOn, qCalor.data, qAbs.data, gradeAbs])
   const camadas = useMemo(() => ({ heatmap, rects: [...(absorcao?.rects ?? []), ...(presos?.rects ?? [])], labels: absorcao?.labels ?? [] }),
     [heatmap, absorcao, presos])
-  const niveis = useMemo<ChartLevel[]>(() => (ehBtc && camadasOn.has('niv') && qTop.data ? [
-    ...qTop.data.bids.slice(0, 5).map((n) => ({ price: n.preco, label: `${Math.round(n.qtd)} BTC`, color: COR_FLUXO.bids, dashed: true })),
-    ...qTop.data.asks.slice(0, 5).map((n) => ({ price: n.preco, label: `${Math.round(n.qtd)} BTC`, color: COR_FLUXO.asks, dashed: true })),
-  ] : []), [ehBtc, camadasOn, qTop.data])
+  const qMapa = useAvisosMapa()
+  const niveis = useMemo<ChartLevel[]>(() => (ehBtc && camadasOn.has('niv') ? [
+    ...(qTop.data?.bids.slice(0, 5) ?? []).map((n) => ({ price: n.preco, label: `${Math.round(n.qtd)} BTC`, color: COR_FLUXO.bids, dashed: true })),
+    ...(qTop.data?.asks.slice(0, 5) ?? []).map((n) => ({ price: n.preco, label: `${Math.round(n.qtd)} BTC`, color: COR_FLUXO.asks, dashed: true })),
+    ...(qMapa.data?.naked_longos ?? []).map((n) => ({ price: n.preco, label: rotuloNaked(n), color: COR_NAKED, dashed: true })),
+  ] : []), [ehBtc, camadasOn, qTop.data, qMapa.data])
 
   return (
     <div className="gpag">
@@ -408,7 +420,7 @@ export default function Grafico() {
           {camadasOn.has('pre') && <span><b style={{ color: COR_FLUXO.presos }}>Presos</b>: seta e faixa amarela no preço de quem ficou preso; "presos?" ainda espera as próximas velas
             {qPresos.data && <span className="muted"> · {qPresos.data.eventos.filter((e) => e.confirmado !== false).length} no período</span>}</span>}
           {camadasOn.has('par') && <span><b style={{ color: '#ece86e' }}>Paredes</b>: livro acima de 3x o normal nos últimos 3 dias; esquenta (até amarelo) com 12x ou mais{qCalor.isPending && <span className="muted"> · lendo o livro…</span>}</span>}
-          {camadasOn.has('niv') && <span><b>Níveis</b>: os 5 maiores níveis de compra (verde) e de venda (vermelho) no livro agora, em BTC</span>}
+          {camadasOn.has('niv') && <span><b>Níveis</b>: os 5 maiores níveis de compra (verde) e de venda (vermelho) no livro agora, em BTC, e os naked POCs (amarelo) de dia, semana e mês que o preço ainda não tocou</span>}
           <span className="muted">leitura, não sinal: nada disso passou no teste contra sorteio</span>
         </div>
       )}

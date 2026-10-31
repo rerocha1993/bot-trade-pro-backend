@@ -173,3 +173,34 @@ def test_niveis_ordenados_com_rotulo_e_distancia_e_serializaveis():
     d = json.loads(json.dumps(m.as_dict()))
     assert d["posicao"] in ("fundo", "meio", "topo") and d["dias_no_composto"] == 10 and len(d["niveis"]) == len(m.niveis)
     assert not any(k in d for k in ("stop", "alvo", "prob", "probabilidade")), "o mapa não traz gatilho nem %"
+
+
+# ------------------------------------------------------------------ naked de prazo longo
+def test_naked_longos_de_dia_e_semana_e_o_tocado_hoje_some():
+    from conselho.mapa_do_dia import naked_longos
+
+    def dia(d, p):
+        return dia_flat(d, p, maximo=p + 50, minimo=p - 50)
+
+    # 29–31/05 a 70.000; a semana inteira de 01/06 (segunda) a 07/06 a 76.000; 08–11/06 a 80.000
+    c = []
+    for d in range(14):
+        c += dia(d, 70_000.0 if d < 3 else 76_000.0 if d < 10 else 80_000.0)
+    lg = naked_longos(c, T0 + 14 * DIA_MS)
+    chaves = {(x["periodo"], x["tipo"], round(x["preco"], -3)) for x in lg}
+    assert ("dia", "tempo", 70_000) in chaves and ("dia", "volume", 70_000) in chaves, "o último dia a 70.000 ninguém tocou"
+    assert ("semana", "tempo", 76_000) in chaves and ("semana", "volume", 76_000) in chaves, "a semana de 01/06 está inteira nos dados"
+    assert not any(x["periodo"] == "semana" and x["preco"] < 72_000 for x in lg), "a semana de 25/05 começou antes dos dados"
+    assert not any(x["periodo"] == "mes" for x in lg), "maio começou antes dos dados e junho não acabou"
+    assert ("dia", "tempo", 80_000) in chaves, "o POC de ontem (11/06) ainda não foi tocado até ontem"
+
+    m = mapa(c + dia(14, 80_000.0), T0 + 14 * DIA_MS + 18 * 3_600_000, lg)
+    precos = [round(x["preco"], -3) for x in m.naked_longos]
+    assert precos == [70_000, 76_000], "o de 80.000 foi tocado hoje; os de 76.000 (dia e semana) viram um nível só"
+    n76 = m.naked_longos[1]
+    assert n76["periodo"] == "semana" and n76["origens"] == 4
+    assert n76["rotulo"] == "Naked POC semana de 01/06 (tempo e volume), dia 07/06 (tempo e volume)"
+    nv = [n for n in m.niveis if n.grupo == "naked"]
+    assert len(nv) == 2 and all(n.chave.startswith("naked.") for n in nv), "com os longos, os naked de 36 dias saem da lista"
+    assert m.naked_pocs, "mas continuam em naked_pocs para os robôs"
+    json.dumps(m.as_dict())

@@ -166,7 +166,10 @@ def test_candles_sao_buscados_de_forma_incremental(tmp_path):
     s = _servico(tmp_path, c, None, None, agora)
     s.ciclo(agora)
     s.ciclo(agora + 60_000)
-    assert s.chamadas[0] < T0 and s.chamadas[1] == s.candles[-1][0], "2º ciclo pede só a partir do último candle guardado"
+    # 1ª chamada: os ~400 dias dos naked de prazo longo (uma vez por dia); depois os 36 dias do mapa
+    assert len(s.chamadas) == 3 and s.chamadas[0] < s.chamadas[1] < T0, "o histórico longo não é buscado de novo no mesmo dia"
+    assert s.chamadas[2] == s.candles[-1][0], "2º ciclo pede só a partir do último candle guardado"
+    assert s.longos is not None and s.longos_dia == agora // DIA_MS
     assert s.ultimo_mapa.preco == 80_000.0, "sem preço ao vivo, vale o último fechamento"
 
 

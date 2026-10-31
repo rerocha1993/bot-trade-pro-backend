@@ -16,12 +16,13 @@ import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from conselho.avisos import Aviso, Estado, avaliar, avisos_de_fluxo
-from conselho.mapa_do_dia import CANDLE_MS, DIA_MS, Mapa, mapa as montar_mapa
+from conselho.mapa_do_dia import CANDLE_MS, DIA_MS, Mapa, mapa as montar_mapa, naked_longos
 
 logger = logging.getLogger(__name__)
 
 PAR = "BTCUSDT"
 DIAS_HISTORICO = 36                      # composto de 10 dias + janela de 30 dias do pivô virgem
+DIAS_NAKED_LONGO = 400                   # naked POCs de dia, semana e mês: recalculados uma vez por dia
 INTERVALO_S = 60
 VALIDADE_MAPA_S = 60
 INTERVALO_FLUXO_S = 300          # a leitura de fluxo (absorção e presos) roda a cada 5 min
@@ -51,6 +52,9 @@ class AvisosService:
         self.ultimo_fluxo_em: float = 0.0
         self.estado = Estado()
         self.candles: List[list] = []
+        self.candles_longos: List[list] = []
+        self.longos: Optional[List[Dict]] = None
+        self.longos_dia: Optional[int] = None
         self.ultimo_mapa: Optional[Mapa] = None
         self.ultimo_mapa_em: float = 0.0
         self.ultimo_erro: Optional[str] = None
@@ -96,16 +100,36 @@ class AvisosService:
             corte = agora_ms - DIAS_HISTORICO * DIA_MS
             self.candles = [vistos[k] for k in sorted(vistos) if k >= corte]
 
+    def _atualizar_longos(self, agora_ms: int):
+        """Uma vez por dia UTC: completa os ~400 dias de candles e refaz os naked POCs de dia, semana e mês."""
+        hoje = agora_ms // DIA_MS
+        if self.longos_dia == hoje:
+            return
+        desde = self.candles_longos[-1][0] if self.candles_longos else agora_ms - DIAS_NAKED_LONGO * DIA_MS
+        novos = self.obter_candles(int(desde))
+        vistos = {int(c[0]): c for c in self.candles_longos}
+        for c in novos or []:
+            vistos[int(c[0])] = [int(c[0]), float(c[1]), float(c[2]), float(c[3]), float(c[4]), float(c[5] or 0)]
+        corte = agora_ms - DIAS_NAKED_LONGO * DIA_MS
+        self.candles_longos = [vistos[k] for k in sorted(vistos) if k >= corte]
+        self.longos = naked_longos(self.candles_longos, agora_ms)
+        self.longos_dia = hoje
+        logger.info("naked POCs de prazo longo: %d níveis em %d dias", len(self.longos), DIAS_NAKED_LONGO)
+
     def montar_mapa(self, agora_ms: Optional[int] = None) -> Mapa:
         agora_ms = int(agora_ms if agora_ms is not None else self.relogio() * 1000)
         with self._lock:
             self._atualizar_candles(agora_ms)
-            m = montar_mapa(self.candles, agora_ms)
+            m = montar_mapa(self.candles, agora_ms, self.longos)
             self.ultimo_mapa, self.ultimo_mapa_em = m, self.relogio()
             return m
 
     def ciclo(self, agora_ms: Optional[int] = None) -> List[Aviso]:
         agora_ms = int(agora_ms if agora_ms is not None else self.relogio() * 1000)
+        try:
+            self._atualizar_longos(agora_ms)
+        except Exception as e:                  # sem eles o mapa segue com os naked dos últimos 36 dias
+            logger.warning("naked POCs de prazo longo indisponíveis neste ciclo: %s: %s", type(e).__name__, e)
         m = self.montar_mapa(agora_ms)
         preco = None
         try:

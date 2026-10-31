@@ -18,12 +18,19 @@ export type NiveisMapa = Omit<NiveisPerfil, 'blocos'>
 export interface ServicoAvisos {
   ativo: boolean; intervalo_s: number; ciclos: number; ultimo_erro: string | null; candles: number; telegram: boolean; arquivo: string
 }
+export interface NakedLongo {
+  preco: number; periodo: 'dia' | 'semana' | 'mes'; tipo: 'tempo' | 'volume'; inicio_ms: number
+  rotulo: string; origens: number; distancia_pct: number
+}
+
 export interface MapaDoDia {
   ts: number; preco: number; posicao: string; p: number | null; dias_no_composto: number
   composto: NiveisMapa | null; ontem: NiveisMapa | null
   sessoes_ontem: Record<string, NiveisMapa>; sessoes_hoje: Record<string, NiveisMapa>
   aberturas: Record<string, number | null>; pivo_virgem: Record<string, number | null>
   naked_pocs: { preco: number; dia_ms: number }[]; niveis: NivelMapa[]
+  /** naked POCs de tempo e volume do dia, semana e mês (até ~400 dias), os 6 mais perto acima e abaixo */
+  naked_longos?: NakedLongo[]
   ressalva: string; servico: ServicoAvisos
 }
 export interface Aviso {
