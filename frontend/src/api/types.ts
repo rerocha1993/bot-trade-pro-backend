@@ -136,6 +136,8 @@ export interface Posicionamento {
     ts: number; fechamento: number
     perp_binance: [number, number]; perp_bybit: [number, number] | null
     spot_binance: [number, number] | null; spot_coinbase: [number, number] | null
+    /** prêmio da Coinbase em dólares: BTC-USD da Coinbase − BTCUSDT à vista da Binance (null sem os dois) */
+    premio: number | null
     /** perpétuo inverse (BTCUSD margeado em BTC): COIN-M da Binance e Bybit do nosso coletor */
     inv_binance: [number, number] | null; inv_bybit: [number, number] | null
     /** OI em vela [abertura, máxima, mínima, fechamento], Binance + Bybit: linear em BTC, inverse em dólares */

@@ -331,3 +331,92 @@ export default function PaineisFluxo({ tempos, range, passo }: { tempos: number[
     </div>
   )
 }
+
+const PERPS: CampoCvd[] = ['perp_binance', 'perp_bybit', 'inv_binance', 'inv_bybit']
+
+/** Os painéis da aba Aggr (o aggr.trade que o Maroja usa na live de 04/11/2026): o prêmio da Coinbase, o CVD dos
+ *  perpétuos contra o da Coinbase (cada um na sua escala, como lá) e a compra × venda a mercado de cada mercado por vela. */
+export function paineisAggr(tempos: number[], pos: Posicionamento | undefined): Painel[] {
+  if (!pos || !pos.velas.length) return []
+  const porTs = new Map(pos.velas.map((v) => [v.ts, v]))
+  const velas = pos.velas
+  const janela = pos.limites.janela_velas
+  const saida: Painel[] = []
+
+  // 1) prêmio: Coinbase − Binance; negativo = o americano vendendo (ou a Binance comprando mais)
+  const premio = tempos.map((t) => porTs.get(t)?.premio ?? null)
+  const ultP = [...velas].reverse().find((v) => v.premio !== null)
+  const usd = (v: number) => `${v < 0 ? '−' : '+'}$${fmt(Math.abs(v), 0)}`
+  saida.push({
+    titulo: 'Prêmio da Coinbase: BTC-USD da Coinbase − BTCUSDT da Binance (US$)', formato: usd, height: 80, ordem: 10,
+    explica: 'verde = a Coinbase mais cara (o comprador americano puxando), vermelho = mais barata (o americano vendendo, ou o varejo da Binance comprando) · o COINBASE_PREMIUM do aggr.trade',
+    leitura: !ultP || ultP.premio === null ? { texto: 'esperando o coletor da Coinbase', cor: NEUTRO }
+      : { texto: `agora ${usd(ultP.premio)} (${pct(100 * ultP.premio / ultP.fechamento, 3)}) · ${ultP.premio >= 0 ? 'Coinbase comprando mais que a Binance' : 'Coinbase vendendo mais que a Binance'}`,
+          cor: ultP.premio >= 0 ? COR.bids : COR.asks },
+    series: [{ id: 'premio', tipo: 'barra', cor: VERDE, valores: premio, cores: premio.map((v) => (v === null ? null : v >= 0 ? VERDE : VERMELHO)) }],
+  })
+
+  // 2) CVD dos perpétuos (linear + inverse) × Coinbase, cada um na sua escala
+  let acc: number | null = null
+  const perp = tempos.map((t) => {
+    const v = porTs.get(t)
+    for (const c of PERPS) { const par = v?.[c]; if (par) acc = (acc ?? 0) + par[0] - par[1] }
+    return acc
+  })
+  const coinbase = cvd(tempos, porTs, 'spot_coinbase')
+  const sp = saldoRecente(velas, PERPS, janela), sc = saldoRecente(velas, ['spot_coinbase'], janela)
+  let leituraCvd: Leitura | undefined
+  if (sp !== null && sc !== null) {
+    const lado = (v: number) => (v >= 0 ? 'comprando' : 'vendendo')
+    leituraCvd = (sp >= 0) === (sc >= 0)
+      ? { texto: `últimas ${janela} velas: os dois ${lado(sp)} (perpétuos ${absK(Math.abs(sp))}, Coinbase ${absK(Math.abs(sc))} BTC)`, cor: sp >= 0 ? COR.bids : COR.asks }
+      : { texto: `últimas ${janela} velas: perpétuos ${lado(sp)} ${absK(Math.abs(sp))} e Coinbase ${lado(sc)} ${absK(Math.abs(sc))} BTC · ` +
+          (sp >= 0 ? 'alta só do alavancado, sem o à vista' : 'o à vista comprando enquanto o alavancado vende'), cor: NEUTRO }
+  }
+  saida.push({
+    titulo: 'CVD: perpétuos × Coinbase (compra − venda a mercado, somado, BTC)', formato: FMT_BTC, height: 110, ordem: 20,
+    explica: 'amarelo = perpétuos (linear + inverse, Binance + Bybit), azul-claro = Coinbase à vista · cada linha na sua escala, como no aggr.trade: o que importa é a direção · ' +
+      'alta saudável = as duas subindo; só o amarelo subindo = alavancado (squeeze)',
+    leitura: leituraCvd,
+    series: [{ id: 'perp', tipo: 'linha', cor: AMARELO, largura: 1, valores: perp, escalaPropria: true },
+             { id: 'coinbase', tipo: 'linha', cor: COR_EX.coinbase, largura: 2, valores: coinbase }],
+  })
+
+  // 3) compra (para cima) e venda (para baixo) a mercado em cada vela, por mercado
+  const mercados: [string, CampoCvd[], number][] = [['Coinbase à vista', ['spot_coinbase'], 30], ['Binance à vista', ['spot_binance'], 40],
+                                                      ['Perpétuos (linear + inverse)', PERPS, 50]]
+  for (const [nome, campos, ordem] of mercados) {
+    const lados = tempos.map((t) => {
+      const v = porTs.get(t)
+      let c = 0, s = 0, tem = false
+      for (const k of campos) { const par = v?.[k]; if (par) { c += par[0]; s += par[1]; tem = true } }
+      return tem ? [c, s] : null
+    })
+    const saldo = saldoRecente(velas, campos, janela)
+    saida.push({
+      titulo: `${nome}: compra e venda a mercado por vela (BTC)`, formato: FMT_QTD, height: 70, ordem,
+      explica: 'branco para cima = compraram a mercado, vermelho para baixo = venderam',
+      leitura: saldo === null ? undefined
+        : { texto: `últimas ${janela} velas: ${saldo >= 0 ? 'compraram' : 'venderam'} ${absK(Math.abs(saldo))} BTC a mais`, cor: saldo >= 0 ? COR.bids : COR.asks },
+      series: [{ id: 'compra', tipo: 'barra', cor: 'rgba(232,236,242,0.75)', valores: lados.map((l) => (l ? l[0] : null)) },
+               { id: 'venda', tipo: 'barra', cor: VERMELHO, valores: lados.map((l) => (l ? -l[1] : null)) }],
+    })
+  }
+  return saida
+}
+
+/** A aba Aggr: os painéis acima e as liquidações, alinhados às velas do gráfico de cima. */
+export function PaineisAggr({ tempos, range, passo }: { tempos: number[]; range: LogicalRange | null; passo: number }) {
+  const inicio = inicioPaineis(tempos, passo)
+  const qPos = usePosicionamento(inicio, passo)
+  const qLiq = useLiquidacoes(inicio, passo)
+  const paineis = useMemo(() => [...paineisAggr(tempos, qPos.data),
+                                  ...paineisDeBaixo(tempos, undefined, undefined, qLiq.data, undefined).map((p) => ({ ...p, ordem: 60 }))]
+    .sort((a, b) => a.ordem - b.ordem), [tempos, qPos.data, qLiq.data])
+  return (
+    <div className="gpaineis">
+      {paineis.map((p) => <SubChart key={p.titulo} {...p} tempos={tempos} range={range} />)}
+      {(qPos.isPending || qLiq.isPending) && <div className="muted" style={{ fontSize: 12, padding: '8px 0' }}>lendo prêmio, CVD, negócios e liquidações…</div>}
+    </div>
+  )
+}

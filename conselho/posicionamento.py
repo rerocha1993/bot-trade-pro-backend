@@ -216,13 +216,16 @@ def posicionamento_liquido(d_oi: float, delta: float) -> Tuple[float, float]:
 
 
 def _delta_coletor(exchange: str, passo: int, inicio_s: int, fim_s: int) -> Dict[int, Dict]:
-    """Compra e venda a mercado por vela, dos minutos gravados pelo nosso coletor de negócios."""
+    """Compra e venda a mercado por vela, dos minutos gravados pelo nosso coletor de negócios, e o fechamento (o
+    último preço do último minuto com negócio)."""
     saida: Dict[int, Dict] = {}
-    for r in lh.carregar_periodo(exchange, inicio_s, fim_s, PASTA_NEGOCIOS):
+    for r in sorted(lh.carregar_periodo(exchange, inicio_s, fim_s, PASTA_NEGOCIOS), key=lambda r: r["ts"]):
         t = int(r["ts"]) // passo * passo
-        v = saida.setdefault(t, {"compra": 0.0, "venda": 0.0})
+        v = saida.setdefault(t, {"compra": 0.0, "venda": 0.0, "fechamento": None})
         v["compra"] += float(r["compra"])
         v["venda"] += float(r["venda"])
+        if r.get("fechamento"):
+            v["fechamento"] = float(r["fechamento"])
     return saida
 
 
@@ -286,6 +289,9 @@ def trecho(passo: int, inicio_s: int, fim_s: int) -> List[Dict]:
             "perp_bybit": [round(by["compra"], 3), round(by["venda"], 3)] if by else None,
             "spot_binance": [round(s["compra"], 3), round(s["volume"] - s["compra"], 3)] if s else None,
             "spot_coinbase": [round(cb["compra"], 3), round(cb["venda"], 3)] if cb else None,
+            # prêmio da Coinbase (o COINBASE_PREMIUM do aggr.trade): BTC-USD da Coinbase − BTCUSDT à vista da Binance, em
+            # dólares; negativo = o americano vendendo mais que o resto (ou a Binance comprando)
+            "premio": round(cb["fechamento"] - s["fechamento"], 2) if cb and cb.get("fechamento") and s else None,
             "inv_binance": [round(iv["compra"], 3), round(iv["volume"] - iv["compra"], 3)] if iv else None,
             "inv_bybit": [round(byi["compra"], 3), round(byi["venda"], 3)] if byi else None,
             "oi_lin": oi_lin, "oi_inv": oi_inv, "np": np_ or None,

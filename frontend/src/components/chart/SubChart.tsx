@@ -23,6 +23,8 @@ export interface SerieSub {
   cores?: (string | null)[]
   /** espessura da linha (só para `linha`) */
   largura?: number
+  /** escala vertical própria e escondida (como no aggr.trade): duas linhas de tamanhos muito diferentes no mesmo painel */
+  escalaPropria?: boolean
 }
 
 interface Props {
@@ -74,7 +76,9 @@ export default function SubChart({ titulo, explica, leitura, tempos, series, ran
           ? c.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, base: 0 })
           : s.tipo === 'vela'
             ? c.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: true, borderVisible: false })
-            : c.addLineSeries({ priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false })
+            : c.addLineSeries({ priceLineVisible: false, lastValueVisible: !s.escalaPropria, crosshairMarkerVisible: false,
+                                ...(s.escalaPropria ? { priceScaleId: s.id } : {}) })
+        if (s.escalaPropria) c.priceScale(s.id).applyOptions({ scaleMargins: { top: 0.12, bottom: 0.08 } })
         ss.current.set(s.id, serie)
       }
       if (s.tipo === 'vela') {
