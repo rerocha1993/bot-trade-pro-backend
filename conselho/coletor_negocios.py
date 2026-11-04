@@ -10,6 +10,8 @@ coletor ouve o websocket público de cada corretora e agrega, por MINUTO:
 
 Fontes (sem chave, só leitura):
     bybit     perpétuo linear BTCUSDT   publicTrade   S = lado do agressor
+    bybit_inv perpétuo inverse BTCUSD   publicTrade   o mesmo; v vem em contratos de US$ 1 → BTC = v / preço
+              (o inverse é margeado em BTC: o Tradeiros lê o CVD e o OI dele separados do linear)
     binance   à vista BTCUSDT           aggTrade      m = o comprador era o maker → o agressor vendeu
               (o perpétuo da Binance, fstream, não responde daqui; a alavancagem vem da Bybit e do open interest)
     coinbase  à vista BTC-USD           matches       side = lado da ordem MAKER → o agressor é o oposto
@@ -40,6 +42,7 @@ PING_S = 20
 # (url, mensagem de inscrição ou None)
 FONTES = {
     "bybit": ("wss://stream.bybit.com/v5/public/linear", {"op": "subscribe", "args": ["publicTrade.BTCUSDT"]}),
+    "bybit_inv": ("wss://stream.bybit.com/v5/public/inverse", {"op": "subscribe", "args": ["publicTrade.BTCUSD"]}),
     # o websocket de futuros (fstream.binance.com) não responde daqui (testado em 20/10/2026): usa o à vista
     "binance": ("wss://stream.binance.com:9443/ws/btcusdt@aggTrade", None),
     "coinbase": ("wss://ws-feed.exchange.coinbase.com",
@@ -54,6 +57,10 @@ def ler_bybit(msg: Dict) -> List[Negocio]:
     if not str(msg.get("topic", "")).startswith("publicTrade"):
         return []
     return [(int(d["T"]) / 1000.0, float(d["p"]), float(d["v"]), d.get("S") == "Buy") for d in msg.get("data") or []]
+
+
+def ler_bybit_inv(msg: Dict) -> List[Negocio]:
+    return [(ts, p, usd / p, comprou) for ts, p, usd, comprou in ler_bybit(msg) if p > 0]
 
 
 def ler_binance(msg: Dict) -> List[Negocio]:
@@ -74,7 +81,8 @@ def ler_coinbase(msg: Dict) -> List[Negocio]:
     return [(_iso_para_s(msg["time"]), float(msg["price"]), float(msg["size"]), msg.get("side") == "sell")]
 
 
-LEITORES: Dict[str, Callable[[Dict], List[Negocio]]] = {"bybit": ler_bybit, "binance": ler_binance, "coinbase": ler_coinbase}
+LEITORES: Dict[str, Callable[[Dict], List[Negocio]]] = {"bybit": ler_bybit, "bybit_inv": ler_bybit_inv, "binance": ler_binance,
+                                                        "coinbase": ler_coinbase}
 
 
 # ----------------------------------------------------------------- agregação por minuto
@@ -156,7 +164,7 @@ class ColetorNegocios:
                 espera = 1.0
                 ultimo_ping = time.time()
                 while not self.parar.is_set():
-                    if exchange == "bybit" and time.time() - ultimo_ping > PING_S:
+                    if exchange.startswith("bybit") and time.time() - ultimo_ping > PING_S:
                         ws.send(json.dumps({"op": "ping"}))
                         ultimo_ping = time.time()
                     try:

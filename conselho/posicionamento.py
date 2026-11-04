@@ -10,6 +10,19 @@ CVD, open interest e a "distorção de posicionamento" do BTC, por vela, para os
 2. Open interest: contratos abertos em BTC, somando Binance (openInterestHist, só os últimos 30 dias), Bybit e OKX.
    OI subindo = gente NOVA abrindo posição; caindo = gente fechando (ou sendo liquidada).
 
+   Em velas (como o MMT do Maroja, live de 04/11/2026), separado em LINEAR (perpétuo em USDT, margem em dólar) e
+   INVERSE (perpétuo em USD margeado em BTC, onde o Tradeiros diz que entra o dinheiro grande), Binance + Bybit.
+   O inverse vem em dólares (contratos de US$ 1 na Bybit, US$ 100 na Binance): a tela converte ao preço de agora,
+   para a forma da curva ser a dos contratos e não andar só porque o preço andou.
+
+   Net Positioning (o "NS/NL" do MMT): em cada vela, o OI que entrou ou saiu vai para os longs ou para os shorts
+   conforme o lado que agrediu a mercado:
+      OI subiu e compraram   -> longs abrindo        OI subiu e venderam -> shorts abrindo
+      OI caiu e compraram    -> shorts fechando      OI caiu e venderam  -> longs fechando
+   É estimativa (a corretora não diz quem abriu), a mesma conta das plataformas.
+   A leitura do Maroja: no fundo, CVD caindo com OI subindo = shorts novos presos ("volume reativo"); na máxima,
+   delta positivo com OI saindo = stop, liquidação ou realização, não long novo.
+
 3. Distorção (o que o usuário pediu em 03/11/2026: "o mercado subindo e muita gente shortando"). Olha as últimas
    ``JANELA`` velas:
       de alta    o preço subiu, o perpétuo VENDEU a mercado no saldo (delta / volume <= −``R_MIN``) e o OI subiu:
@@ -25,8 +38,9 @@ vantagem"); os robôs não usam.
 from __future__ import annotations
 
 import logging
+from bisect import bisect_right
 from statistics import median
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import requests
 
@@ -48,6 +62,18 @@ OI_BYBIT = {60: "5min", 300: "5min", 900: "15min", 1800: "30min", 3600: "1h", 14
 OI_OKX = {60: "5m", 300: "5m", 900: "15m", 1800: "30m", 3600: "1H", 14400: "4H"}
 PASSOS = tuple(KLINE)
 
+# velas da Binance com o volume do agressor: mercado -> (url, símbolo, campo do volume em BTC, campo da compra em BTC)
+# (no COIN-M os campos 5 e 9 são contratos de US$ 100; os 7 e 10 já vêm em BTC)
+KLINES = {"perp": ("https://fapi.binance.com/fapi/v1/klines", "BTCUSDT", 5, 9),
+          "spot": ("https://api.binance.com/api/v3/klines", "BTCUSDT", 5, 9),
+          "inv": ("https://dapi.binance.com/dapi/v1/klines", "BTCUSD_PERP", 7, 10)}
+
+# OI em velas: de quanto em quanto tempo (s) vêm os pontos para cada tempo do gráfico, para a vela ter máxima e mínima
+OI_PONTO = {60: 300, 300: 300, 900: 300, 1800: 300, 3600: 900, 14400: 3600}
+PERIODO_BINANCE = {300: "5m", 900: "15m", 3600: "1h"}
+PERIODO_BYBIT = {300: "5min", 900: "15min", 3600: "1h"}
+USD_POR_CONTRATO_COINM = 100.0
+
 
 def _json(url: str, params: dict):
     r = requests.get(url, params=params, headers=CABECALHOS, timeout=TIMEOUT_S)
@@ -56,29 +82,32 @@ def _json(url: str, params: dict):
 
 
 # ------------------------------------------------------------------------------------------------ busca
-def velas_agressao(perp: bool, passo: int, inicio_s: int, fim_s: int) -> Dict[int, Dict]:
-    """Velas BTCUSDT da Binance com o volume do agressor: {ts_s: {fechamento, volume, compra}} (compra em BTC)."""
-    url = "https://fapi.binance.com/fapi/v1/klines" if perp else "https://api.binance.com/api/v3/klines"
+def velas_agressao(mercado: str, passo: int, inicio_s: int, fim_s: int) -> Dict[int, Dict]:
+    """Velas da Binance (``mercado`` em KLINES) com o volume do comprador agressor: {ts_s: {fechamento, volume, compra}},
+    volume e compra em BTC."""
+    url, simbolo, i_vol, i_compra = KLINES[mercado]
     saida: Dict[int, Dict] = {}
     desde = inicio_s
     while desde <= fim_s:
-        lote = _json(url, {"symbol": "BTCUSDT", "interval": KLINE[passo], "startTime": desde * 1000,
+        lote = _json(url, {"symbol": simbolo, "interval": KLINE[passo], "startTime": desde * 1000,
                            "endTime": fim_s * 1000, "limit": 1000})
         for c in lote:
-            saida[int(c[0]) // 1000] = {"fechamento": float(c[4]), "volume": float(c[5]), "compra": float(c[9])}
+            saida[int(c[0]) // 1000] = {"fechamento": float(c[4]), "volume": float(c[i_vol]),
+                                        "compra": float(c[i_compra])}
         if len(lote) < 1000:
             break
         desde = int(lote[-1][0]) // 1000 + passo
     return saida
 
 
-def _binance_hist(caminho: str, passo: int, inicio_s: int, fim_s: int, campo: str) -> Dict[int, float]:
+def _binance_hist(caminho: str, periodo: str, inicio_s: int, fim_s: int, campo: str,
+                  base: str = "https://fapi.binance.com", filtro: Optional[dict] = None) -> Dict[int, float]:
     """Séries /futures/data da Binance (só 30 dias): a API devolve as 500 MAIS NOVAS do trecho, então pagina para trás."""
     saida: Dict[int, float] = {}
     fim = fim_s * 1000
     while fim >= inicio_s * 1000:
-        lote = _json("https://fapi.binance.com/futures/data/" + caminho,
-                     {"symbol": "BTCUSDT", "period": OI_BINANCE[passo], "startTime": inicio_s * 1000,
+        lote = _json(base + "/futures/data/" + caminho,
+                     {**(filtro or {"symbol": "BTCUSDT"}), "period": periodo, "startTime": inicio_s * 1000,
                       "endTime": fim, "limit": 500})
         for p in lote:
             saida[int(p["timestamp"]) // 1000] = float(p[campo])
@@ -90,21 +119,24 @@ def _binance_hist(caminho: str, passo: int, inicio_s: int, fim_s: int, campo: st
 
 def oi_binance(passo: int, inicio_s: int, fim_s: int) -> Dict[int, float]:
     """Open interest do perpétuo BTCUSDT da Binance em BTC."""
-    return _binance_hist("openInterestHist", passo, inicio_s, fim_s, "sumOpenInterest")
+    return _binance_hist("openInterestHist", OI_BINANCE[passo], inicio_s, fim_s, "sumOpenInterest")
 
 
 def contas_binance(passo: int, inicio_s: int, fim_s: int) -> Dict[int, float]:
     """Fração das contas do perpétuo da Binance que estão COMPRADAS (0 a 1); o resto está vendido."""
-    return _binance_hist("globalLongShortAccountRatio", passo, inicio_s, fim_s, "longAccount")
+    return _binance_hist("globalLongShortAccountRatio", OI_BINANCE[passo], inicio_s, fim_s, "longAccount")
 
 
-def oi_bybit(passo: int, inicio_s: int, fim_s: int) -> Dict[int, float]:
-    """Open interest do perpétuo BTCUSDT da Bybit em BTC (a API pagina do mais novo para o mais velho)."""
+def oi_bybit(passo: int, inicio_s: int, fim_s: int, inverse: bool = False,
+             intervalo: Optional[str] = None) -> Dict[int, float]:
+    """Open interest do perpétuo da Bybit (a API pagina do mais novo para o mais velho): BTCUSDT em BTC, ou o inverse
+    BTCUSD em dólares (contratos de US$ 1)."""
     saida: Dict[int, float] = {}
     fim = fim_s * 1000
     while fim >= inicio_s * 1000:
         res = _json("https://api.bybit.com/v5/market/open-interest",
-                    {"category": "linear", "symbol": "BTCUSDT", "intervalTime": OI_BYBIT[passo],
+                    {"category": "inverse" if inverse else "linear", "symbol": "BTCUSD" if inverse else "BTCUSDT",
+                     "intervalTime": intervalo or OI_BYBIT[passo],
                      "startTime": inicio_s * 1000, "endTime": fim, "limit": 200})
         lista = (res.get("result") or {}).get("list") or []
         for p in lista:
@@ -131,6 +163,56 @@ def oi_okx(passo: int, inicio_s: int, fim_s: int) -> Dict[int, float]:
             break
         fim = min(int(x[0]) for x in lista) - 1
     return saida
+
+
+def oi_pontos(inverse: bool, ponto: int, inicio_s: int, fim_s: int) -> Dict[int, float]:
+    """OI de Binance + Bybit somado a cada ``ponto`` segundos: linear em BTC, inverse em dólares."""
+    if inverse:
+        bin_ = _binance_hist("openInterestHist", PERIODO_BINANCE[ponto], inicio_s, fim_s, "sumOpenInterest",
+                             base="https://dapi.binance.com", filtro={"pair": "BTCUSD", "contractType": "PERPETUAL"})
+        bin_ = {t: v * USD_POR_CONTRATO_COINM for t, v in bin_.items()}
+    else:
+        bin_ = _binance_hist("openInterestHist", PERIODO_BINANCE[ponto], inicio_s, fim_s, "sumOpenInterest")
+    byb = oi_bybit(0, inicio_s, fim_s, inverse=inverse, intervalo=PERIODO_BYBIT[ponto])
+    return somar_na_grade([bin_, byb], ponto, inicio_s, fim_s)
+
+
+def somar_na_grade(series: List[Dict[int, float]], ponto: int, inicio_s: int, fim_s: int) -> Dict[int, float]:
+    """A soma das séries em cada ponto da grade de ``ponto`` segundos: o último valor de cada uma até ali (no máximo
+    2 pontos de atraso). O ponto só existe quando TODAS têm valor, para a soma não pular de nível."""
+    chaves = [sorted(s) for s in series]
+    saida: Dict[int, float] = {}
+    for p in range(-(-inicio_s // ponto) * ponto, fim_s + 1, ponto):
+        total = 0.0
+        for s, ks in zip(series, chaves):
+            k = bisect_right(ks, p) - 1
+            if k < 0 or p - ks[k] > 2 * ponto:
+                break
+            total += s[ks[k]]
+        else:
+            saida[p] = total
+    return saida
+
+
+def velas_oi(pontos: Dict[int, float], passo: int, tempos: Iterable[int]) -> Dict[int, Optional[List[float]]]:
+    """[abertura, máxima, mínima, fechamento] do OI em cada vela: abre no último ponto até o começo dela e fecha no
+    último até o fim (o fechamento de uma é a abertura da seguinte); a máxima e a mínima vêm dos pontos de dentro.
+    Sem ponto até 2 velas antes do começo, abre no primeiro de dentro."""
+    ks = sorted(pontos)
+    saida: Dict[int, Optional[List[float]]] = {}
+    for t in tempos:
+        i0, i1 = bisect_right(ks, t) - 1, bisect_right(ks, t + passo) - 1
+        primeiro = i0 if i0 >= 0 and t - ks[i0] <= 2 * passo else i0 + 1
+        vals = [pontos[ks[k]] for k in range(primeiro, i1 + 1)]
+        saida[t] = [round(vals[0], 1), round(max(vals), 1), round(min(vals), 1), round(vals[-1], 1)] if vals else None
+    return saida
+
+
+def posicionamento_liquido(d_oi: float, delta: float) -> Tuple[float, float]:
+    """(longs, shorts) que entraram (+) ou saíram (-) na vela, pelo OI e pelo lado que agrediu (ver o topo do arquivo)."""
+    if d_oi == 0 or delta == 0:
+        return 0.0, 0.0
+    return (d_oi, 0.0) if (d_oi > 0) == (delta > 0) else (0.0, d_oi)
 
 
 def _delta_coletor(exchange: str, passo: int, inicio_s: int, fim_s: int) -> Dict[int, Dict]:
@@ -162,10 +244,15 @@ def trecho(passo: int, inicio_s: int, fim_s: int) -> List[Dict]:
     """
     if passo not in KLINE:
         raise ValueError(f"passo: {list(KLINE)}")
-    perp = velas_agressao(True, passo, inicio_s, fim_s)
+    perp = velas_agressao("perp", passo, inicio_s, fim_s)
     tempos = sorted(perp)
-    extras = {"spot": lambda: velas_agressao(False, passo, inicio_s, fim_s),
+    ponto = OI_PONTO[passo]
+    extras = {"spot": lambda: velas_agressao("spot", passo, inicio_s, fim_s),
+              "inv": lambda: velas_agressao("inv", passo, inicio_s, fim_s),
               "bybit": lambda: _delta_coletor("bybit", passo, inicio_s, fim_s),
+              "bybit_inv": lambda: _delta_coletor("bybit_inv", passo, inicio_s, fim_s),
+              "oi_lin": lambda: velas_oi(oi_pontos(False, ponto, inicio_s - 2 * ponto, fim_s + passo), passo, tempos),
+              "oi_inv": lambda: velas_oi(oi_pontos(True, ponto, inicio_s - 2 * ponto, fim_s + passo), passo, tempos),
               "coinbase": lambda: _delta_coletor("coinbase", passo, inicio_s, fim_s),
               "oi_binance": lambda: _degrau(oi_binance(passo, inicio_s - 3600, fim_s), tempos),
               "oi_bybit": lambda: _degrau(oi_bybit(passo, inicio_s - 3600, fim_s), tempos),
@@ -182,12 +269,26 @@ def trecho(passo: int, inicio_s: int, fim_s: int) -> List[Dict]:
     for t in tempos:
         p, s = perp[t], dados["spot"].get(t)
         by, cb = dados["bybit"].get(t), dados["coinbase"].get(t)
+        iv, byi = dados["inv"].get(t), dados["bybit_inv"].get(t)
+        oi_lin, oi_inv = dados["oi_lin"].get(t), dados["oi_inv"].get(t)
+        # Net Positioning de cada grupo: o OI da vela (o inverse em BTC ao preço dela) e o saldo a mercado das fontes
+        np_ = {}
+        for grupo, oi_v, partes in (
+                ("lin", oi_lin, [(p["compra"], p["volume"] - p["compra"]), by and (by["compra"], by["venda"])]),
+                ("inv", oi_inv, [iv and (iv["compra"], iv["volume"] - iv["compra"]), byi and (byi["compra"], byi["venda"])])):
+            partes = [x for x in partes if x]
+            if oi_v and partes:
+                d_oi = (oi_v[3] - oi_v[0]) / (p["fechamento"] if grupo == "inv" else 1.0)
+                np_[grupo] = [round(x, 2) for x in posicionamento_liquido(d_oi, sum(c - v for c, v in partes))]
         linhas.append({
             "ts": t, "fechamento": p["fechamento"],
             "perp_binance": [round(p["compra"], 3), round(p["volume"] - p["compra"], 3)],
             "perp_bybit": [round(by["compra"], 3), round(by["venda"], 3)] if by else None,
             "spot_binance": [round(s["compra"], 3), round(s["volume"] - s["compra"], 3)] if s else None,
             "spot_coinbase": [round(cb["compra"], 3), round(cb["venda"], 3)] if cb else None,
+            "inv_binance": [round(iv["compra"], 3), round(iv["volume"] - iv["compra"], 3)] if iv else None,
+            "inv_bybit": [round(byi["compra"], 3), round(byi["venda"], 3)] if byi else None,
+            "oi_lin": oi_lin, "oi_inv": oi_inv, "np": np_ or None,
             "oi": {ex: (round(dados[f"oi_{ex}"].get(t), 1) if dados[f"oi_{ex}"].get(t) is not None else None)
                    for ex in ("binance", "bybit", "okx")},
             "contas_long": round(dados["contas"][t], 4) if dados["contas"].get(t) is not None else None,

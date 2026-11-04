@@ -11,6 +11,7 @@ corretora:
 
 Fontes (sem chave, só leitura; testadas em 21/10/2026):
     bybit   allLiquidation.BTCUSDT (perpétuo linear)   S = "Buy" → long liquidado, "Sell" → short liquidado
+    bybit_inv allLiquidation.BTCUSD (perpétuo inverse)  o mesmo; v em contratos de US$ 1 → BTC = v / preço
     okx     liquidation-orders SWAP                     BTC-USDT-SWAP (0,01 BTC por contrato) e BTC-USD-SWAP
                                                         (US$ 100 por contrato); side "sell" → long liquidado
     (a Binance futuros, fstream, não responde daqui; as corretoras não guardam histórico público longo de
@@ -34,6 +35,7 @@ PING_S = 20
 
 FONTES = {
     "bybit": ("wss://stream.bybit.com/v5/public/linear", {"op": "subscribe", "args": ["allLiquidation.BTCUSDT"]}),
+    "bybit_inv": ("wss://stream.bybit.com/v5/public/inverse", {"op": "subscribe", "args": ["allLiquidation.BTCUSD"]}),
     "okx": ("wss://ws.okx.com:8443/ws/v5/public", {"op": "subscribe", "args": [{"channel": "liquidation-orders", "instType": "SWAP"}]}),
 }
 
@@ -46,6 +48,10 @@ def ler_bybit(msg: Dict) -> List[Liquidacao]:
     if not str(msg.get("topic", "")).startswith("allLiquidation"):
         return []
     return [(int(d["T"]) / 1000.0, float(d["p"]), float(d["v"]), d.get("S") == "Buy") for d in msg.get("data") or []]
+
+
+def ler_bybit_inv(msg: Dict) -> List[Liquidacao]:
+    return [(ts, p, usd / p, era_long) for ts, p, usd, era_long in ler_bybit(msg) if p > 0]
 
 
 def ler_okx(msg: Dict) -> List[Liquidacao]:
@@ -66,7 +72,7 @@ def ler_okx(msg: Dict) -> List[Liquidacao]:
     return saida
 
 
-LEITORES: Dict[str, Callable[[Dict], List[Liquidacao]]] = {"bybit": ler_bybit, "okx": ler_okx}
+LEITORES: Dict[str, Callable[[Dict], List[Liquidacao]]] = {"bybit": ler_bybit, "bybit_inv": ler_bybit_inv, "okx": ler_okx}
 
 
 class AgregadorLiquidacoes:
@@ -124,7 +130,7 @@ class ColetorLiquidacoes:
                 ultimo_ping = time.time()
                 while not self.parar.is_set():
                     if time.time() - ultimo_ping > PING_S:
-                        ws.send(json.dumps({"op": "ping"}) if exchange == "bybit" else "ping")
+                        ws.send(json.dumps({"op": "ping"}) if exchange.startswith("bybit") else "ping")
                         ultimo_ping = time.time()
                     try:
                         bruto = ws.recv()

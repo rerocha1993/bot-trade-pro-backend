@@ -136,6 +136,12 @@ export interface Posicionamento {
     ts: number; fechamento: number
     perp_binance: [number, number]; perp_bybit: [number, number] | null
     spot_binance: [number, number] | null; spot_coinbase: [number, number] | null
+    /** perpétuo inverse (BTCUSD margeado em BTC): COIN-M da Binance e Bybit do nosso coletor */
+    inv_binance: [number, number] | null; inv_bybit: [number, number] | null
+    /** OI em vela [abertura, máxima, mínima, fechamento], Binance + Bybit: linear em BTC, inverse em dólares */
+    oi_lin: [number, number, number, number] | null; oi_inv: [number, number, number, number] | null
+    /** Net Positioning: [longs, shorts] que entraram (+) ou saíram (−) na vela, em BTC, por grupo */
+    np: { lin?: [number, number]; inv?: [number, number] } | null
     oi: Record<'binance' | 'bybit' | 'okx', number | null>; oi_total: number | null; contas_long: number | null
     distorcao: DistorcaoVela | null
   }[]

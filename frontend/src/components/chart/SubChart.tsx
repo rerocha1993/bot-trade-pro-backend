@@ -12,10 +12,13 @@ export const LARGURA_ESCALA = 72
 
 export interface SerieSub {
   id: string
-  tipo: 'barra' | 'linha'
+  tipo: 'barra' | 'linha' | 'vela'
   cor: string
-  /** um valor por tempo de `tempos` (null = sem dado naquela vela) */
+  /** um valor por tempo de `tempos` (null = sem dado naquela vela); em `vela`, o fechamento */
   valores: (number | null)[]
+  /** só para `vela`: [abertura, máxima, mínima, fechamento] por tempo, e a cor da vela que caiu (`cor` = a que subiu) */
+  velas?: ([number, number, number, number] | null)[]
+  corBaixa?: string
   /** cor por barra (opcional) */
   cores?: (string | null)[]
   /** espessura da linha (só para `linha`) */
@@ -38,7 +41,7 @@ interface Props {
 export default function SubChart({ titulo, explica, leitura, tempos, series, range, formato, height = 90 }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
-  const ss = useRef<Map<string, ISeriesApi<'Histogram'> | ISeriesApi<'Line'>>>(new Map())
+  const ss = useRef<Map<string, ISeriesApi<'Histogram'> | ISeriesApi<'Line'> | ISeriesApi<'Candlestick'>>>(new Map())
 
   useEffect(() => {
     if (!el.current) return
@@ -69,8 +72,19 @@ export default function SubChart({ titulo, explica, leitura, tempos, series, ran
       if (!serie) {
         serie = s.tipo === 'barra'
           ? c.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, base: 0 })
-          : c.addLineSeries({ priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false })
+          : s.tipo === 'vela'
+            ? c.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: true, borderVisible: false })
+            : c.addLineSeries({ priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false })
         ss.current.set(s.id, serie)
+      }
+      if (s.tipo === 'vela') {
+        const baixa = s.corBaixa ?? s.cor
+        ;(serie as ISeriesApi<'Candlestick'>).applyOptions({ upColor: s.cor, downColor: baixa, wickUpColor: s.cor, wickDownColor: baixa })
+        ;(serie as ISeriesApi<'Candlestick'>).setData(tempos.map((t, i) => {
+          const v = s.velas?.[i]
+          return v && v.every(Number.isFinite) ? { time: t as UTCTimestamp, open: v[0], high: v[1], low: v[2], close: v[3] } : { time: t as UTCTimestamp }
+        }))
+        continue
       }
       serie.applyOptions(s.tipo === 'linha' ? { color: s.cor, lineWidth: (s.largura ?? 2) as 1 | 2 | 3 | 4 } : { color: s.cor })
       // um ponto por vela; sem dado vira "espaço em branco", que mantém o alinhamento com o gráfico de cima

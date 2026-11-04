@@ -64,3 +64,27 @@ def test_sem_oi_subindo_nao_acende():
         compras[i], vendas[i] = 4.0, 9.0
         ois[i] = 1000.0 - 10 * (k + 1)            # OI caindo: é gente fechando, não abrindo short
     assert pos.distorcao(_serie(precos, compras, vendas, ois))[-1]["lado"] is None
+
+
+def test_soma_na_grade_so_quando_todas_as_corretoras_tem_valor():
+    a = {0: 10.0, 300: 11.0, 600: 12.0}
+    b = {300: 5.0, 600: 6.0}
+    assert pos.somar_na_grade([a, b], 300, 0, 600) == {300: 16.0, 600: 18.0}
+    # uma série parada há mais de 2 pontos deixa de valer
+    assert pos.somar_na_grade([a, {0: 1.0}], 300, 0, 1200) == {0: 11.0, 300: 12.0, 600: 13.0}
+
+
+def test_vela_do_oi_abre_no_comeco_fecha_no_fim_e_pega_maxima_e_minima_de_dentro():
+    pontos = {0: 100.0, 300: 104.0, 600: 98.0, 900: 101.0, 1200: 103.0}
+    velas = pos.velas_oi(pontos, 900, [0, 900])
+    assert velas[0] == [100.0, 104.0, 98.0, 101.0]
+    assert velas[900] == [101.0, 103.0, 101.0, 103.0]     # a vela de agora fecha no último ponto que existe
+    assert pos.velas_oi(pontos, 900, [5400])[5400] is None
+
+
+def test_net_positioning_manda_o_oi_para_o_lado_que_agrediu():
+    assert pos.posicionamento_liquido(10, 3) == (10, 0)      # OI subiu e compraram: longs abrindo
+    assert pos.posicionamento_liquido(10, -3) == (0, 10)     # OI subiu e venderam: shorts abrindo
+    assert pos.posicionamento_liquido(-10, 3) == (0, -10)    # OI caiu e compraram: shorts fechando
+    assert pos.posicionamento_liquido(-10, -3) == (-10, 0)   # OI caiu e venderam: longs fechando
+    assert pos.posicionamento_liquido(0, 5) == (0, 0)
