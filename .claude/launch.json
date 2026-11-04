@@ -60,6 +60,15 @@
         "set VITE_API_URL=http://127.0.0.1:8012&& npm --prefix frontend run dev -- --port 5176 --strictPort"
       ],
       "port": 5176
+    },
+    {
+      "name": "painel-dev-servidor",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_API_URL=http://127.0.0.1:8031&& npm --prefix frontend run dev -- --port 5177 --strictPort"
+      ],
+      "port": 5177
     }
   ]
 }

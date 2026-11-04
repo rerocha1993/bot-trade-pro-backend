@@ -6,6 +6,8 @@ Leituras de fluxo para o gráfico (conselho/fluxo.py):
     GET /api/fluxo/absorcao?inicio                   a "distorção": parede no livro + agressão alavancada contra ela
                                                      + preço travado; é a nuvem que aparece no gráfico
     GET /api/fluxo/liquidacoes?inicio&passo          liquidações dos perpétuos (Bybit + OKX) por vela: long e short
+    GET /api/fluxo/posicionamento?inicio&passo       CVD (alavancado e à vista), open interest, contas compradas e a
+                                                     distorção (preço para um lado, alavancados apostando no outro)
 
 `inicio` e os `ts` da resposta em segundos (UTC). Só lê dados/negocios e dados/livro, mais o open interest público
 da Bybit; nada envia ordem.
@@ -16,8 +18,9 @@ from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from api import cache_dias
-from conselho import fluxo, livro_historico as lh, mercado
+from conselho import fluxo, livro_historico as lh, mercado, posicionamento as pos
 from conselho.coletor_liquidacoes import FONTES as FONTES_LIQ, PASTA_LIQUIDACOES
+from conselho.coletor_negocios import PASSO_USD as FAIXA_COLETOR
 
 router = APIRouter()
 
@@ -83,7 +86,7 @@ ABANDONO_POR_PASSO = {300: 0.002, 900: 0.004, 1800: 0.005, 3600: 0.007, 14400: 0
 
 @router.get("/footprint")
 def footprint(passo: int = Query(1800, description="segundos por vela: 300, 900, 1800, 3600 ou 14400"),
-              linha: float = Query(50.0, ge=5.0, le=1000.0, description="altura da linha de preço em US$"),
+              linha: float = Query(40.0, ge=20.0, le=1000.0, description="altura da linha de preço em US$ (múltiplo de 20)"),
               n: int = Query(150, ge=1, le=500, description="quantas velas, das mais recentes"),
               exchanges: str = Query("bybit")) -> Dict:
     """
@@ -92,6 +95,10 @@ def footprint(passo: int = Query(1800, description="segundos por vela: 300, 900,
     """
     if passo not in ABANDONO_POR_PASSO:
         raise HTTPException(status_code=400, detail=f"passo: {sorted(ABANDONO_POR_PASSO)}")
+    # o coletor grava faixas de US$ 20: uma linha que não é múltiplo delas (50, 250) repartiria faixas pela metade
+    # e jogaria até ~30% do volume da vela na linha vizinha (conferido com o arquivo oficial da Bybit em 03/11/2026)
+    if linha % FAIXA_COLETOR:
+        raise HTTPException(status_code=400, detail=f"linha: múltiplo de US$ {FAIXA_COLETOR:g}")
     exs = [e.strip() for e in exchanges.split(",") if e.strip() in EXCHANGES_NEGOCIOS] or ["bybit"]
     fim_s = int(time.time())
     inicio_s = fim_s - passo * (n + 4)                   # +4 velas para a confirmação dos presos no começo
@@ -133,3 +140,26 @@ def liquidacoes(inicio: Optional[int] = Query(None), fim: Optional[int] = Query(
                 v[k] += r.get(k, 0)
     return {"inicio": inicio_s, "fim": fim_s, "passo_s": passo, "exchanges": list(FONTES_LIQ), "desde": primeiro,
             "velas": [velas[t] for t in sorted(velas)]}
+
+
+@router.get("/posicionamento")
+def posicionamento(inicio: Optional[int] = Query(None), fim: Optional[int] = Query(None),
+                   passo: int = Query(300, description="segundos por vela: 60, 300, 900, 1800, 3600 ou 14400")) -> Dict:
+    """
+    Por vela: compra/venda a mercado do perpétuo e do à vista (para o CVD), o OI de Binance, Bybit e OKX, a fração de
+    contas compradas da Binance e a leitura da distorção (conselho/posicionamento.py).
+    """
+    if passo not in pos.PASSOS:
+        raise HTTPException(status_code=400, detail=f"passo: {list(pos.PASSOS)}")
+    inicio_s, fim_s = _periodo(inicio, fim)
+    # a distorção olha JANELA velas para trás: busca um pouco antes do início
+    antes = inicio_s - pos.JANELA * passo
+    try:
+        pedacos = cache_dias.por_dia(("posicionamento", passo), antes, fim_s, lambda a, b: {"linhas": pos.trecho(passo, a, b)})
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"velas da Binance indisponíveis: {e}")
+    linhas = sorted({l["ts"]: l for p in pedacos for l in p["linhas"] if antes <= l["ts"] <= fim_s}.values(),
+                    key=lambda l: l["ts"])
+    leituras = {d["ts"]: d for d in pos.distorcao(linhas)}
+    velas = [{**l, "oi_total": pos.oi_total(l), "distorcao": leituras.get(l["ts"])} for l in linhas if l["ts"] >= inicio_s]
+    return {"inicio": inicio_s, "fim": fim_s, "passo_s": passo, "limites": pos.limites(linhas), "velas": velas}

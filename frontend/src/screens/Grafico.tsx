@@ -12,21 +12,27 @@
  *
  * Nuvens (só no COINBASE:BTC-USD): o Order Book Depth Overlay do TRDR desenhado em cada vela, com o livro da Coinbase;
  * `&n=0` desliga.
+ *
+ * Fibonacci: a ferramenta de retração da TradingView. Dois cliques (ou arrastar) desenham; clicar seleciona, arrastar
+ * as pontas ou o corpo move, Delete apaga, duplo clique (ou o botão ⚙) abre a configuração. Fica guardado por moeda
+ * neste navegador.
  */
 import { useQuery } from '@tanstack/react-query'
 import type { LogicalRange } from 'lightweight-charts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useAbsorcao, useAvisosMapa, useFootprint, useNuvensCalor, useNuvensTop, usePresos } from '../api/hooks'
+import { useAbsorcao, useAvisosMapa, useFootprint, useNuvensCalor, useNuvensTop, usePosicionamento, usePresos } from '../api/hooks'
 import { api } from '../api/client'
 import type { NakedLongo, NuvensOverlay, SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
+import FiboConfig from '../components/chart/FiboConfig'
 import FootprintChart from '../components/chart/FootprintChart'
 import GraficoTV, { casas, SEGUNDOS, type InfoGrafico, type Vela } from '../components/chart/GraficoTV'
-import PaineisFluxo, { PASSO_MAX_PAINEIS } from '../components/chart/PaineisFluxo'
+import PaineisFluxo, { inicioPaineis, marcasDistorcao, PASSO_MAX_PAINEIS } from '../components/chart/PaineisFluxo'
 import { COR_TPO, type Selecao } from '../components/chart/tpoDesenho'
 import ParedesAgora from '../components/ParedesAgora'
 import { COR_FLUXO, colunasDaAbsorcao, imagemCalor, marcasAbsorcao, marcasPresos } from '../lib/camadasFluxo'
 import type { ChartLevel } from '../lib/chart-tipos'
+import { guardarFibos, lerFibos, type Fibo } from '../lib/fibo'
 
 const PADRAO = { s: 'COINBASE:BTC-USD', t: '30m' }
 const TEMPOS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const
@@ -55,8 +61,9 @@ const CAMADAS = [
   { id: 'pre', nome: 'Presos', dica: 'Seta e faixa amarela onde ficou gente presa no footprint (entrou forte e o preço fechou do outro lado)' },
   { id: 'par', nome: 'Paredes', dica: 'Mapa de calor: todo o livro acima de 3x o normal (Coinbase + Binance + Bybit)' },
   { id: 'niv', nome: 'Níveis', dica: 'Linhas dos 5 maiores níveis de compra e de venda no livro agora e dos naked POCs de dia, semana e mês' },
+  { id: 'dis', nome: 'Distorção', dica: 'Seta "D" onde o preço foi para um lado e os alavancados abriram posição no outro (verde embaixo = vendidos contra a alta; vermelha em cima = comprados contra a queda)' },
 ] as const
-const CAMADAS_PADRAO = 'abs,pre'
+const CAMADAS_PADRAO = 'abs,pre,dis'
 /** o que `ir` (trocar tempo, moeda ou TPO) leva junto no endereço */
 const MANTER_NO_ENDERECO = ['p', 'c', 'pt', 'v', 'fpt', 'fpl']
 const PASSO_FLUXO = 300
@@ -64,7 +71,8 @@ const SETE_DIAS_FLUXO = 7 * 86400 - 600
 const DIAS_PAREDES = 3
 const TFS_PRESOS = [['300', '5 min'], ['1800', '30 min']] as const
 const TFS_FP = [['300', '5m'], ['900', '15m'], ['1800', '30m'], ['3600', '1h'], ['14400', '4h']] as const
-const LINHAS_FP = ['10', '20', '50', '100', '250', '500'] as const
+// múltiplos da faixa de US$ 20 que o coletor grava; 50 ou 250 repartiriam faixas e poriam volume na linha errada
+const LINHAS_FP = ['20', '40', '100', '200', '500'] as const
 /** a grade do livro do servidor: 0,1% do preço arredondado a US$ 10 (api/routes/nuvens_routes.py) */
 const gradeLivro = (preco: number) => Math.max(10, Math.round((preco * 0.001) / 10) * 10)
 /** nesses tempos o dia tem velas demais de largas para o perfil caber: ligar o TPO passa para 30 min */
@@ -182,6 +190,34 @@ export default function Grafico() {
   const [info, setInfo] = useState<InfoGrafico | null>(null)
   useEffect(() => { setJuntando(false) }, [simbolo])
 
+  // Fibonacci: os desenhos desta moeda, o selecionado, a ferramenta e a configuração aberta (com a cópia para Cancelar)
+  const [fibos, setFibos] = useState<Fibo[]>(() => lerFibos(simbolo))
+  const [fiboSel, setFiboSel] = useState<string | null>(null)
+  const [desenhandoFibo, setDesenhandoFibo] = useState(false)
+  const [ima, setIma] = useState(false)
+  const [config, setConfig] = useState<{ id: string; antes: Fibo } | null>(null)
+  useEffect(() => { setFibos(lerFibos(simbolo)); setFiboSel(null); setDesenhandoFibo(false); setConfig(null) }, [simbolo])
+  const mudarFibos = useCallback((f: Fibo[]) => { setFibos(f); guardarFibos(simbolo, f) }, [simbolo])
+  const abrirConfig = useCallback((id: string) => {
+    const f = fibos.find((x) => x.id === id)
+    if (f) { setFiboSel(id); setConfig({ id, antes: f }) }
+  }, [fibos])
+  const apagarFibo = useCallback(() => {
+    if (!fiboSel) return
+    mudarFibos(fibos.filter((f) => f.id !== fiboSel)); setFiboSel(null)
+  }, [fiboSel, fibos, mudarFibos])
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => {
+      const alvo = e.target as HTMLElement | null
+      if (config || escolhendo || (alvo && /^(INPUT|SELECT|TEXTAREA)$/.test(alvo.tagName))) return
+      if ((e.key === 'Delete' || e.key === 'Backspace') && fiboSel) { e.preventDefault(); apagarFibo() }
+      if (e.key === 'Escape') { setDesenhandoFibo(false); setFiboSel(null) }
+    }
+    window.addEventListener('keydown', tecla)
+    return () => window.removeEventListener('keydown', tecla)
+  }, [config, escolhendo, fiboSel, apagarFibo])
+  const fiboAberto = config ? fibos.find((f) => f.id === config.id) ?? null : null
+
   useEffect(() => {
     try { localStorage.setItem(GUARDADO, JSON.stringify({ s: simbolo, t: tempo })) } catch { /* modo privado */ }
   }, [simbolo, tempo])
@@ -216,7 +252,7 @@ export default function Grafico() {
   const tfPresos = params.get('pt') === '300' ? 300 : 1800
   const vistaFp = ehBtc && params.get('v') === 'fp'
   const tfFp = TFS_FP.some(([v]) => v === params.get('fpt')) ? Number(params.get('fpt')) : 1800
-  const linhaFp = (LINHAS_FP as readonly string[]).includes(params.get('fpl') ?? '') ? Number(params.get('fpl')) : 50
+  const linhaFp = (LINHAS_FP as readonly string[]).includes(params.get('fpl') ?? '') ? Number(params.get('fpl')) : 40
   // os dados de fluxo vão até 7 dias atrás (arredondado a 5 min para a chave do pedido não mudar a cada render)
   const inicioFluxo = ehBtc && !vistaFp && velasG.length
     ? Math.max(Math.floor(velasG[0].t / PASSO_FLUXO) * PASSO_FLUXO, Math.floor((Date.now() / 1000 - SETE_DIAS_FLUXO) / PASSO_FLUXO) * PASSO_FLUXO)
@@ -293,6 +329,10 @@ export default function Grafico() {
   const absorcao = useMemo(() => (ehBtc && camadasOn.has('abs') && qAbs.data ? marcasAbsorcao(qAbs.data.eventos) : null), [ehBtc, camadasOn, qAbs.data])
   const presos = useMemo(() => (ehBtc && camadasOn.has('pre') && qPresos.data
     ? marcasPresos(qPresos.data.eventos, tfPresos, velasG, SEGUNDOS[tempo]) : null), [ehBtc, camadasOn, qPresos.data, tfPresos, velasG, tempo])
+  // a distorção usa o mesmo pedido dos painéis de baixo (mesmo início e passo): não busca duas vezes
+  const qPos = usePosicionamento(ehBtc && camadasOn.has('dis') && fluxoCabe ? inicioPaineis(tempos, SEGUNDOS[tempo]) : null, SEGUNDOS[tempo])
+  const marcadores = useMemo(() => [...(presos?.markers ?? []), ...(ehBtc && camadasOn.has('dis') ? marcasDistorcao(qPos.data) : [])],
+    [presos, ehBtc, camadasOn, qPos.data])
   // a grade fica a mesma enquanto a moeda não muda (com o preço perto de US$ 105 mil ela alternaria entre 100 e 110)
   const gradeFixa = useRef<{ s: string; g: number } | null>(null)
   if (precoRef && gradeFixa.current?.s !== simbolo) gradeFixa.current = { s: simbolo, g: gradeLivro(precoRef) }
@@ -364,6 +404,21 @@ export default function Grafico() {
               title="Painéis embaixo do gráfico: livro à vista e alavancado, liquidações e funding do BTC, e as paredes de agora">Fluxo</button>
           )}
         </div>
+        <div className="gferramentas">
+          <button type="button" className={'gbotao' + (desenhandoFibo ? ' on' : '')} disabled={vistaFp}
+            onClick={() => { setDesenhandoFibo((v) => !v); setFiboSel(null) }}
+            title="Fibonacci de retração: clique no começo do movimento e depois no fim (ou arraste). Esc cancela">Fibonacci</button>
+          <button type="button" className={'gbotao' + (ima ? ' on' : '')} disabled={vistaFp} onClick={() => setIma((v) => !v)}
+            title="Ímã: o ponto gruda na abertura, máxima, mínima ou fechamento da vela">Ímã</button>
+          {fiboSel && <>
+            <button type="button" className="gbotao" onClick={() => abrirConfig(fiboSel)} title="Configurar o Fibonacci selecionado (ou duplo clique nele)">⚙ configurar</button>
+            <button type="button" className="gbotao" onClick={apagarFibo} title="Apagar o Fibonacci selecionado (Delete)">✕ apagar</button>
+          </>}
+          {fibos.length > 1 && !fiboSel && (
+            <button type="button" className="gbotao" onClick={() => { if (window.confirm(`Apagar os ${fibos.length} Fibonacci desta moeda?`)) mudarFibos([]) }}
+              title="Apagar todos os Fibonacci desta moeda">✕ todos os Fibonacci</button>
+          )}
+        </div>
         {ult && (
           <span className="mono gpreco">
             {ult.c.toLocaleString('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec })}
@@ -372,6 +427,9 @@ export default function Grafico() {
         )}
         {!temNuvem && <span className="gnota muted">sem nuvens: só no BTC-USD da Coinbase</span>}
       </div>
+      {desenhandoFibo && (
+        <div className="glegenda-tpo"><span className="gjuncao">Fibonacci: clique no começo do movimento e depois no fim (ou arraste de um ao outro) · Esc cancela{ima ? ' · ímã ligado' : ''}</span></div>
+      )}
       <div className="gatalhos">
         {ATALHOS.map((s) => (
           <button key={s} type="button" className={'chip' + (s === simbolo ? ' on' : '')} onClick={() => ir(s, tempo)}>
@@ -420,6 +478,9 @@ export default function Grafico() {
           {camadasOn.has('pre') && <span><b style={{ color: COR_FLUXO.presos }}>Presos</b>: seta e faixa amarela no preço de quem ficou preso; "presos?" ainda espera as próximas velas
             {qPresos.data && <span className="muted"> · {qPresos.data.eventos.filter((e) => e.confirmado !== false).length} no período</span>}</span>}
           {camadasOn.has('par') && <span><b style={{ color: '#ece86e' }}>Paredes</b>: livro acima de 3x o normal nos últimos 3 dias; esquenta (até amarelo) com 12x ou mais{qCalor.isPending && <span className="muted"> · lendo o livro…</span>}</span>}
+          {camadasOn.has('dis') && <span><b style={{ color: COR_FLUXO.bids }}>Distorção</b>: seta "D" verde embaixo = o preço subiu enquanto os alavancados abriam short (combustível para alta forçada); vermelha em cima = o preço caiu enquanto eles abriam long; "D×2" = agressão e contas juntas
+            {!fluxoCabe ? <span className="muted"> · só até velas de 4 h</span>
+              : qPos.data && <span className="muted"> · {qPos.data.velas.filter((v) => v.distorcao?.lado).length} velas no período</span>}</span>}
           {camadasOn.has('niv') && <span><b>Níveis</b>: os 5 maiores níveis de compra (verde) e de venda (vermelho) no livro agora, em BTC, e os naked POCs (amarelo) de dia, semana e mês que o preço ainda não tocou</span>}
           <span className="muted">leitura, não sinal: nada disso passou no teste contra sorteio</span>
         </div>
@@ -449,13 +510,20 @@ export default function Grafico() {
           </div>
         ) : <>
         <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} nuvens={nuvens} onDia={escolherDia}
-          onVelas={setVelasG} onRange={setRange} camadas={camadas} marcadores={presos?.markers} niveis={niveis} />
+          onVelas={setVelasG} onRange={setRange} camadas={camadas} marcadores={marcadores} niveis={niveis}
+          fibos={fibos} onFibos={mudarFibos} fiboSel={fiboSel} onFiboSel={setFiboSel} onFiboConfig={abrirConfig}
+          desenhandoFibo={desenhandoFibo} onFiboPronto={() => setDesenhandoFibo(false)} ima={ima} />
         {ehBtc && fluxoLigado && (fluxoCabe
           ? tempos.length > 0 && <PaineisFluxo tempos={tempos} range={range} passo={SEGUNDOS[tempo]} />
           : <div className="muted" style={{ fontSize: 12, padding: '10px 0' }}>os painéis de livro, liquidações e funding vão até velas de 4 h: escolha um tempo menor para vê-los</div>)}
         </>}
       </div>
       {ehBtc && fluxoLigado && <ParedesAgora preco={ult?.c ?? null} />}
+      {config && fiboAberto && (
+        <FiboConfig fibo={fiboAberto} casas={dec}
+          onMudar={(f) => setFibos((l) => l.map((x) => (x.id === f.id ? f : x)))}
+          onFechar={(ok) => { mudarFibos(ok ? fibos : fibos.map((x) => (x.id === config.id ? config.antes : x))); setConfig(null) }} />
+      )}
       {escolhendo && <Seletor atual={simbolo} onFechar={() => setEscolhendo(false)} onEscolher={(s) => { setEscolhendo(false); ir(s, tempo) }} />}
     </div>
   )

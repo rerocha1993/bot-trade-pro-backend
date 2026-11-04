@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from './client'
-import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoLiquidacoes, FluxoPresos, FundingAgregado, LivroPerp, MapaDoDia, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo, CarteiraStatus } from './types'
+import type { AvisosUltimos, FluxoAbsorcao, FluxoFootprint, FluxoLiquidacoes, FluxoPresos, FundingAgregado, LivroPerp, MapaDoDia, Posicionamento, NuvensCalor, NuvensOverlay, NuvensTop, RobosStatus, TradeRobo, CarteiraStatus } from './types'
 import { candlesDaApi } from './adapters'
 
 /** Candles públicos da Bybit, servidos pela API do conselho (timestamp em ms na API, em segundos no gráfico). */
@@ -65,6 +65,12 @@ export const useTradesRobos = () => useQuery({
 export const useLiquidacoes = (inicio: number | null, passo = 300) => useQuery({
   queryKey: ['liquidacoes', inicio, passo], enabled: inicio !== null, placeholderData: keepPreviousData, refetchInterval: 60_000,
   queryFn: () => api.get<FluxoLiquidacoes>('/api/fluxo/liquidacoes', { inicio: inicio as number, passo }),
+})
+
+/** CVD (perpétuo e à vista), open interest, contas compradas e a distorção, por vela (BTC). */
+export const usePosicionamento = (inicio: number | null, passo = 300) => useQuery({
+  queryKey: ['posicionamento', inicio, passo], enabled: inicio !== null, placeholderData: keepPreviousData, refetchInterval: 60_000,
+  queryFn: () => api.get<Posicionamento>('/api/fluxo/posicionamento', { inicio: inicio as number, passo }),
 })
 
 /** Funding de Bybit, Binance e OKX e a média entre eles (muda de 8 em 8 h). */

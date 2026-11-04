@@ -47,6 +47,8 @@ export interface ChartMarker {
   time: number
   side: 'buy' | 'sell' | 'exit' | 'info'
   text?: string
+  /** cor da seta (padrão: o amarelo dos presos) */
+  color?: string
 }
 
 /**

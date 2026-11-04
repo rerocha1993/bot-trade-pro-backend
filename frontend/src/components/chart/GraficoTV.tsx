@@ -7,13 +7,15 @@
  */
 import {
   ColorType, CrosshairMode, LineStyle, createChart,
-  type IChartApi, type IPriceLine, type ISeriesApi, type LogicalRange, type MouseEventParams, type Time, type UTCTimestamp,
+  type IChartApi, type IPriceLine, type ISeriesApi, type Logical, type LogicalRange, type MouseEventParams, type Time, type UTCTimestamp,
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import type { NuvensOverlay, TpoComposto, TpoDia, TpoGrafico, VelasGrafico } from '../../api/types'
 import type { ChartLevel, ChartMarker } from '../../lib/chart-tipos'
+import { novoId, padraoFibo, type Fibo } from '../../lib/fibo'
 import { CamadasDesenho, type Camadas } from './camadasDesenho'
+import { FiboDesenho, type ParteFibo } from './fiboDesenho'
 import { NuvensDesenho } from './nuvensDesenho'
 import { LARGURA_ESCALA } from './SubChart'
 import { TpoDesenho, type Selecao } from './tpoDesenho'
@@ -30,6 +32,8 @@ const VELAS_NA_TELA = 160
 const CARREGAR_QUANDO_FALTAM = 30
 /** o ponteiro andou menos que isso entre apertar e soltar: é clique */
 const ARRASTO_PX = 5
+/** dois cliques no mesmo Fibonacci em menos que isso: abre a configuração */
+const DUPLO_MS = 400
 const N_MAX_API = 2000
 const ALTA = '#26a69a', BAIXA = '#ef5350'
 
@@ -77,6 +81,19 @@ interface Props {
   niveis?: ChartLevel[]
   /** arrasto e zoom: os painéis de baixo seguem o mesmo intervalo */
   onRange?: (r: LogicalRange | null) => void
+  /** Fibonacci de retração desenhados à mão (a ferramenta "Fib Retracement" da TradingView) */
+  fibos?: Fibo[]
+  onFibos?: (f: Fibo[]) => void
+  fiboSel?: string | null
+  onFiboSel?: (id: string | null) => void
+  /** duplo clique num Fibonacci: abre a configuração dele */
+  onFiboConfig?: (id: string) => void
+  /** ferramenta ligada: o próximo clique marca o ponto 1 e o seguinte (ou soltar depois de arrastar) o ponto 2 */
+  desenhandoFibo?: boolean
+  /** acabou de desenhar ou desistiu (Esc): a tela desliga a ferramenta */
+  onFiboPronto?: () => void
+  /** ímã: o ponto gruda na abertura, máxima, mínima ou fechamento da vela mais perto */
+  ima?: boolean
 }
 
 /** Índice de vela (fracionário) do instante t: entre duas velas interpola; antes ou depois dos dados, extrapola pelo
@@ -91,7 +108,8 @@ function indiceDe(d: Vela[], t: number, passo: number): number | null {
   return a + (t - d[a].t) / (d[b].t - d[a].t)
 }
 
-export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia, onVelas, onRange, camadas = null, marcadores, niveis }: Props) {
+export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia, onVelas, onRange, camadas = null, marcadores, niveis,
+  fibos, onFibos, fiboSel = null, onFiboSel, onFiboConfig, desenhandoFibo = false, onFiboPronto, ima = false }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -110,6 +128,11 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
   avisarVelas.current = onVelas
   const avisarRange = useRef(onRange)
   avisarRange.current = onRange
+  // os ouvintes do mouse são criados uma vez: leem o Fibonacci de agora por aqui
+  const fibo = useRef({ fibos: fibos ?? [], sel: fiboSel, desenhando: desenhandoFibo, ima, onFibos, onFiboSel, onFiboConfig, onFiboPronto })
+  fibo.current = { fibos: fibos ?? [], sel: fiboSel, desenhando: desenhandoFibo, ima, onFibos, onFiboSel, onFiboConfig, onFiboPronto }
+  const desenhoFibo = useRef<FiboDesenho | null>(null)
+  const cancelarFibo = useRef<() => void>(() => {})
   const marcas = useRef<ChartMarker[]>([])
   const linhas = useRef<IPriceLine[]>([])
   const desenhoCamadas = useRef<CamadasDesenho | null>(null)
@@ -120,7 +143,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     const existe = new Set(dados.current.map((k) => k.t))
     s.setMarkers(marcas.current.filter((m) => existe.has(m.time)).sort((a, b) => a.time - b.time).map((m) => ({
       time: m.time as UTCTimestamp, position: m.side === 'sell' ? 'aboveBar' as const : 'belowBar' as const,
-      color: '#f5c04a', shape: m.side === 'sell' ? 'arrowDown' as const : 'arrowUp' as const, text: m.text,
+      color: m.color ?? '#f5c04a', shape: m.side === 'sell' ? 'arrowDown' as const : 'arrowUp' as const, text: m.text,
     })))
   }
   const tempos = () => { avisarVelas.current?.([...dados.current]); aplicarMarcas() }
@@ -160,6 +183,9 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     const tpoDesenho = new TpoDesenho(logico, formatar)
     s.attachPrimitive(tpoDesenho)
     desenhoTpo.current = tpoDesenho
+    const fiboDesenho = new FiboDesenho(logico, formatar)
+    s.attachPrimitive(fiboDesenho)
+    desenhoFibo.current = fiboDesenho
     chart.current = c; velas.current = s; vols.current = v
 
     const aoMover = (p: MouseEventParams<Time>) => {
@@ -175,22 +201,135 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     // clique pelo ponteiro, não pelo subscribeClick: a biblioteca descarta o 2º clique se vier em menos de 0,5 s
     // (vira duplo clique), e juntar dois dias é justamente clicar num e logo no outro
     const caixa = el.current
+    // o ouvinte de captura do Fibonacci roda antes: quando o clique é dele, o gráfico não arrasta e o TPO não escolhe dia
+    let consumido = false
     let apertou: { x: number; y: number } | null = null
-    const aoApertar = (e: PointerEvent) => { apertou = e.button === 0 ? { x: e.clientX, y: e.clientY } : null }
+    const aoApertar = (e: PointerEvent) => { apertou = e.button === 0 && !consumido ? { x: e.clientX, y: e.clientY } : null }
     const aoSoltar = (e: PointerEvent) => {
       const a = apertou
       apertou = null
+      if (consumido) { consumido = false; return }
       if (!a || Math.hypot(e.clientX - a.x, e.clientY - a.y) > ARRASTO_PX) return     // foi arrasto, não clique
       const x = e.clientX - caixa.getBoundingClientRect().left
       if (x > c.timeScale().width()) return                                            // em cima da escala de preço
       const dia = tpoDesenho.diaEm(x)
       if (dia) aoEscolherDia.current?.(dia, e.shiftKey)
     }
+
+    // ---------------------------------------------------------------- Fibonacci com o mouse
+    let criando: { fase: 1 | 2; x: number; y: number; f: Fibo } | null = null
+    let arrasto: { id: string; parte: ParteFibo; t0: number; p0: number; orig: Fibo; mexeu: boolean } | null = null
+    let ultimoClique = { id: '', em: 0 }
+    const travar = (sim: boolean) => c.applyOptions({ handleScroll: !sim, handleScale: !sim })
+    /** instante da vela na coluna x (fora dos dados, conta pelo tamanho da vela) */
+    const tempoDoX = (x: number): number | null => {
+      const d = dados.current
+      const x0 = c.timeScale().logicalToCoordinate(0 as Logical)
+      if (!d.length || x0 === null) return null
+      const i = Math.round((x - x0) / c.timeScale().options().barSpacing)
+      if (i < 0) return d[0].t + i * passoAtual.current
+      if (i >= d.length) return d[d.length - 1].t + (i - d.length + 1) * passoAtual.current
+      return d[i].t
+    }
+    const ponto = (e: PointerEvent, comIma: boolean) => {
+      const r = caixa.getBoundingClientRect()
+      const x = e.clientX - r.left, y = e.clientY - r.top
+      const t = tempoDoX(x), p = s.coordinateToPrice(y)
+      if (t === null || p === null) return null
+      const k = comIma && fibo.current.ima ? dados.current.find((d) => d.t === t) : undefined
+      if (!k) return { t, p: p as number }
+      const dist = (v: number) => Math.abs((s.priceToCoordinate(v) ?? 1e9) - y)
+      return { t, p: [k.o, k.h, k.l, k.c].reduce((a, b) => (dist(b) < dist(a) ? b : a)) }
+    }
+    const terminar = () => {
+      const f = criando?.f
+      criando = null
+      fiboDesenho.setRascunho(null)
+      travar(false)
+      const F = fibo.current
+      F.onFiboPronto?.()
+      if (!f || (f.t1 === f.t2 && f.p1 === f.p2)) return
+      F.onFibos?.([...F.fibos, f])
+      F.onFiboSel?.(f.id)
+    }
+    cancelarFibo.current = () => { if (criando) { criando = null; fiboDesenho.setRascunho(null); travar(false) } }
+    const aoApertarFibo = (e: PointerEvent) => {
+      if (e.button !== 0) return
+      const r = caixa.getBoundingClientRect()
+      const x = e.clientX - r.left, y = e.clientY - r.top
+      if (x > c.timeScale().width()) return                                            // escala de preço
+      const F = fibo.current
+      if (F.desenhando || criando) {
+        const pt = ponto(e, true)
+        if (!pt) return
+        consumido = true; travar(true)
+        if (!criando) {
+          criando = { fase: 1, x: e.clientX, y: e.clientY, f: { id: novoId(), t1: pt.t, p1: pt.p, t2: pt.t, p2: pt.p, cfg: padraoFibo() } }
+          fiboDesenho.setRascunho(criando.f)
+        } else { criando.f = { ...criando.f, t2: pt.t, p2: pt.p }; terminar() }
+        return
+      }
+      const acerto = fiboDesenho.acertar(x, y)
+      if (!acerto) { if (F.sel) F.onFiboSel?.(null); return }
+      consumido = true; travar(true)
+      const agora = Date.now()
+      if (ultimoClique.id === acerto.id && agora - ultimoClique.em < DUPLO_MS) { ultimoClique = { id: '', em: 0 }; F.onFiboConfig?.(acerto.id) }
+      else ultimoClique = { id: acerto.id, em: agora }
+      if (F.sel !== acerto.id) F.onFiboSel?.(acerto.id)
+      const pt = ponto(e, acerto.parte !== 'corpo'), orig = F.fibos.find((f) => f.id === acerto.id)
+      if (pt && orig) arrasto = { ...acerto, t0: pt.t, p0: pt.p, orig, mexeu: false }
+    }
+    const aoMoverFibo = (e: PointerEvent) => {
+      if (criando) {
+        const pt = ponto(e, true)
+        if (pt) { criando.f = { ...criando.f, t2: pt.t, p2: pt.p }; fiboDesenho.setRascunho(criando.f) }
+        return
+      }
+      if (arrasto) {
+        const a = arrasto, o = a.orig
+        const pt = ponto(e, a.parte !== 'corpo')
+        if (!pt) return
+        a.mexeu = true
+        const novo = a.parte === 'p1' ? { ...o, t1: pt.t, p1: pt.p } : a.parte === 'p2' ? { ...o, t2: pt.t, p2: pt.p }
+          : { ...o, t1: o.t1 + pt.t - a.t0, t2: o.t2 + pt.t - a.t0, p1: o.p1 + pt.p - a.p0, p2: o.p2 + pt.p - a.p0 }
+        fiboDesenho.set(fiboDesenho.todos().map((f) => (f.id === novo.id ? novo : f)), a.id)
+        return
+      }
+      if (!caixa.contains(e.target as Node)) return
+      const r = caixa.getBoundingClientRect()
+      const acerto = fibo.current.desenhando ? null : fiboDesenho.acertar(e.clientX - r.left, e.clientY - r.top)
+      caixa.style.cursor = fibo.current.desenhando ? 'crosshair' : acerto ? (acerto.parte === 'corpo' ? 'move' : 'pointer') : ''
+    }
+    const aoSoltarFibo = (e: PointerEvent) => {
+      if (criando) {
+        if (criando.fase === 1) {
+          if (Math.hypot(e.clientX - criando.x, e.clientY - criando.y) > ARRASTO_PX) terminar()   // arrastou: o 2º ponto é aqui
+          else { criando.fase = 2; travar(false) }                                                // clicou: espera o 2º clique
+        }
+        return
+      }
+      if (!arrasto) return
+      const a = arrasto
+      arrasto = null
+      travar(false)
+      if (a.mexeu) fibo.current.onFibos?.(fiboDesenho.todos())
+    }
+    const segurar = (e: Event) => { if (consumido) e.stopPropagation() }
+    caixa.addEventListener('pointerdown', aoApertarFibo, true)
+    caixa.addEventListener('mousedown', segurar, true)
+    caixa.addEventListener('touchstart', segurar, true)
+    window.addEventListener('pointermove', aoMoverFibo)
+    window.addEventListener('pointerup', aoSoltarFibo)
     caixa.addEventListener('pointerdown', aoApertar)
     caixa.addEventListener('pointerup', aoSoltar)
     const ro = new ResizeObserver(() => { if (el.current) c.applyOptions({ width: el.current.clientWidth, height: el.current.clientHeight }) })
     ro.observe(el.current)
-    return () => { ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); caixa.removeEventListener('pointerdown', aoApertar); caixa.removeEventListener('pointerup', aoSoltar); c.remove(); chart.current = null; velas.current = null; vols.current = null; linhas.current = []; desenhoCamadas.current = null }
+    return () => {
+      ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); caixa.removeEventListener('pointerdown', aoApertar); caixa.removeEventListener('pointerup', aoSoltar)
+      caixa.removeEventListener('pointerdown', aoApertarFibo, true); caixa.removeEventListener('mousedown', segurar, true); caixa.removeEventListener('touchstart', segurar, true)
+      window.removeEventListener('pointermove', aoMoverFibo); window.removeEventListener('pointerup', aoSoltarFibo)
+      c.remove(); chart.current = null; velas.current = null; vols.current = null; linhas.current = []; desenhoCamadas.current = null; desenhoFibo.current = null
+    }
   }, [])
 
   // trocar de moeda ou de tempo: zera e busca de novo
@@ -270,6 +409,9 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       lineStyle: n.dashed ? LineStyle.Dashed : LineStyle.Solid, axisLabelVisible: true, title: n.label }))
   }, [niveis])
   useEffect(() => { desenhoTpo.current?.setJuncao(selecao, composto) }, [selecao, composto])
+  useEffect(() => { desenhoFibo.current?.set(fibos ?? [], fiboSel) }, [fibos, fiboSel])
+  // desligar a ferramenta (botão ou Esc) no meio do desenho joga fora o ponto 1
+  useEffect(() => { if (!desenhandoFibo) cancelarFibo.current() }, [desenhandoFibo])
 
   // vela aberta: pergunta as 2 últimas e atualiza (ou acrescenta quando abre uma nova)
   useEffect(() => {

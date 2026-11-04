@@ -1,5 +1,6 @@
 /**
  * Os painéis de baixo do gráfico, como os do TRDR, cada um mostrando UMA coisa e dizendo o que ela quer dizer agora:
+ * a distorção (preço para um lado, alavancados apostando no outro), o CVD alavancado e o à vista, o open interest,
  * o saldo do livro à vista e do alavancado (compra − venda), as liquidações e o funding. Cada série tem um valor por
  * vela do gráfico de cima (`tempos`; null = sem dado), para ficar alinhada, e o painel segue o arrasto de lá (`range`).
  *
@@ -8,9 +9,10 @@
  */
 import type { LogicalRange } from 'lightweight-charts'
 import { useMemo } from 'react'
-import { useFunding, useLiquidacoes, useLivroPerp, useNuvensOverlay } from '../../api/hooks'
-import type { FluxoLiquidacoes, FundingAgregado, LivroPerp, NuvensOverlay, NuvensPonto } from '../../api/types'
+import { useFunding, useLiquidacoes, useLivroPerp, useNuvensOverlay, usePosicionamento } from '../../api/hooks'
+import type { DistorcaoVela, FluxoLiquidacoes, FundingAgregado, LivroPerp, NuvensOverlay, NuvensPonto, Posicionamento } from '../../api/types'
 import { fmt } from '../../lib/format'
+import type { ChartMarker } from '../../lib/chart-tipos'
 import SubChart, { type SerieSub } from './SubChart'
 
 const COR = { bids: '#2ecc84', asks: '#f0544f' }
@@ -44,6 +46,103 @@ function painelSaldo(titulo: string, explica: string, tempos: number[], saldo: (
   }
   return { titulo, explica, leitura, formato: FMT_BTC, height: 90,
            series: [{ id: 'saldo', tipo: 'barra', cor: VERDE, valores, cores: valores.map((v) => (v === null ? null : v >= 0 ? VERDE : VERMELHO)) }] }
+}
+
+const pct = (v: number, casas = 2) => `${v > 0 ? '+' : ''}${fmt(v, casas)}%`
+const COR_EX = { binance: '#3d8bfd', bybit: '#f5a623', coinbase: '#7fb3ff' }
+type VelaPos = Posicionamento['velas'][number]
+
+/** O que a distorção de uma vela quer dizer, em uma frase. */
+function fraseDistorcao(d: DistorcaoVela): string {
+  const quem = d.lado === 'alta' ? 'short' : 'long'
+  const motivos = [
+    d.por.includes('agressao') && d.perp_pct !== null && `o perpétuo ${d.lado === 'alta' ? 'vendeu' : 'comprou'} ${fmt(Math.abs(d.perp_pct), 0)}% do volume a mercado`,
+    d.por.includes('contas') && d.contas_pp !== null && `${fmt(Math.abs(d.contas_pp), 1)} p.p. das contas da Binance viraram ${quem}`,
+  ].filter(Boolean).join(' e ')
+  return `preço ${pct(d.preco_pct)}, ${motivos}, OI ${pct(d.oi_pct ?? 0)}: gente abrindo ${quem} contra ${d.lado === 'alta' ? 'a alta' : 'a queda'}` +
+    (d.spot_confirma ? ' · o à vista empurra o preço' : '')
+}
+
+/** CVD de uma fonte: soma de (compra − venda) vela a vela, desde a primeira vela em que ela aparece. */
+function cvd(tempos: number[], porTs: Map<number, VelaPos>, campo: 'perp_binance' | 'perp_bybit' | 'spot_binance' | 'spot_coinbase') {
+  let acc: number | null = null
+  return tempos.map((t) => {
+    const par = porTs.get(t)?.[campo]
+    if (par) acc = (acc ?? 0) + par[0] - par[1]
+    return acc
+  })
+}
+
+/** Os painéis do posicionamento (GET /api/fluxo/posicionamento): distorção, CVD alavancado e à vista, open interest. */
+export function paineisPosicionamento(tempos: number[], pos: Posicionamento | undefined): Painel[] {
+  if (!pos || !pos.velas.length) return []
+  const porTs = new Map(pos.velas.map((v) => [v.ts, v]))
+  const lim = pos.limites
+  const janela = lim.janela_velas
+  const saida: Painel[] = []
+
+  // 1) distorção: barra para cima = de alta (gente vendida contra a alta), para baixo = de baixa; dupla com os dois motivos
+  const dist = tempos.map((t) => porTs.get(t)?.distorcao ?? null)
+  const recente = pos.velas.slice(-janela).reverse().find((v) => v.distorcao?.lado)
+  const ultima = pos.velas[pos.velas.length - 1].distorcao
+  const leituraDist: Leitura = recente?.distorcao
+    ? { texto: `${recente.distorcao.lado === 'alta' ? 'DE ALTA' : 'DE BAIXA'} às ${hhmm(recente.ts)} UTC: ${fraseDistorcao(recente.distorcao)}`,
+        cor: recente.distorcao.lado === 'alta' ? COR.bids : COR.asks }
+    : { texto: ultima ? `agora sem distorção · preço ${pct(ultima.preco_pct)}, perpétuo ${pct(ultima.perp_pct ?? 0, 0)} do volume, OI ${pct(ultima.oi_pct ?? 0)}` : 'agora sem distorção', cor: NEUTRO }
+  saida.push({
+    titulo: `Distorção: o preço vai para um lado e os alavancados apostam no outro (janela de ${janela} velas)`,
+    explica: `verde para cima = de alta: o preço subiu (≥ ${fmt(lim.preco_pct ?? 0, 2)}%), o OI subiu e os alavancados ficaram vendidos ` +
+      `(perpétuo vendendo ≥ ${fmt(lim.perp_pct ?? 0, 1)}% do volume, ou ≥ ${fmt(lim.contas_pp ?? 0, 2)} p.p. das contas da Binance indo para short): combustível para alta forçada; ` +
+      'vermelho para baixo = o espelho; barra dupla = os dois motivos; cor forte = o à vista empurra o preço · leitura para o olho, não medida contra sorteio',
+    leitura: leituraDist, formato: (v) => (v > 0 ? `alta ×${v}` : v < 0 ? `baixa ×${-v}` : '0'), height: 70,
+    series: [{ id: 'dist', tipo: 'barra', cor: VERDE,
+               valores: dist.map((d) => (d?.lado ? (d.lado === 'alta' ? 1 : -1) * d.por.length : null)),
+               cores: dist.map((d) => (!d?.lado ? null : d.lado === 'alta' ? (d.spot_confirma ? COR.bids : 'rgba(46,204,132,0.5)')
+                                                                           : (d.spot_confirma ? COR.asks : 'rgba(240,84,79,0.5)'))) }],
+  })
+
+  // 2) CVD alavancado e à vista
+  const leituraCvd = (nome: string, vals: (number | null)[]): Leitura | null => {
+    const ok = vals.filter((v): v is number => v !== null)
+    if (ok.length <= janela) return null
+    const d = ok[ok.length - 1] - ok[ok.length - 1 - janela]
+    return { texto: `${nome}, últimas ${janela} velas: ${d >= 0 ? 'comprou' : 'vendeu'} ${absK(Math.abs(d))} BTC a mercado no saldo`, cor: d >= 0 ? COR.bids : COR.asks }
+  }
+  const perpB = cvd(tempos, porTs, 'perp_binance'), perpY = cvd(tempos, porTs, 'perp_bybit')
+  saida.push({
+    titulo: 'CVD alavancado: compra − venda a mercado nos perpétuos, somado (BTC)', formato: FMT_BTC, height: 90,
+    explica: 'azul = Binance, laranja = Bybit (do nosso coletor) · subindo = alavancados comprando a mercado; preço subindo com o CVD caindo = vendidos entrando contra a alta',
+    leitura: leituraCvd('Binance', perpB) ?? undefined,
+    series: [{ id: 'binance', tipo: 'linha', cor: COR_EX.binance, largura: 2, valores: perpB },
+             { id: 'bybit', tipo: 'linha', cor: COR_EX.bybit, largura: 1, valores: perpY }],
+  })
+  const spotB = cvd(tempos, porTs, 'spot_binance'), spotC = cvd(tempos, porTs, 'spot_coinbase')
+  saida.push({
+    titulo: 'CVD à vista: compra − venda a mercado no spot, somado (BTC)', formato: FMT_BTC, height: 90,
+    explica: 'azul = Binance, azul-claro = Coinbase (do nosso coletor, desde 20/10) · o à vista é quem compra o BTC de verdade, sem alavancagem',
+    leitura: (leituraCvd('Coinbase', spotC) ?? leituraCvd('Binance à vista', spotB)) ?? undefined,
+    series: [{ id: 'binance', tipo: 'linha', cor: COR_EX.binance, largura: 1, valores: spotB },
+             { id: 'coinbase', tipo: 'linha', cor: COR_EX.coinbase, largura: 2, valores: spotC }],
+  })
+
+  // 3) open interest: quanto entrou (verde) ou saiu (vermelho) em cada vela, nas corretoras que têm as duas pontas
+  const variacao = tempos.map((t, i) => {
+    const a = i > 0 ? porTs.get(tempos[i - 1]) : undefined, b = porTs.get(t)
+    if (!a || !b) return null
+    const exs = (['binance', 'bybit', 'okx'] as const).filter((ex) => a.oi[ex] !== null && b.oi[ex] !== null)
+    return exs.length ? exs.reduce((s, ex) => s + (b.oi[ex] as number) - (a.oi[ex] as number), 0) : null
+  })
+  const ultOi = [...pos.velas].reverse().find((v) => v.oi_total !== null)
+  const dOi = ultima?.oi_pct ?? null
+  saida.push({
+    titulo: 'Open interest: contratos abertos entrando e saindo (Binance + Bybit + OKX, BTC)', formato: FMT_BTC, height: 80,
+    explica: 'verde = o OI subiu na vela (gente nova abrindo posição), vermelho = caiu (fechando ou liquidada)' +
+      (ultOi?.oi_total ? ` · total agora ${absK(ultOi.oi_total)} BTC` : ''),
+    leitura: dOi === null ? undefined
+      : { texto: `últimas ${janela} velas: OI ${pct(dOi)} · ${dOi > 0 ? 'gente abrindo posição' : 'gente fechando posição'}`, cor: dOi > 0 ? COR.bids : COR.asks },
+    series: [{ id: 'doi', tipo: 'barra', cor: VERDE, valores: variacao, cores: variacao.map((v) => (v === null ? null : v >= 0 ? VERDE : VERMELHO)) }],
+  })
+  return saida
 }
 
 export function paineisDeBaixo(tempos: number[], livro: NuvensOverlay | undefined, perp: LivroPerp | undefined, liq: FluxoLiquidacoes | undefined,
@@ -115,20 +214,41 @@ export function paineisDeBaixo(tempos: number[], livro: NuvensOverlay | undefine
 }
 
 /** Os painéis de baixo da tela Gráfico: busca o que falta e desenha um SubChart por painel, alinhado às velas. */
+/** Onde os pedidos dos painéis começam: na primeira vela carregada, mas no máximo 7 dias atrás (arredondado à vela, para
+ *  não mudar a cada render). A tela usa o mesmo início para as marcas da distorção e reaproveita o pedido. */
+export const inicioPaineis = (tempos: number[], passo: number) =>
+  tempos.length ? Math.max(tempos[0], Math.floor((Date.now() / 1000 - JANELA_S) / passo) * passo + passo) : null
+
+/** Setas da distorção no gráfico de preço: verde embaixo = de alta, vermelha em cima = de baixa; só na primeira vela de
+ *  cada sequência, para não encher o gráfico. */
+export function marcasDistorcao(pos: Posicionamento | undefined): ChartMarker[] {
+  const saida: ChartMarker[] = []
+  let anterior: string | null = null
+  for (const v of pos?.velas ?? []) {
+    const lado = v.distorcao?.lado ?? null
+    if (lado && lado !== anterior) {
+      saida.push({ time: v.ts, side: lado === 'alta' ? 'buy' : 'sell', color: lado === 'alta' ? COR.bids : COR.asks,
+                   text: `D${v.distorcao!.por.length > 1 ? '×2' : ''}` })
+    }
+    anterior = lado
+  }
+  return saida
+}
+
 export default function PaineisFluxo({ tempos, range, passo }: { tempos: number[]; range: LogicalRange | null; passo: number }) {
-  // o pedido começa na primeira vela carregada, mas no máximo 7 dias atrás (arredondado à vela, para não mudar a cada render)
-  const inicio = tempos.length ? Math.max(tempos[0], Math.floor((Date.now() / 1000 - JANELA_S) / passo) * passo + passo) : null
+  const inicio = inicioPaineis(tempos, passo)
   const qLivro = useNuvensOverlay(inicio, 'coinbase,binance', passo)
   const qPerp = useLivroPerp(inicio, passo)
   const qLiq = useLiquidacoes(inicio, passo)
   const qFunding = useFunding()
-  const paineis = useMemo(() => paineisDeBaixo(tempos, qLivro.data, qPerp.data, qLiq.data, qFunding.data),
-    [tempos, qLivro.data, qPerp.data, qLiq.data, qFunding.data])
-  const carregando = qLivro.isPending || qPerp.isPending || qLiq.isPending || qFunding.isPending
+  const qPos = usePosicionamento(inicio, passo)
+  const paineis = useMemo(() => [...paineisPosicionamento(tempos, qPos.data), ...paineisDeBaixo(tempos, qLivro.data, qPerp.data, qLiq.data, qFunding.data)],
+    [tempos, qPos.data, qLivro.data, qPerp.data, qLiq.data, qFunding.data])
+  const carregando = qLivro.isPending || qPerp.isPending || qLiq.isPending || qFunding.isPending || qPos.isPending
   return (
     <div className="gpaineis">
       {paineis.map((p) => <SubChart key={p.titulo} {...p} tempos={tempos} range={range} />)}
-      {carregando && <div className="muted" style={{ fontSize: 12, padding: '8px 0' }}>lendo livro, liquidações e funding…</div>}
+      {carregando && <div className="muted" style={{ fontSize: 12, padding: '8px 0' }}>lendo distorção, CVD, open interest, livro, liquidações e funding…</div>}
     </div>
   )
 }

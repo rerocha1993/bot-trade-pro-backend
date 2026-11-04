@@ -39,7 +39,7 @@ const num = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v >= 100 ?
 
 class Desenho implements ICustomSeriesPaneRenderer {
   dados: PaneRendererCustomData<Time, FpDado> | null = null
-  linha = 50
+  linha = 40
 
   draw(target: CanvasRenderingTarget2D, preco: PriceToCoordinateConverter): void {
     const d = this.dados

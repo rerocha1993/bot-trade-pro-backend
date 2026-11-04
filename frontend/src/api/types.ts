@@ -121,6 +121,26 @@ export interface TradeRobo {
 export interface VelaLiquidacoes { ts: number; long_usd: number; short_usd: number; long_btc: number; short_btc: number; n: number }
 export interface FluxoLiquidacoes { inicio: number; fim: number; passo_s: number; exchanges: string[]; desde: number | null; velas: VelaLiquidacoes[] }
 
+/** A leitura da distorção de uma vela (conselho/posicionamento.py): preço para um lado, alavancados apostando no outro. */
+export interface DistorcaoVela {
+  ts: number; lado: 'alta' | 'baixa' | null; por: ('agressao' | 'contas')[]
+  preco_pct: number; perp_pct: number | null; spot_pct: number | null; oi_pct: number | null; contas_pp: number | null
+  spot_confirma: boolean
+}
+
+/** CVD, open interest e distorção por vela (GET /api/fluxo/posicionamento); compra/venda em BTC. */
+export interface Posicionamento {
+  inicio: number; fim: number; passo_s: number
+  limites: { janela_velas: number; percentil: number; preco_pct: number | null; perp_pct: number | null; contas_pp: number | null }
+  velas: {
+    ts: number; fechamento: number
+    perp_binance: [number, number]; perp_bybit: [number, number] | null
+    spot_binance: [number, number] | null; spot_coinbase: [number, number] | null
+    oi: Record<'binance' | 'bybit' | 'okx', number | null>; oi_total: number | null; contas_long: number | null
+    distorcao: DistorcaoVela | null
+  }[]
+}
+
 /** Funding (GET /api/mercado/funding): [ts_ms, taxa] por corretora e [ts_ms, taxa média, n corretoras]. */
 export interface FundingAgregado {
   por_exchange: Record<string, [number, number][]>; media: [number, number, number][]; falhas: Record<string, string>
