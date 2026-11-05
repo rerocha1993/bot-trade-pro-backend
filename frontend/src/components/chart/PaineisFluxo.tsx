@@ -343,20 +343,21 @@ export function paineisAggr(tempos: number[], pos: Posicionamento | undefined): 
   const janela = pos.limites.janela_velas
   const saida: Painel[] = []
 
-  // 1) prêmio: Coinbase − Binance; negativo = o americano vendendo (ou a Binance comprando mais)
-  const premio = tempos.map((t) => porTs.get(t)?.premio ?? null)
+  // 1) prêmio: Coinbase − Binance em % do preço (o "-0.1" do aggr); negativo = o americano vendendo (ou a Binance comprando mais)
+  const premio = tempos.map((t) => { const v = porTs.get(t); return v?.premio == null ? null : 100 * v.premio / v.fechamento })
   const ultP = [...velas].reverse().find((v) => v.premio !== null)
   const usd = (v: number) => `${v < 0 ? '−' : '+'}$${fmt(Math.abs(v), 0)}`
   saida.push({
-    titulo: 'Prêmio da Coinbase: BTC-USD da Coinbase − BTCUSDT da Binance (US$)', formato: usd, height: 80, ordem: 10,
-    explica: 'verde = a Coinbase mais cara (o comprador americano puxando), vermelho = mais barata (o americano vendendo, ou o varejo da Binance comprando) · o COINBASE_PREMIUM do aggr.trade',
+    titulo: 'COINBASE_PREMIUM: preço da Coinbase − preço da Binance (% do preço)', formato: (v) => `${v > 0 ? '+' : ''}${v.toFixed(3)}%`, height: 80, ordem: 10,
+    explica: 'acima de zero (verde) = a Coinbase mais cara: o comprador americano puxando · abaixo (vermelho) = mais barata: o americano vendendo, ou o varejo da Binance comprando',
     leitura: !ultP || ultP.premio === null ? { texto: 'esperando o coletor da Coinbase', cor: NEUTRO }
-      : { texto: `agora ${usd(ultP.premio)} (${pct(100 * ultP.premio / ultP.fechamento, 3)}) · ${ultP.premio >= 0 ? 'Coinbase comprando mais que a Binance' : 'Coinbase vendendo mais que a Binance'}`,
+      : { texto: `agora ${pct(100 * ultP.premio / ultP.fechamento, 3)} (${usd(ultP.premio)}) · ${ultP.premio >= 0 ? 'Coinbase comprando mais que a Binance' : 'Coinbase vendendo mais que a Binance'}`,
           cor: ultP.premio >= 0 ? COR.bids : COR.asks },
-    series: [{ id: 'premio', tipo: 'barra', cor: VERDE, valores: premio, cores: premio.map((v) => (v === null ? null : v >= 0 ? VERDE : VERMELHO)) }],
+    series: [{ id: 'premio', tipo: 'base', cor: VERDE, valores: premio }],
   })
 
-  // 2) CVD dos perpétuos (linear + inverse) × Coinbase, cada um na sua escala
+  // 2) CVD dos perpétuos (linear + inverse) × Coinbase. Como no aggr, cada linha na sua régua: aqui as duas vão de 0 a 100
+  //    do próprio mínimo ao próprio máximo no período, para caberem juntas; o que conta é a direção (os BTC ficam na leitura)
   let acc: number | null = null
   const perp = tempos.map((t) => {
     const v = porTs.get(t)
@@ -364,6 +365,11 @@ export function paineisAggr(tempos: number[], pos: Posicionamento | undefined): 
     return acc
   })
   const coinbase = cvd(tempos, porTs, 'spot_coinbase')
+  const regua = (vals: (number | null)[]) => {
+    const ok = vals.filter((v): v is number => v !== null)
+    const lo = Math.min(...ok), hi = Math.max(...ok)
+    return vals.map((v) => (v === null || !ok.length ? null : hi > lo ? (100 * (v - lo)) / (hi - lo) : 50))
+  }
   const sp = saldoRecente(velas, PERPS, janela), sc = saldoRecente(velas, ['spot_coinbase'], janela)
   let leituraCvd: Leitura | undefined
   if (sp !== null && sc !== null) {
@@ -374,12 +380,12 @@ export function paineisAggr(tempos: number[], pos: Posicionamento | undefined): 
           (sp >= 0 ? 'alta só do alavancado, sem o à vista' : 'o à vista comprando enquanto o alavancado vende'), cor: NEUTRO }
   }
   saida.push({
-    titulo: 'CVD: perpétuos × Coinbase (compra − venda a mercado, somado, BTC)', formato: FMT_BTC, height: 110, ordem: 20,
-    explica: 'amarelo = perpétuos (linear + inverse, Binance + Bybit), azul-claro = Coinbase à vista · cada linha na sua escala, como no aggr.trade: o que importa é a direção · ' +
-      'alta saudável = as duas subindo; só o amarelo subindo = alavancado (squeeze)',
+    titulo: 'CVD: PERP × Coinbase (compra − venda a mercado, somado)', formato: () => '', height: 200, ordem: 20,
+    explica: 'amarelo PERP = perpétuos (linear + inverse, Binance + Bybit), azul Coinbase = Coinbase à vista · cada linha na sua régua, como no aggr.trade: ' +
+      'o que importa é a direção · alta saudável = as duas subindo; só o amarelo subindo = alavancado (squeeze)',
     leitura: leituraCvd,
-    series: [{ id: 'perp', tipo: 'linha', cor: AMARELO, largura: 1, valores: perp, escalaPropria: true },
-             { id: 'coinbase', tipo: 'linha', cor: COR_EX.coinbase, largura: 2, valores: coinbase }],
+    series: [{ id: 'perp', tipo: 'linha', cor: AMARELO, largura: 1, valores: regua(perp), etiqueta: 'PERP' },
+             { id: 'coinbase', tipo: 'linha', cor: AZUL, largura: 2, valores: regua(coinbase), etiqueta: 'Coinbase' }],
   })
 
   // 3) compra (para cima) e venda (para baixo) a mercado em cada vela, por mercado
@@ -405,18 +411,19 @@ export function paineisAggr(tempos: number[], pos: Posicionamento | undefined): 
   return saida
 }
 
-/** A aba Aggr: os painéis acima e as liquidações, alinhados às velas do gráfico de cima. */
-export function PaineisAggr({ tempos, range, passo }: { tempos: number[]; range: LogicalRange | null; passo: number }) {
+/** A aba Aggr: os painéis acima e as liquidações, alinhados às velas do gráfico. ``cima`` = só o prêmio (que no aggr fica
+ *  em cima do preço); sem ele, o resto. Os dois pedem os mesmos dados (o react-query reaproveita). */
+export function PaineisAggr({ tempos, range, passo, cima = false }: { tempos: number[]; range: LogicalRange | null; passo: number; cima?: boolean }) {
   const inicio = inicioPaineis(tempos, passo)
   const qPos = usePosicionamento(inicio, passo)
   const qLiq = useLiquidacoes(inicio, passo)
   const paineis = useMemo(() => [...paineisAggr(tempos, qPos.data),
                                   ...paineisDeBaixo(tempos, undefined, undefined, qLiq.data, undefined).map((p) => ({ ...p, ordem: 60 }))]
-    .sort((a, b) => a.ordem - b.ordem), [tempos, qPos.data, qLiq.data])
+    .filter((p) => (p.ordem < 20) === cima).sort((a, b) => a.ordem - b.ordem), [tempos, qPos.data, qLiq.data, cima])
   return (
     <div className="gpaineis">
       {paineis.map((p) => <SubChart key={p.titulo} {...p} tempos={tempos} range={range} />)}
-      {(qPos.isPending || qLiq.isPending) && <div className="muted" style={{ fontSize: 12, padding: '8px 0' }}>lendo prêmio, CVD, negócios e liquidações…</div>}
+      {!cima && (qPos.isPending || qLiq.isPending) && <div className="muted" style={{ fontSize: 12, padding: '8px 0' }}>lendo prêmio, CVD, negócios e liquidações…</div>}
     </div>
   )
 }

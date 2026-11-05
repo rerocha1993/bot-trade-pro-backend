@@ -12,7 +12,7 @@ export const LARGURA_ESCALA = 72
 
 export interface SerieSub {
   id: string
-  tipo: 'barra' | 'linha' | 'vela'
+  tipo: 'barra' | 'linha' | 'vela' | 'base'
   cor: string
   /** um valor por tempo de `tempos` (null = sem dado naquela vela); em `vela`, o fechamento */
   valores: (number | null)[]
@@ -23,8 +23,8 @@ export interface SerieSub {
   cores?: (string | null)[]
   /** espessura da linha (só para `linha`) */
   largura?: number
-  /** escala vertical própria e escondida (como no aggr.trade): duas linhas de tamanhos muito diferentes no mesmo painel */
-  escalaPropria?: boolean
+  /** nome na etiqueta do último valor (como o "PERP" e o "Coinbase" do aggr.trade) */
+  etiqueta?: string
 }
 
 interface Props {
@@ -43,7 +43,7 @@ interface Props {
 export default function SubChart({ titulo, explica, leitura, tempos, series, range, formato, height = 90 }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
-  const ss = useRef<Map<string, ISeriesApi<'Histogram'> | ISeriesApi<'Line'> | ISeriesApi<'Candlestick'>>>(new Map())
+  const ss = useRef<Map<string, ISeriesApi<'Histogram'> | ISeriesApi<'Line'> | ISeriesApi<'Candlestick'> | ISeriesApi<'Baseline'>>>(new Map())
 
   useEffect(() => {
     if (!el.current) return
@@ -76,9 +76,12 @@ export default function SubChart({ titulo, explica, leitura, tempos, series, ran
           ? c.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, base: 0 })
           : s.tipo === 'vela'
             ? c.addCandlestickSeries({ priceLineVisible: false, lastValueVisible: true, borderVisible: false })
-            : c.addLineSeries({ priceLineVisible: false, lastValueVisible: !s.escalaPropria, crosshairMarkerVisible: false,
-                                ...(s.escalaPropria ? { priceScaleId: s.id } : {}) })
-        if (s.escalaPropria) c.priceScale(s.id).applyOptions({ scaleMargins: { top: 0.12, bottom: 0.08 } })
+            : s.tipo === 'base'
+              // área com base no zero: verde acima, vermelha abaixo (o prêmio da Coinbase do aggr.trade)
+              ? c.addBaselineSeries({ priceLineVisible: false, lastValueVisible: true, baseValue: { type: 'price', price: 0 }, lineWidth: 1,
+                                      topLineColor: '#2ecc84', topFillColor1: 'rgba(46,204,132,0.35)', topFillColor2: 'rgba(46,204,132,0.05)',
+                                      bottomLineColor: '#f0544f', bottomFillColor1: 'rgba(240,84,79,0.05)', bottomFillColor2: 'rgba(240,84,79,0.35)' })
+              : c.addLineSeries({ priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false })
         ss.current.set(s.id, serie)
       }
       if (s.tipo === 'vela') {
@@ -90,7 +93,8 @@ export default function SubChart({ titulo, explica, leitura, tempos, series, ran
         }))
         continue
       }
-      serie.applyOptions(s.tipo === 'linha' ? { color: s.cor, lineWidth: (s.largura ?? 2) as 1 | 2 | 3 | 4 } : { color: s.cor })
+      if (s.tipo === 'linha') serie.applyOptions({ color: s.cor, lineWidth: (s.largura ?? 2) as 1 | 2 | 3 | 4, title: s.etiqueta ?? '' })
+      else if (s.tipo === 'barra') serie.applyOptions({ color: s.cor })
       // um ponto por vela; sem dado vira "espaço em branco", que mantém o alinhamento com o gráfico de cima
       serie.setData(tempos.map((t, i) => {
         const v = s.valores[i]

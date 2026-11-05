@@ -52,6 +52,7 @@ export function volumeCurto(v: number): string {
 
 const daApi = (r: number[]): Vela => ({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4], v: r[5] })
 const vela = (k: Vela) => ({ time: k.t as UTCTimestamp, open: k.o, high: k.h, low: k.l, close: k.c })
+const fechamento = (k: Vela) => ({ time: k.t as UTCTimestamp, value: k.c })
 const volume = (k: Vela) => ({ time: k.t as UTCTimestamp, value: k.v, color: k.c >= k.o ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)' })
 const buscar = (simbolo: string, tempo: string, n: number, ate?: number) =>
   api.get<VelasGrafico>('/api/grafico/velas', { simbolo, tempo, n, ate })
@@ -94,6 +95,8 @@ interface Props {
   onFiboPronto?: () => void
   /** ímã: o ponto gruda na abertura, máxima, mínima ou fechamento da vela mais perto */
   ima?: boolean
+  /** preço como linha do fechamento, como no aggr.trade (as velas ficam escondidas, o resto segue igual) */
+  emLinha?: boolean
 }
 
 /** Índice de vela (fracionário) do instante t: entre duas velas interpola; antes ou depois dos dados, extrapola pelo
@@ -109,11 +112,12 @@ function indiceDe(d: Vela[], t: number, passo: number): number | null {
 }
 
 export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia, onVelas, onRange, camadas = null, marcadores, niveis,
-  fibos, onFibos, fiboSel = null, onFiboSel, onFiboConfig, desenhandoFibo = false, onFiboPronto, ima = false }: Props) {
+  fibos, onFibos, fiboSel = null, onFiboSel, onFiboConfig, desenhandoFibo = false, onFiboPronto, ima = false, emLinha = false }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const vols = useRef<ISeriesApi<'Histogram'> | null>(null)
+  const linhaPreco = useRef<ISeriesApi<'Line'> | null>(null)
   const dados = useRef<Vela[]>([])
   const desenhoTpo = useRef<TpoDesenho | null>(null)
   const desenhoNuvens = useRef<NuvensDesenho | null>(null)
@@ -171,6 +175,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     })
     const s = c.addCandlestickSeries({ upColor: ALTA, downColor: BAIXA, borderVisible: false, wickUpColor: ALTA, wickDownColor: BAIXA, priceLineStyle: LineStyle.Dotted })
     const v = c.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false })
+    linhaPreco.current = c.addLineSeries({ color: '#e8b4c4', lineWidth: 1, priceLineStyle: LineStyle.Dotted, crosshairMarkerVisible: false, visible: false })
     c.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
     const formatar = (p: number) => { const u = dados.current[dados.current.length - 1]; const k = casas(u ? u.c : p); return p.toLocaleString('pt-BR', { minimumFractionDigits: k, maximumFractionDigits: k }) }
     const logico = (t: number) => indiceDe(dados.current, t, passoAtual.current)
@@ -334,13 +339,18 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
 
   // trocar de moeda ou de tempo: zera e busca de novo
   useEffect(() => {
+    velas.current?.applyOptions({ visible: !emLinha })
+    linhaPreco.current?.applyOptions({ visible: emLinha })
+  }, [emLinha])
+
+  useEffect(() => {
     const c = chart.current, s = velas.current, v = vols.current
     if (!c || !s || !v) return
     const geracao = ++estado.current.geracao
     estado.current.buscandoAntigas = false
     estado.current.fimDoHistorico = false
     dados.current = []
-    s.setData([]); v.setData([])
+    s.setData([]); v.setData([]); linhaPreco.current?.setData([])
     tempos()
     s.priceScale().applyOptions({ autoScale: true })      // arrastar a escala desliga; moeda nova começa ajustada
     setErro(null); setCarregando(true); setLegenda(null)
@@ -355,8 +365,9 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       if (ultimo) {
         const dec = casas(ultimo.c)
         s.applyOptions({ priceFormat: { type: 'price', precision: dec, minMove: 10 ** -dec } })
+        linhaPreco.current?.applyOptions({ priceFormat: { type: 'price', precision: dec, minMove: 10 ** -dec } })
       }
-      s.setData(d.map(vela)); v.setData(d.map(volume))
+      s.setData(d.map(vela)); v.setData(d.map(volume)); linhaPreco.current?.setData(d.map(fechamento))
       tempos()
       c.timeScale().setVisibleLogicalRange({ from: d.length - VELAS_NA_TELA, to: d.length + 8 })
       setCarregando(false)
@@ -387,6 +398,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
         const vista = c.timeScale().getVisibleLogicalRange()
         dados.current = [...antigas, ...dados.current]
         velas.current?.setData(dados.current.map(vela)); vols.current?.setData(dados.current.map(volume))
+        linhaPreco.current?.setData(dados.current.map(fechamento))
         tempos()
         if (vista) c.timeScale().setVisibleLogicalRange({ from: vista.from + antigas.length, to: vista.to + antigas.length })
       }).catch(() => { /* tenta de novo no próximo arrasto */ }).finally(() => {
@@ -430,7 +442,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
           if (!ult || k.t < ult.t) continue
           if (k.t === ult.t) d[d.length - 1] = k
           else { d.push(k); novas = true }
-          velas.current?.update(vela(k)); vols.current?.update(volume(k))
+          velas.current?.update(vela(k)); vols.current?.update(volume(k)); linhaPreco.current?.update(fechamento(k))
         }
         if (novas) tempos()
         info()
