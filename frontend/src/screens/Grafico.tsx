@@ -13,9 +13,11 @@
  * Nuvens (só no COINBASE:BTC-USD): o Order Book Depth Overlay do TRDR desenhado em cada vela, com o livro da Coinbase;
  * `&n=0` desliga.
  *
- * Fibonacci: a ferramenta de retração da TradingView. Dois cliques (ou arrastar) desenham; clicar seleciona, arrastar
- * as pontas ou o corpo move, Delete apaga, duplo clique (ou o botão ⚙) abre a configuração. Fica guardado por moeda
- * neste navegador.
+ * Desenhos: a barra da esquerda, no molde da TradingView (components/chart/BarraFerramentas.tsx), com as ferramentas
+ * de components/chart/ferramentas.ts. Dois cliques (ou arrastar) desenham; clicar seleciona e mostra a barra flutuante
+ * de estilo; arrastar as alças ou o corpo move; Delete apaga; duplo clique abre a configuração; Ctrl+Z e Ctrl+Y desfazem
+ * e refazem; Ctrl+C e Ctrl+V clonam; Alt+T, Alt+H e Alt+F ligam a linha de tendência, a horizontal e o Fibonacci.
+ * Ficam guardados por moeda no servidor (lib/useDesenhos.ts), iguais no PC e no celular.
  */
 import { useQuery } from '@tanstack/react-query'
 import type { LogicalRange } from 'lightweight-charts'
@@ -24,15 +26,21 @@ import { useSearchParams } from 'react-router-dom'
 import { useAbsorcao, useAvisosMapa, useFootprint, useNuvensCalor, useNuvensTop, usePosicionamento, usePresos } from '../api/hooks'
 import { api } from '../api/client'
 import type { NakedLongo, NuvensOverlay, SimbolosGrafico, TpoComposto, TpoDia, TpoGrafico } from '../api/types'
-import FiboConfig from '../components/chart/FiboConfig'
+import ArvoreObjetos from '../components/chart/ArvoreObjetos'
+import BarraEstilo from '../components/chart/BarraEstilo'
+import BarraFerramentas from '../components/chart/BarraFerramentas'
+import DesenhoConfig from '../components/chart/DesenhoConfig'
+import { FERRAMENTAS } from '../components/chart/ferramentas'
 import FootprintChart from '../components/chart/FootprintChart'
-import GraficoTV, { casas, SEGUNDOS, type InfoGrafico, type Vela } from '../components/chart/GraficoTV'
+import GraficoTV, { casas, SEGUNDOS, type Ima, type InfoGrafico, type Vela } from '../components/chart/GraficoTV'
 import PaineisFluxo, { inicioPaineis, marcasDistorcao, PASSO_MAX_PAINEIS } from '../components/chart/PaineisFluxo'
 import { COR_TPO, type Selecao } from '../components/chart/tpoDesenho'
 import ParedesAgora from '../components/ParedesAgora'
 import { COR_FLUXO, colunasDaAbsorcao, imagemCalor, marcasAbsorcao, marcasPresos } from '../lib/camadasFluxo'
 import type { ChartLevel } from '../lib/chart-tipos'
-import { guardarFibos, lerFibos, type Fibo } from '../lib/fibo'
+import { novoId, type Desenho } from '../lib/desenhos'
+import { copiar } from '../lib/fibo'
+import { useDesenhos } from '../lib/useDesenhos'
 
 const PADRAO = { s: 'COINBASE:BTC-USD', t: '30m' }
 const TEMPOS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const
@@ -77,6 +85,13 @@ const LINHAS_FP = ['20', '40', '100', '200', '500'] as const
 const gradeLivro = (preco: number) => Math.max(10, Math.round((preco * 0.001) / 10) * 10)
 /** nesses tempos o dia tem velas demais de largas para o perfil caber: ligar o TPO passa para 30 min */
 const TEMPO_LARGO = ['4h', '1d']
+
+const CHAVE_PREF_DESENHO = 'grafico.desenho.pref.v1'
+type PrefDesenho = { ima: Ima; ficar: boolean; travar: boolean; ocultar: boolean }
+function lerPrefDesenho(): PrefDesenho {
+  const p: PrefDesenho = { ima: 'nao', ficar: false, travar: false, ocultar: false }
+  try { return { ...p, ...JSON.parse(localStorage.getItem(CHAVE_PREF_DESENHO) || '{}') } } catch { return p }
+}
 
 function partes(simbolo: string) {
   const [corretora = '', par = '', perp] = simbolo.split(':')
@@ -190,33 +205,72 @@ export default function Grafico() {
   const [info, setInfo] = useState<InfoGrafico | null>(null)
   useEffect(() => { setJuntando(false) }, [simbolo])
 
-  // Fibonacci: os desenhos desta moeda, o selecionado, a ferramenta e a configuração aberta (com a cópia para Cancelar)
-  const [fibos, setFibos] = useState<Fibo[]>(() => lerFibos(simbolo))
-  const [fiboSel, setFiboSel] = useState<string | null>(null)
-  const [desenhandoFibo, setDesenhandoFibo] = useState(false)
-  const [ima, setIma] = useState(false)
-  const [config, setConfig] = useState<{ id: string; antes: Fibo } | null>(null)
-  useEffect(() => { setFibos(lerFibos(simbolo)); setFiboSel(null); setDesenhandoFibo(false); setConfig(null) }, [simbolo])
-  const mudarFibos = useCallback((f: Fibo[]) => { setFibos(f); guardarFibos(simbolo, f) }, [simbolo])
+  // desenhos (as ferramentas da TradingView): os desta moeda, guardados no servidor; o selecionado, a ferramenta ligada,
+  // as preferências da barra (ímã, ficar no modo desenho, travar e esconder todos) e a configuração aberta
+  const des = useDesenhos(simbolo)
+  const desenhos = des.lista
+  const [desSel, setDesSel] = useState<string | null>(null)
+  const [ferramenta, setFerramenta] = useState<string | null>(null)
+  const [pref, setPref] = useState<PrefDesenho>(lerPrefDesenho)
+  const ima = pref.ima, ficar = pref.ficar
+  const mudarPref = useCallback((p: Partial<PrefDesenho>) => setPref((v) => {
+    const n = { ...v, ...p }
+    try { localStorage.setItem(CHAVE_PREF_DESENHO, JSON.stringify(n)) } catch { /* modo privado */ }
+    return n
+  }), [])
+  const [arvore, setArvore] = useState(false)
+  const [config, setConfig] = useState<{ id: string; antes: Desenho[] } | null>(null)
+  const copiado = useRef<Desenho | null>(null)
+  useEffect(() => { setDesSel(null); setFerramenta(null); setConfig(null) }, [simbolo])
+  const ferramentaAtual = ferramenta ? FERRAMENTAS.find((f) => f.tipo === ferramenta) ?? null : null
+  const selecionado = desSel ? desenhos.find((d) => d.id === desSel && !d.oculto) ?? null : null
+  const desAberto = config ? desenhos.find((d) => d.id === config.id) ?? null : null
+  const trocar = useCallback((d: Desenho, juntar?: string) => {
+    des.mudar(des.agora().map((x) => (x.id === d.id ? d : x)), juntar)
+    if (d.oculto && d.id === desSel) setDesSel(null)
+  }, [des, desSel])
+  const apagar = useCallback((id: string) => {
+    des.mudar(des.agora().filter((x) => x.id !== id))
+    if (desSel === id) setDesSel(null)
+  }, [des, desSel])
+  const clonar = useCallback((d: Desenho) => {
+    const c = { ...copiar(d), id: novoId(), oculto: false }
+    des.mudar([...des.agora(), c]); setDesSel(c.id)
+  }, [des])
+  const ordem = useCallback((id: string, frente: boolean) => {
+    const l = des.agora(), d = l.find((x) => x.id === id)
+    if (!d) return
+    const resto = l.filter((x) => x.id !== id)
+    des.mudar(frente ? [...resto, d] : [d, ...resto])
+  }, [des])
+  const removerTodos = useCallback(() => {
+    if (!desenhos.length || !window.confirm(`Remover os ${desenhos.length} desenhos desta moeda? (Ctrl+Z desfaz)`)) return
+    des.mudar([]); setDesSel(null)
+  }, [des, desenhos.length])
   const abrirConfig = useCallback((id: string) => {
-    const f = fibos.find((x) => x.id === id)
-    if (f) { setFiboSel(id); setConfig({ id, antes: f }) }
-  }, [fibos])
-  const apagarFibo = useCallback(() => {
-    if (!fiboSel) return
-    mudarFibos(fibos.filter((f) => f.id !== fiboSel)); setFiboSel(null)
-  }, [fiboSel, fibos, mudarFibos])
+    if (!des.agora().some((d) => d.id === id)) return
+    setDesSel(id); setConfig({ id, antes: des.agora() })
+  }, [des])
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
       const alvo = e.target as HTMLElement | null
       if (config || escolhendo || (alvo && /^(INPUT|SELECT|TEXTAREA)$/.test(alvo.tagName))) return
-      if ((e.key === 'Delete' || e.key === 'Backspace') && fiboSel) { e.preventDefault(); apagarFibo() }
-      if (e.key === 'Escape') { setDesenhandoFibo(false); setFiboSel(null) }
+      const k = e.key.toLowerCase()
+      const ctrl = e.ctrlKey || e.metaKey
+      if ((e.key === 'Delete' || e.key === 'Backspace') && desSel) { e.preventDefault(); apagar(desSel) }
+      else if (e.key === 'Escape') { setFerramenta(null); setDesSel(null) }
+      else if (ctrl && k === 'z' && !e.shiftKey) { e.preventDefault(); des.desfazer() }
+      else if (ctrl && (k === 'y' || (k === 'z' && e.shiftKey))) { e.preventDefault(); des.refazer() }
+      else if (ctrl && k === 'c' && desSel) { copiado.current = des.agora().find((d) => d.id === desSel) ?? null }
+      else if (ctrl && k === 'v' && copiado.current) { e.preventDefault(); clonar(copiado.current) }
+      else if (e.altKey && !ctrl) {
+        const f = FERRAMENTAS.find((x) => x.atalho?.toLowerCase() === k)
+        if (f) { e.preventDefault(); setFerramenta(f.tipo); setDesSel(null) }
+      }
     }
     window.addEventListener('keydown', tecla)
     return () => window.removeEventListener('keydown', tecla)
-  }, [config, escolhendo, fiboSel, apagarFibo])
-  const fiboAberto = config ? fibos.find((f) => f.id === config.id) ?? null : null
+  }, [config, escolhendo, desSel, apagar, clonar, des])
 
   useEffect(() => {
     try { localStorage.setItem(GUARDADO, JSON.stringify({ s: simbolo, t: tempo })) } catch { /* modo privado */ }
@@ -404,21 +458,6 @@ export default function Grafico() {
               title="Painéis embaixo do gráfico: livro à vista e alavancado, liquidações e funding do BTC, e as paredes de agora">Fluxo</button>
           )}
         </div>
-        <div className="gferramentas">
-          <button type="button" className={'gbotao' + (desenhandoFibo ? ' on' : '')} disabled={vistaFp}
-            onClick={() => { setDesenhandoFibo((v) => !v); setFiboSel(null) }}
-            title="Fibonacci de retração: clique no começo do movimento e depois no fim (ou arraste). Esc cancela">Fibonacci</button>
-          <button type="button" className={'gbotao' + (ima ? ' on' : '')} disabled={vistaFp} onClick={() => setIma((v) => !v)}
-            title="Ímã: o ponto gruda na abertura, máxima, mínima ou fechamento da vela">Ímã</button>
-          {fiboSel && <>
-            <button type="button" className="gbotao" onClick={() => abrirConfig(fiboSel)} title="Configurar o Fibonacci selecionado (ou duplo clique nele)">⚙ configurar</button>
-            <button type="button" className="gbotao" onClick={apagarFibo} title="Apagar o Fibonacci selecionado (Delete)">✕ apagar</button>
-          </>}
-          {fibos.length > 1 && !fiboSel && (
-            <button type="button" className="gbotao" onClick={() => { if (window.confirm(`Apagar os ${fibos.length} Fibonacci desta moeda?`)) mudarFibos([]) }}
-              title="Apagar todos os Fibonacci desta moeda">✕ todos os Fibonacci</button>
-          )}
-        </div>
         {ult && (
           <span className="mono gpreco">
             {ult.c.toLocaleString('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec })}
@@ -427,8 +466,8 @@ export default function Grafico() {
         )}
         {!temNuvem && <span className="gnota muted">sem nuvens: só no BTC-USD da Coinbase</span>}
       </div>
-      {desenhandoFibo && (
-        <div className="glegenda-tpo"><span className="gjuncao">Fibonacci: clique no começo do movimento e depois no fim (ou arraste de um ao outro) · Esc cancela{ima ? ' · ímã ligado' : ''}</span></div>
+      {ferramentaAtual && (
+        <div className="glegenda-tpo"><span className="gjuncao">{ferramentaAtual.nome}: {ferramentaAtual.pontos === 1 ? 'clique no preço' : 'clique no primeiro ponto e depois no segundo (ou arraste de um ao outro)'} · Esc cancela{ima !== 'nao' ? ` · ímã ${ima}` : ''}{ficar ? ' · fica ligada depois de desenhar' : ''}</span></div>
       )}
       <div className="gatalhos">
         {ATALHOS.map((s) => (
@@ -508,21 +547,42 @@ export default function Grafico() {
               para 1; <b style={{ color: COR_FLUXO.presos }}>contorno amarelo</b> = presos; Δ embaixo = compra menos venda da vela.
             </div>
           </div>
-        ) : <>
-        <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} nuvens={nuvens} onDia={escolherDia}
-          onVelas={setVelasG} onRange={setRange} camadas={camadas} marcadores={marcadores} niveis={niveis}
-          fibos={fibos} onFibos={mudarFibos} fiboSel={fiboSel} onFiboSel={setFiboSel} onFiboConfig={abrirConfig}
-          desenhandoFibo={desenhandoFibo} onFiboPronto={() => setDesenhandoFibo(false)} ima={ima} />
-        {ehBtc && fluxoLigado && (fluxoCabe
-          ? tempos.length > 0 && <PaineisFluxo tempos={tempos} range={range} passo={SEGUNDOS[tempo]} />
-          : <div className="muted" style={{ fontSize: 12, padding: '10px 0' }}>os painéis de livro, liquidações e funding vão até velas de 4 h: escolha um tempo menor para vê-los</div>)}
-        </>}
+        ) : (
+        <div className="gdes-grade">
+          <BarraFerramentas ferramenta={ferramenta} onFerramenta={(t) => { setFerramenta(t); setDesSel(null) }}
+            ima={pref.ima} onIma={(ima) => mudarPref({ ima })} ficar={pref.ficar} onFicar={(ficar) => mudarPref({ ficar })}
+            travarTodos={pref.travar} onTravarTodos={(travar) => mudarPref({ travar })}
+            ocultarTodos={pref.ocultar} onOcultarTodos={(ocultar) => { mudarPref({ ocultar }); setDesSel(null) }}
+            nDesenhos={desenhos.length} onRemoverTodos={removerTodos}
+            podeDesfazer={des.podeDesfazer} podeRefazer={des.podeRefazer} onDesfazer={des.desfazer} onRefazer={des.refazer}
+            arvore={arvore} onArvore={setArvore} />
+          <div className="gdes-area">
+            <GraficoTV simbolo={simbolo} tempo={tempo} onInfo={setInfo} tpo={tpo} selecao={selecao} composto={composto} nuvens={nuvens} onDia={escolherDia}
+              onVelas={setVelasG} onRange={setRange} camadas={camadas} marcadores={marcadores} niveis={niveis}
+              desenhos={desenhos} onDesenhos={(l) => des.mudar(l)} desenhoSel={desSel} onDesenhoSel={setDesSel} onDesenhoConfig={abrirConfig}
+              ferramenta={ferramenta} onFerramentaPronta={() => { if (!pref.ficar) setFerramenta(null) }} ima={pref.ima}
+              travarTodos={pref.travar} ocultarTodos={pref.ocultar} />
+            {selecionado && !ferramenta && !pref.ocultar && (
+              <BarraEstilo desenho={selecionado} onMudar={(d) => trocar(d, `estilo:${d.id}`)} onConfig={() => abrirConfig(selecionado.id)}
+                onClonar={() => clonar(selecionado)} onOrdem={(frente) => ordem(selecionado.id, frente)} onApagar={() => apagar(selecionado.id)} />
+            )}
+            {arvore && (
+              <ArvoreObjetos lista={desenhos} sel={desSel} tempo={tempo} formatar={fmt} onSel={(id) => { setDesSel(id); setFerramenta(null) }}
+                onMudar={(d) => trocar(d)} onApagar={apagar} onFechar={() => setArvore(false)} />
+            )}
+            {des.estado === 'so_aqui' && <div className="gdes-aviso warn-txt">desenhos guardados só neste navegador: o servidor não respondeu (tenta de novo na próxima mudança)</div>}
+            {ehBtc && fluxoLigado && (fluxoCabe
+              ? tempos.length > 0 && <PaineisFluxo tempos={tempos} range={range} passo={SEGUNDOS[tempo]} />
+              : <div className="muted" style={{ fontSize: 12, padding: '10px 0' }}>os painéis de livro, liquidações e funding vão até velas de 4 h: escolha um tempo menor para vê-los</div>)}
+          </div>
+        </div>
+        )}
       </div>
       {ehBtc && fluxoLigado && <ParedesAgora preco={ult?.c ?? null} />}
-      {config && fiboAberto && (
-        <FiboConfig fibo={fiboAberto} casas={dec}
-          onMudar={(f) => setFibos((l) => l.map((x) => (x.id === f.id ? f : x)))}
-          onFechar={(ok) => { mudarFibos(ok ? fibos : fibos.map((x) => (x.id === config.id ? config.antes : x))); setConfig(null) }} />
+      {config && desAberto && (
+        <DesenhoConfig desenho={desAberto} casas={dec}
+          onMudar={(d) => des.previa(des.agora().map((x) => (x.id === d.id ? d : x)))}
+          onFechar={(ok) => { if (ok) des.mudar(des.agora()); else des.previa(config.antes); setConfig(null) }} />
       )}
       {escolhendo && <Seletor atual={simbolo} onFechar={() => setEscolhendo(false)} onEscolher={(s) => { setEscolhendo(false); ir(s, tempo) }} />}
     </div>

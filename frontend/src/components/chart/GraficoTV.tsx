@@ -13,9 +13,11 @@ import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import type { NuvensOverlay, TpoComposto, TpoDia, TpoGrafico, VelasGrafico } from '../../api/types'
 import type { ChartLevel, ChartMarker } from '../../lib/chart-tipos'
-import { novoId, padraoFibo, type Fibo } from '../../lib/fibo'
+import { copiar } from '../../lib/fibo'
+import { modeloDe, novoId, VIS_PADRAO, type Desenho } from '../../lib/desenhos'
 import { CamadasDesenho, type Camadas } from './camadasDesenho'
-import { FiboDesenho, type ParteFibo } from './fiboDesenho'
+import { DesenhosPrimitiva, type ParteDesenho } from './desenhosPrimitiva'
+import { FERRAMENTA } from './ferramentas'
 import { NuvensDesenho } from './nuvensDesenho'
 import { LARGURA_ESCALA } from './SubChart'
 import { TpoDesenho, type Selecao } from './tpoDesenho'
@@ -32,8 +34,12 @@ const VELAS_NA_TELA = 160
 const CARREGAR_QUANDO_FALTAM = 30
 /** o ponteiro andou menos que isso entre apertar e soltar: é clique */
 const ARRASTO_PX = 5
-/** dois cliques no mesmo Fibonacci em menos que isso: abre a configuração */
+/** dois cliques no mesmo desenho em menos que isso: abre a configuração */
 const DUPLO_MS = 400
+/** ímã fraco: só gruda quando o ponteiro está a menos que isso (px) da abertura, máxima, mínima ou fechamento */
+const IMA_FRACO_PX = 14
+
+export type Ima = 'nao' | 'fraco' | 'forte'
 const N_MAX_API = 2000
 const ALTA = '#26a69a', BAIXA = '#ef5350'
 
@@ -82,19 +88,24 @@ interface Props {
   niveis?: ChartLevel[]
   /** arrasto e zoom: os painéis de baixo seguem o mesmo intervalo */
   onRange?: (r: LogicalRange | null) => void
-  /** Fibonacci de retração desenhados à mão (a ferramenta "Fib Retracement" da TradingView) */
-  fibos?: Fibo[]
-  onFibos?: (f: Fibo[]) => void
-  fiboSel?: string | null
-  onFiboSel?: (id: string | null) => void
-  /** duplo clique num Fibonacci: abre a configuração dele */
-  onFiboConfig?: (id: string) => void
-  /** ferramenta ligada: o próximo clique marca o ponto 1 e o seguinte (ou soltar depois de arrastar) o ponto 2 */
-  desenhandoFibo?: boolean
-  /** acabou de desenhar ou desistiu (Esc): a tela desliga a ferramenta */
-  onFiboPronto?: () => void
-  /** ímã: o ponto gruda na abertura, máxima, mínima ou fechamento da vela mais perto */
-  ima?: boolean
+  /** desenhos à mão (as ferramentas da TradingView, components/chart/ferramentas.ts) */
+  desenhos?: Desenho[]
+  /** um desenho novo, arrastado ou apagado: a lista inteira como ficou */
+  onDesenhos?: (l: Desenho[]) => void
+  desenhoSel?: string | null
+  onDesenhoSel?: (id: string | null) => void
+  /** duplo clique num desenho: abre a configuração dele */
+  onDesenhoConfig?: (id: string) => void
+  /** ferramenta ligada (o tipo): o próximo clique marca o ponto 1 e o seguinte (ou soltar depois de arrastar) o 2 */
+  ferramenta?: string | null
+  /** acabou de desenhar: a tela decide se a ferramenta continua ligada ("ficar no modo desenho") */
+  onFerramentaPronta?: () => void
+  /** ímã: o ponto gruda na abertura, máxima, mínima ou fechamento da vela (fraco = só quando perto) */
+  ima?: Ima
+  /** travar todos: dá para selecionar, mas não arrastar */
+  travarTodos?: boolean
+  /** esconder todos os desenhos */
+  ocultarTodos?: boolean
   /** preço como linha do fechamento, como no aggr.trade (as velas ficam escondidas, o resto segue igual) */
   emLinha?: boolean
 }
@@ -112,7 +123,8 @@ function indiceDe(d: Vela[], t: number, passo: number): number | null {
 }
 
 export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia, onVelas, onRange, camadas = null, marcadores, niveis,
-  fibos, onFibos, fiboSel = null, onFiboSel, onFiboConfig, desenhandoFibo = false, onFiboPronto, ima = false, emLinha = false }: Props) {
+  desenhos, onDesenhos, desenhoSel = null, onDesenhoSel, onDesenhoConfig, ferramenta = null, onFerramentaPronta, ima = 'nao',
+  travarTodos = false, ocultarTodos = false, emLinha = false }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -132,11 +144,11 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
   avisarVelas.current = onVelas
   const avisarRange = useRef(onRange)
   avisarRange.current = onRange
-  // os ouvintes do mouse são criados uma vez: leem o Fibonacci de agora por aqui
-  const fibo = useRef({ fibos: fibos ?? [], sel: fiboSel, desenhando: desenhandoFibo, ima, onFibos, onFiboSel, onFiboConfig, onFiboPronto })
-  fibo.current = { fibos: fibos ?? [], sel: fiboSel, desenhando: desenhandoFibo, ima, onFibos, onFiboSel, onFiboConfig, onFiboPronto }
-  const desenhoFibo = useRef<FiboDesenho | null>(null)
-  const cancelarFibo = useRef<() => void>(() => {})
+  // os ouvintes do mouse são criados uma vez: leem os desenhos de agora por aqui
+  const des = useRef({ lista: desenhos ?? [], sel: desenhoSel, ferramenta, ima, travarTodos, onDesenhos, onDesenhoSel, onDesenhoConfig, onFerramentaPronta })
+  des.current = { lista: desenhos ?? [], sel: desenhoSel, ferramenta, ima, travarTodos, onDesenhos, onDesenhoSel, onDesenhoConfig, onFerramentaPronta }
+  const primDesenhos = useRef<DesenhosPrimitiva | null>(null)
+  const cancelarDesenho = useRef<() => void>(() => {})
   const marcas = useRef<ChartMarker[]>([])
   const linhas = useRef<IPriceLine[]>([])
   const desenhoCamadas = useRef<CamadasDesenho | null>(null)
@@ -188,9 +200,10 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     const tpoDesenho = new TpoDesenho(logico, formatar)
     s.attachPrimitive(tpoDesenho)
     desenhoTpo.current = tpoDesenho
-    const fiboDesenho = new FiboDesenho(logico, formatar)
-    s.attachPrimitive(fiboDesenho)
-    desenhoFibo.current = fiboDesenho
+    const prim = new DesenhosPrimitiva(logico, formatar, () => passoAtual.current)
+    s.attachPrimitive(prim)
+    primDesenhos.current = prim
+    if (import.meta.env.DEV) (window as unknown as { __desenhos: DesenhosPrimitiva }).__desenhos = prim   // para testar no navegador
     chart.current = c; velas.current = s; vols.current = v
 
     const aoMover = (p: MouseEventParams<Time>) => {
@@ -206,7 +219,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     // clique pelo ponteiro, não pelo subscribeClick: a biblioteca descarta o 2º clique se vier em menos de 0,5 s
     // (vira duplo clique), e juntar dois dias é justamente clicar num e logo no outro
     const caixa = el.current
-    // o ouvinte de captura do Fibonacci roda antes: quando o clique é dele, o gráfico não arrasta e o TPO não escolhe dia
+    // o ouvinte de captura dos desenhos roda antes: quando o clique é deles, o gráfico não arrasta e o TPO não escolhe dia
     let consumido = false
     let apertou: { x: number; y: number } | null = null
     const aoApertar = (e: PointerEvent) => { apertou = e.button === 0 && !consumido ? { x: e.clientX, y: e.clientY } : null }
@@ -221,9 +234,9 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       if (dia) aoEscolherDia.current?.(dia, e.shiftKey)
     }
 
-    // ---------------------------------------------------------------- Fibonacci com o mouse
-    let criando: { fase: 1 | 2; x: number; y: number; f: Fibo } | null = null
-    let arrasto: { id: string; parte: ParteFibo; t0: number; p0: number; orig: Fibo; mexeu: boolean } | null = null
+    // ---------------------------------------------------------------- desenhos com o mouse
+    let criando: { fase: 1 | 2; x: number; y: number; d: Desenho } | null = null
+    let arrasto: { id: string; parte: ParteDesenho; t0: number; p0: number; orig: Desenho; mexeu: boolean } | null = null
     let ultimoClique = { id: '', em: 0 }
     const travar = (sim: boolean) => c.applyOptions({ handleScroll: !sim, handleScale: !sim })
     /** instante da vela na coluna x (fora dos dados, conta pelo tamanho da vela) */
@@ -241,53 +254,65 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       const x = e.clientX - r.left, y = e.clientY - r.top
       const t = tempoDoX(x), p = s.coordinateToPrice(y)
       if (t === null || p === null) return null
-      const k = comIma && fibo.current.ima ? dados.current.find((d) => d.t === t) : undefined
+      const modo = des.current.ima
+      const k = comIma && modo !== 'nao' ? dados.current.find((d) => d.t === t) : undefined
       if (!k) return { t, p: p as number }
       const dist = (v: number) => Math.abs((s.priceToCoordinate(v) ?? 1e9) - y)
-      return { t, p: [k.o, k.h, k.l, k.c].reduce((a, b) => (dist(b) < dist(a) ? b : a)) }
+      const perto = [k.o, k.h, k.l, k.c].reduce((a, b) => (dist(b) < dist(a) ? b : a))
+      return modo === 'forte' || dist(perto) <= IMA_FRACO_PX ? { t, p: perto } : { t, p: p as number }
     }
     const terminar = () => {
-      const f = criando?.f
+      const d = criando?.d
       criando = null
-      fiboDesenho.setRascunho(null)
+      prim.setRascunho(null)
       travar(false)
-      const F = fibo.current
-      F.onFiboPronto?.()
-      if (!f || (f.t1 === f.t2 && f.p1 === f.p2)) return
-      F.onFibos?.([...F.fibos, f])
-      F.onFiboSel?.(f.id)
+      const D = des.current
+      D.onFerramentaPronta?.()
+      if (!d) return
+      const [a, b] = d.pts
+      if (b && a.t === b.t && a.p === b.p) return                                          // nem saiu do lugar
+      D.onDesenhos?.([...D.lista, d])
+      D.onDesenhoSel?.(d.id)
     }
-    cancelarFibo.current = () => { if (criando) { criando = null; fiboDesenho.setRascunho(null); travar(false) } }
-    const aoApertarFibo = (e: PointerEvent) => {
+    cancelarDesenho.current = () => { if (criando) { criando = null; prim.setRascunho(null); travar(false) } }
+    const aoApertarDesenho = (e: PointerEvent) => {
       if (e.button !== 0) return
       const r = caixa.getBoundingClientRect()
       const x = e.clientX - r.left, y = e.clientY - r.top
       if (x > c.timeScale().width()) return                                            // escala de preço
-      const F = fibo.current
-      if (F.desenhando || criando) {
+      const D = des.current
+      const f = D.ferramenta ? FERRAMENTA[D.ferramenta] : null
+      if (f || criando) {
         const pt = ponto(e, true)
         if (!pt) return
         consumido = true; travar(true)
-        if (!criando) {
-          criando = { fase: 1, x: e.clientX, y: e.clientY, f: { id: novoId(), t1: pt.t, p1: pt.p, t2: pt.t, p2: pt.p, cfg: padraoFibo() } }
-          fiboDesenho.setRascunho(criando.f)
-        } else { criando.f = { ...criando.f, t2: pt.t, p2: pt.p }; terminar() }
+        if (!criando && f) {
+          const d: Desenho = { id: novoId(), tipo: f.tipo, pts: Array.from({ length: f.pontos }, () => ({ ...pt })), cfg: modeloDe(f.tipo, f.padrao()), vis: copiar(VIS_PADRAO) }
+          criando = { fase: 1, x: e.clientX, y: e.clientY, d }
+          if (f.pontos === 1) { terminar(); return }                                    // um clique só (linha horizontal)
+          prim.setRascunho(d)
+        } else if (criando) {
+          const pts = [...criando.d.pts]; pts[pts.length - 1] = pt
+          criando.d = { ...criando.d, pts }; terminar()
+        }
         return
       }
-      const acerto = fiboDesenho.acertar(x, y)
-      if (!acerto) { if (F.sel) F.onFiboSel?.(null); return }
+      const acerto = prim.acertar(x, y)
+      if (!acerto) { if (D.sel) D.onDesenhoSel?.(null); return }
       consumido = true; travar(true)
       const agora = Date.now()
-      if (ultimoClique.id === acerto.id && agora - ultimoClique.em < DUPLO_MS) { ultimoClique = { id: '', em: 0 }; F.onFiboConfig?.(acerto.id) }
+      if (ultimoClique.id === acerto.id && agora - ultimoClique.em < DUPLO_MS) { ultimoClique = { id: '', em: 0 }; D.onDesenhoConfig?.(acerto.id) }
       else ultimoClique = { id: acerto.id, em: agora }
-      if (F.sel !== acerto.id) F.onFiboSel?.(acerto.id)
-      const pt = ponto(e, acerto.parte !== 'corpo'), orig = F.fibos.find((f) => f.id === acerto.id)
-      if (pt && orig) arrasto = { ...acerto, t0: pt.t, p0: pt.p, orig, mexeu: false }
+      if (D.sel !== acerto.id) D.onDesenhoSel?.(acerto.id)
+      const orig = D.lista.find((d) => d.id === acerto.id)
+      if (!orig || orig.travado || D.travarTodos) return                                // travado: seleciona, não arrasta
+      const pt = ponto(e, acerto.parte !== 'corpo')
+      if (pt) arrasto = { ...acerto, t0: pt.t, p0: pt.p, orig, mexeu: false }
     }
-    const aoMoverFibo = (e: PointerEvent) => {
+    const aoMoverDesenho = (e: PointerEvent) => {
       if (criando) {
         const pt = ponto(e, true)
-        if (pt) { criando.f = { ...criando.f, t2: pt.t, p2: pt.p }; fiboDesenho.setRascunho(criando.f) }
+        if (pt) { const pts = [...criando.d.pts]; pts[pts.length - 1] = pt; criando.d = { ...criando.d, pts }; prim.setRascunho(criando.d) }
         return
       }
       if (arrasto) {
@@ -295,17 +320,20 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
         const pt = ponto(e, a.parte !== 'corpo')
         if (!pt) return
         a.mexeu = true
-        const novo = a.parte === 'p1' ? { ...o, t1: pt.t, p1: pt.p } : a.parte === 'p2' ? { ...o, t2: pt.t, p2: pt.p }
-          : { ...o, t1: o.t1 + pt.t - a.t0, t2: o.t2 + pt.t - a.t0, p1: o.p1 + pt.p - a.p0, p2: o.p2 + pt.p - a.p0 }
-        fiboDesenho.set(fiboDesenho.todos().map((f) => (f.id === novo.id ? novo : f)), a.id)
+        const pts = typeof a.parte === 'number' ? o.pts.map((p, i) => (i === a.parte ? pt : p))
+          : o.pts.map((p) => ({ t: p.t + pt.t - a.t0, p: p.p + pt.p - a.p0 }))
+        const novo = { ...o, pts }
+        prim.set(prim.todos().map((d) => (d.id === novo.id ? novo : d)), a.id)
         return
       }
-      if (!caixa.contains(e.target as Node)) return
+      if (!(e.target instanceof Node) || !caixa.contains(e.target)) return
       const r = caixa.getBoundingClientRect()
-      const acerto = fibo.current.desenhando ? null : fiboDesenho.acertar(e.clientX - r.left, e.clientY - r.top)
-      caixa.style.cursor = fibo.current.desenhando ? 'crosshair' : acerto ? (acerto.parte === 'corpo' ? 'move' : 'pointer') : ''
+      const D = des.current
+      const acerto = D.ferramenta ? null : prim.acertar(e.clientX - r.left, e.clientY - r.top)
+      const travado = acerto && (D.travarTodos || D.lista.find((d) => d.id === acerto.id)?.travado)
+      caixa.style.cursor = D.ferramenta ? 'crosshair' : acerto ? (travado ? 'pointer' : acerto.parte === 'corpo' ? 'move' : 'pointer') : ''
     }
-    const aoSoltarFibo = (e: PointerEvent) => {
+    const aoSoltarDesenho = (e: PointerEvent) => {
       if (criando) {
         if (criando.fase === 1) {
           if (Math.hypot(e.clientX - criando.x, e.clientY - criando.y) > ARRASTO_PX) terminar()   // arrastou: o 2º ponto é aqui
@@ -317,23 +345,23 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       const a = arrasto
       arrasto = null
       travar(false)
-      if (a.mexeu) fibo.current.onFibos?.(fiboDesenho.todos())
+      if (a.mexeu) des.current.onDesenhos?.(prim.todos())
     }
     const segurar = (e: Event) => { if (consumido) e.stopPropagation() }
-    caixa.addEventListener('pointerdown', aoApertarFibo, true)
+    caixa.addEventListener('pointerdown', aoApertarDesenho, true)
     caixa.addEventListener('mousedown', segurar, true)
     caixa.addEventListener('touchstart', segurar, true)
-    window.addEventListener('pointermove', aoMoverFibo)
-    window.addEventListener('pointerup', aoSoltarFibo)
+    window.addEventListener('pointermove', aoMoverDesenho)
+    window.addEventListener('pointerup', aoSoltarDesenho)
     caixa.addEventListener('pointerdown', aoApertar)
     caixa.addEventListener('pointerup', aoSoltar)
     const ro = new ResizeObserver(() => { if (el.current) c.applyOptions({ width: el.current.clientWidth, height: el.current.clientHeight }) })
     ro.observe(el.current)
     return () => {
       ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); caixa.removeEventListener('pointerdown', aoApertar); caixa.removeEventListener('pointerup', aoSoltar)
-      caixa.removeEventListener('pointerdown', aoApertarFibo, true); caixa.removeEventListener('mousedown', segurar, true); caixa.removeEventListener('touchstart', segurar, true)
-      window.removeEventListener('pointermove', aoMoverFibo); window.removeEventListener('pointerup', aoSoltarFibo)
-      c.remove(); chart.current = null; velas.current = null; vols.current = null; linhas.current = []; desenhoCamadas.current = null; desenhoFibo.current = null
+      caixa.removeEventListener('pointerdown', aoApertarDesenho, true); caixa.removeEventListener('mousedown', segurar, true); caixa.removeEventListener('touchstart', segurar, true)
+      window.removeEventListener('pointermove', aoMoverDesenho); window.removeEventListener('pointerup', aoSoltarDesenho)
+      c.remove(); chart.current = null; velas.current = null; vols.current = null; linhas.current = []; desenhoCamadas.current = null; primDesenhos.current = null
     }
   }, [])
 
@@ -421,9 +449,11 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       lineStyle: n.dashed ? LineStyle.Dashed : LineStyle.Solid, axisLabelVisible: true, title: n.label }))
   }, [niveis])
   useEffect(() => { desenhoTpo.current?.setJuncao(selecao, composto) }, [selecao, composto])
-  useEffect(() => { desenhoFibo.current?.set(fibos ?? [], fiboSel) }, [fibos, fiboSel])
+  useEffect(() => { primDesenhos.current?.set(desenhos ?? [], desenhoSel) }, [desenhos, desenhoSel])
+  useEffect(() => { primDesenhos.current?.setTempo(tempo) }, [tempo])
+  useEffect(() => { primDesenhos.current?.setEscondidos(ocultarTodos) }, [ocultarTodos])
   // desligar a ferramenta (botão ou Esc) no meio do desenho joga fora o ponto 1
-  useEffect(() => { if (!desenhandoFibo) cancelarFibo.current() }, [desenhandoFibo])
+  useEffect(() => { if (!ferramenta) cancelarDesenho.current() }, [ferramenta])
 
   // vela aberta: pergunta as 2 últimas e atualiza (ou acrescenta quando abre uma nova)
   useEffect(() => {
