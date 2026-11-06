@@ -4,12 +4,15 @@
  * ferramentasTexto.ts (texto e notas); o formato de uma ferramenta e os ajudantes de canvas, em ferramentasBase.ts.
  *
  * Etapa 1 (05/11/2026): a base, a linha de tendência, a horizontal e o Fibonacci. Etapa 2: as outras linhas, canais,
- * medidas, formas, texto e setas. Cada ferramenta nova é uma entrada nas listas, com a sua configuração.
+ * medidas, formas, texto e setas. Etapa 3: a família Fibonacci (ferramentasFibo.ts), pitchforks e Gann
+ * (ferramentasGann.ts). Cada ferramenta nova é uma entrada nas listas, com a sua configuração.
  */
 import { PADRAO_TV as FIBO_TV, comAlfa, copiar, niveisDe, tracos, type ConfigFibo, type Fibo } from '../../lib/fibo'
 import type { Desenho } from '../../lib/desenhos'
 import { distSegmento, PERTO_PX, resumoPrecos, tracar, type Ferramenta, type Geo, type Px } from './ferramentasBase'
+import { FIBO_FAMILIA } from './ferramentasFibo'
 import { MEDIDAS, FORMAS, SETAS } from './ferramentasFormas'
+import { GANN } from './ferramentasGann'
 import { CANAIS, LINHAS, setaLinha } from './ferramentasLinhas'
 import { TEXTOS } from './ferramentasTexto'
 
@@ -97,5 +100,5 @@ const fibo: Ferramenta = {
   resumo: resumoPrecos,
 }
 
-export const FERRAMENTAS: Ferramenta[] = [...LINHAS, ...CANAIS, fibo, ...MEDIDAS, ...FORMAS, ...TEXTOS, setaLinha, ...SETAS]
+export const FERRAMENTAS: Ferramenta[] = [...LINHAS, ...CANAIS, fibo, ...FIBO_FAMILIA, ...GANN, ...MEDIDAS, ...FORMAS, ...TEXTOS, setaLinha, ...SETAS]
 export const FERRAMENTA: Record<string, Ferramenta> = Object.fromEntries(FERRAMENTAS.map((f) => [f.tipo, f]))

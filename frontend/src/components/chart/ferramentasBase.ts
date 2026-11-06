@@ -23,9 +23,9 @@ export type Geo = {
   velas: (t1: number, t2: number) => VelaG[]
 }
 
-export type GrupoId = 'linhas' | 'canais' | 'fibonacci' | 'medidas' | 'formas' | 'texto' | 'setas'
+export type GrupoId = 'linhas' | 'canais' | 'fibonacci' | 'gann' | 'medidas' | 'formas' | 'texto' | 'setas'
 export const GRUPOS: { id: GrupoId; nome: string }[] = [
-  { id: 'linhas', nome: 'Linhas' }, { id: 'canais', nome: 'Canais' }, { id: 'fibonacci', nome: 'Fibonacci' },
+  { id: 'linhas', nome: 'Linhas' }, { id: 'canais', nome: 'Canais' }, { id: 'fibonacci', nome: 'Fibonacci' }, { id: 'gann', nome: 'Pitchfork e Gann' },
   { id: 'medidas', nome: 'Medidas' }, { id: 'formas', nome: 'Formas' }, { id: 'texto', nome: 'Texto e notas' }, { id: 'setas', nome: 'Setas' },
 ]
 
@@ -38,6 +38,8 @@ export type Campo =
   | { tipo: 'escolha'; chave: string; nome: string; opcoes: [string, string][] }
   | { tipo: 'numero'; chave: string; nome: string; min?: number; max?: number; passo?: number }
   | { tipo: 'secao'; nome: string }
+  /** lista de níveis (valor, cor, ligado), como a da TradingView */
+  | { tipo: 'niveis'; chave: string; nome: string }
 
 type Acesso<T> = { ler: (c: Cfg) => T; gravar: (c: Cfg, v: T) => Cfg }
 

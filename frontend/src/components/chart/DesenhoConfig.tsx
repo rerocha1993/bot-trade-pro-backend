@@ -82,6 +82,24 @@ function EstiloPorCampos({ campos, cfg, mudar }: { campos: Campo[]; cfg: Desenho
             </select>
           </div>
         )
+        if (c.tipo === 'niveis') {
+          const lista = (lerCampo(cfg, c.chave) ?? []) as { valor: number; cor: string; ligado: boolean }[]
+          const nivel = (k: number, parcial: object) => set(c.chave, lista.map((n, j) => (j === k ? { ...n, ...parcial } : n)))
+          return (
+            <div key={i}>
+              <div className="fcfg-secao">{c.nome}</div>
+              <div className="fcfg-niveis">
+                {lista.map((n, k) => (
+                  <div key={k} className="fcfg-nivel">
+                    <input type="checkbox" checked={n.ligado} onChange={(e) => nivel(k, { ligado: e.target.checked })} aria-label={`Mostrar o nível ${n.valor}`} />
+                    <input type="number" step="0.001" value={+n.valor.toFixed(4)} onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) nivel(k, { valor: v }) }} aria-label="Valor do nível" />
+                    <input type="color" value={n.cor} onChange={(e) => nivel(k, { cor: e.target.value })} aria-label={`Cor do nível ${n.valor}`} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        }
         if (c.tipo === 'numero') return (
           <div key={i} className="fcfg-linha">
             <span style={{ minWidth: 110 }}>{c.nome}</span>
