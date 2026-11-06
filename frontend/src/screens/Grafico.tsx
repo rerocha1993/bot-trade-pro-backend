@@ -32,7 +32,7 @@ import BarraFerramentas from '../components/chart/BarraFerramentas'
 import DesenhoConfig, { type AbaConfig } from '../components/chart/DesenhoConfig'
 import { FERRAMENTAS } from '../components/chart/ferramentas'
 import FootprintChart from '../components/chart/FootprintChart'
-import GraficoTV, { casas, SEGUNDOS, type Ima, type InfoGrafico, type Vela } from '../components/chart/GraficoTV'
+import GraficoTV, { casas, fluxoDe, FONTES_FLUXO_PADRAO, SEGUNDOS, type Ima, type InfoGrafico, type Vela } from '../components/chart/GraficoTV'
 import PaineisFluxo, { inicioPaineis, marcasDistorcao, PASSO_MAX_PAINEIS } from '../components/chart/PaineisFluxo'
 import { COR_TPO, type Selecao } from '../components/chart/tpoDesenho'
 import ParedesAgora from '../components/ParedesAgora'
@@ -45,6 +45,13 @@ import { useDesenhos } from '../lib/useDesenhos'
 const PADRAO = { s: 'COINBASE:BTC-USD', t: '30m' }
 const TEMPOS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const
 const ROTULO_TEMPO: Record<string, string> = { '1d': '1D' }
+/** velas que não são de tempo (só BTC): `d` = cada vela fecha a cada N milhões de US$ de delta, `v` = de volume */
+const TEMPOS_FLUXO = [
+  ['d5', 'Δ 5M'], ['d10', 'Δ 10M'], ['d20', 'Δ 20M'], ['d50', 'Δ 50M'],
+  ['v50', 'Vol 50M'], ['v100', 'Vol 100M'], ['v250', 'Vol 250M'],
+] as const
+/** de onde vem o fluxo das velas de delta/volume (&fx= no endereço; sem ele, as três somadas) */
+const FONTES_FLUXO = [['', 'Binance + Bybit + Coinbase'], ['bybit', 'Bybit perpétuo'], ['binance', 'Binance à vista'], ['coinbase', 'Coinbase à vista']] as const
 const CORRETORAS: { id: string; nome: string; perp: boolean }[] = [
   { id: 'COINBASE', nome: 'Coinbase', perp: false }, { id: 'BINANCE', nome: 'Binance', perp: true },
   { id: 'BYBIT', nome: 'Bybit', perp: true }, { id: 'OKX', nome: 'OKX', perp: true },
@@ -73,7 +80,7 @@ const CAMADAS = [
 ] as const
 const CAMADAS_PADRAO = 'abs,pre,dis'
 /** o que `ir` (trocar tempo, moeda ou TPO) leva junto no endereço */
-const MANTER_NO_ENDERECO = ['p', 'c', 'pt', 'v', 'fpt', 'fpl']
+const MANTER_NO_ENDERECO = ['p', 'c', 'pt', 'v', 'fpt', 'fpl', 'fx']
 const PASSO_FLUXO = 300
 const SETE_DIAS_FLUXO = 7 * 86400 - 600
 const DIAS_PAREDES = 3
@@ -108,7 +115,8 @@ function lerJuncao(j: string | null): Selecao | null {
 
 const ddmm = (t: number) => { const d = new Date(t * 1000); return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}` }
 
-const tempoValido = (t: string | null | undefined): t is string => !!t && (TEMPOS as readonly string[]).includes(t)
+const tempoValido = (t: string | null | undefined): t is string =>
+  !!t && ((TEMPOS as readonly string[]).includes(t) || TEMPOS_FLUXO.some(([v]) => v === t))
 
 function lerGuardado(): { s: string; t: string } | null {
   try { const v = JSON.parse(localStorage.getItem(GUARDADO) || 'null'); return v?.s && tempoValido(v?.t) ? v : null } catch { return null }
@@ -197,8 +205,13 @@ export default function Grafico() {
   const guardado = lerGuardado()
   const simbolo = (params.get('s') || guardado?.s || PADRAO.s).toUpperCase()
   const tParam = params.get('t')
-  const tempo = tempoValido(tParam) ? tParam : guardado?.t || PADRAO.t
-  const diasTpo = params.get('tpo')
+  const t0 = tempoValido(tParam) ? tParam : guardado?.t || PADRAO.t
+  // velas de delta/volume só existem para o BTC (os negócios gravados são do BTC): outra moeda volta ao padrão
+  const tempo = fluxoDe(t0) && !/^BTC-(USD|USDT|USDC|FDUSD)$/.test(partes(simbolo).par) ? PADRAO.t : t0
+  const emFluxo = !!fluxoDe(tempo)
+  const fx = FONTES_FLUXO.some(([v]) => v && v === params.get('fx')) ? params.get('fx')! : ''
+  // o TPO e as camadas por tempo não valem em velas de fluxo (cada vela tem uma duração)
+  const diasTpo = emFluxo ? null : params.get('tpo')
   const selecao = useMemo(() => (diasTpo ? lerJuncao(params.get('j')) : null), [diasTpo, params])
   const [escolhendo, setEscolhendo] = useState(false)
   const [juntando, setJuntando] = useState(false)
@@ -291,7 +304,7 @@ export default function Grafico() {
   // camadas de fluxo só no BTC cotado em dólar: os dados (livro, presos, níveis) são todos em USD
   const ehBtc = /^BTC-(USD|USDT|USDC|FDUSD)$/.test(partes(simbolo).par)
   const fluxoLigado = params.get('p') !== '0'
-  const fluxoCabe = (SEGUNDOS[tempo] ?? 0) <= PASSO_MAX_PAINEIS
+  const fluxoCabe = !emFluxo && (SEGUNDOS[tempo] ?? 0) <= PASSO_MAX_PAINEIS
   const [velasG, setVelasG] = useState<Vela[]>([])
   const tempos = useMemo(() => velasG.map((k) => k.t), [velasG])
   // camadas de order flow (&c=abs,pre,par,niv), presos de 5 ou 30 min (&pt=) e a vista de footprint (&v=fp)
@@ -309,7 +322,7 @@ export default function Grafico() {
   const tfFp = TFS_FP.some(([v]) => v === params.get('fpt')) ? Number(params.get('fpt')) : 1800
   const linhaFp = (LINHAS_FP as readonly string[]).includes(params.get('fpl') ?? '') ? Number(params.get('fpl')) : 40
   // os dados de fluxo vão até 7 dias atrás (arredondado a 5 min para a chave do pedido não mudar a cada render)
-  const inicioFluxo = ehBtc && !vistaFp && velasG.length
+  const inicioFluxo = ehBtc && !vistaFp && !emFluxo && velasG.length
     ? Math.max(Math.floor(velasG[0].t / PASSO_FLUXO) * PASSO_FLUXO, Math.floor((Date.now() / 1000 - SETE_DIAS_FLUXO) / PASSO_FLUXO) * PASSO_FLUXO)
     : null
   const qAbs = useAbsorcao(camadasOn.has('abs') ? inicioFluxo : null)
@@ -322,7 +335,7 @@ export default function Grafico() {
   const qFp = useFootprint(tfFp, linhaFp, vistaFp)
   const [range, setRange] = useState<LogicalRange | null>(null)
   const ligarFluxo = () => setParams((q) => { const n = new URLSearchParams(q); if (fluxoLigado) n.set('p', '0'); else n.delete('p'); return n }, { replace: true })
-  const temNuvem = simbolo === COM_NUVEM
+  const temNuvem = simbolo === COM_NUVEM && !emFluxo
   const livro = nuvemParam === '0' ? null : LIVRO
   const nuvensQ = useQuery({
     queryKey: ['grafico-nuvens', tempo, livro?.exchanges], enabled: temNuvem && !!livro, refetchInterval: 60_000,
@@ -424,9 +437,22 @@ export default function Grafico() {
               onClick={() => { if (diasTpo && TEMPO_LARGO.includes(t)) { setJuntando(false); ir(simbolo, t, null) } else ir(simbolo, t) }}>{ROTULO_TEMPO[t] ?? t}</button>
           ))}
         </div>
+        {ehBtc && (
+          <select className={'gselect' + (emFluxo ? ' on' : '')} value={emFluxo ? tempo : ''} aria-label="Velas de delta ou de volume"
+            title="Velas que não são de tempo: cada uma fecha quando a agressão (delta) ou o volume soma o valor escolhido"
+            onChange={(e) => ir(simbolo, e.target.value || PADRAO.t, null)}>
+            <option value="">Δ / Vol…</option>
+            {TEMPOS_FLUXO.map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+          </select>
+        )}
+        {emFluxo && (
+          <select className="gselect" value={fx} onChange={(e) => trocarParam('fx', e.target.value || null)} aria-label="De onde vem o fluxo">
+            {FONTES_FLUXO.map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+          </select>
+        )}
         <div className="gferramentas">
-          <button type="button" className={'gbotao' + (diasTpo ? ' on' : '')} onClick={ligarTpo}
-            title="Perfil de 30 min de cada dia com POC, VAH e VAL">TPO 30m</button>
+          <button type="button" className={'gbotao' + (diasTpo ? ' on' : '')} onClick={ligarTpo} disabled={emFluxo}
+            title={emFluxo ? 'o TPO é por tempo: escolha um tempo comum para vê-lo' : 'Perfil de 30 min de cada dia com POC, VAH e VAL'}>TPO 30m</button>
           {diasTpo && (
             <select className="gselect" value={diasTpo} onChange={(e) => ir(simbolo, tempo, e.target.value)} aria-label="Dias de TPO">
               {DIAS_TPO.map((d) => <option key={d} value={d}>{d} dias</option>)}
@@ -443,9 +469,9 @@ export default function Grafico() {
           )}
           {ehBtc && CAMADAS.map((c) => (
             <button key={c.id} type="button" className={'gbotao' + (camadasOn.has(c.id) ? ' on' : '')} title={c.dica}
-              onClick={() => alternarCamada(c.id)} disabled={vistaFp}>{c.nome}</button>
+              onClick={() => alternarCamada(c.id)} disabled={vistaFp || (emFluxo && c.id !== 'niv')}>{c.nome}</button>
           ))}
-          {ehBtc && camadasOn.has('pre') && !vistaFp && (
+          {ehBtc && camadasOn.has('pre') && !vistaFp && !emFluxo && (
             <select className="gselect" value={String(tfPresos)} onChange={(e) => trocarParam('pt', e.target.value === '1800' ? null : e.target.value)} aria-label="Bloco dos presos">
               {TFS_PRESOS.map(([v, n]) => <option key={v} value={v}>presos {n}</option>)}
             </select>
@@ -465,7 +491,7 @@ export default function Grafico() {
             {variacao !== null && <span style={{ color: variacao >= 0 ? '#26a69a' : '#ef5350' }}> {variacao >= 0 ? '+' : ''}{(variacao * 100).toFixed(2)}%</span>}
           </span>
         )}
-        {!temNuvem && <span className="gnota muted">sem nuvens: só no BTC-USD da Coinbase</span>}
+        {!temNuvem && !emFluxo && <span className="gnota muted">sem nuvens: só no BTC-USD da Coinbase</span>}
       </div>
       {ferramentaAtual && (
         <div className="glegenda-tpo"><span className="gjuncao">{ferramentaAtual.nome}: {ferramentaAtual.arrastar ? 'aperte e arraste para desenhar' : ferramentaAtual.tela ? 'clique onde o texto fica na tela' : ferramentaAtual.pontos === 1 ? 'clique no lugar' : ferramentaAtual.pontos === 0 ? 'clique em cada ponto; duplo clique ou Enter termina' : ferramentaAtual.pontos === 3 ? 'clique nos três pontos (o 1º e o 2º dão a linha, o 3º a largura)' : 'clique no primeiro ponto e depois no segundo (ou arraste de um ao outro)'} · Esc cancela{ima !== 'nao' ? ` · ímã ${ima}` : ''}{ficar ? ' · fica ligada depois de desenhar' : ''}</span></div>
@@ -511,7 +537,22 @@ export default function Grafico() {
           </>}
         </div>
       )}
-      {ehBtc && !vistaFp && CAMADAS.some((c) => camadasOn.has(c.id)) && (
+      {emFluxo && !vistaFp && (() => {
+        const f = fluxoDe(tempo)!
+        return (
+          <div className="glegenda-tpo">
+            {f.modo === 'delta'
+              ? <span><b>Velas de delta de {f.milhoes} milhões</b>: cada vela só fecha quando a agressão (compra a mercado − venda a mercado) soma
+                {' '}+{f.milhoes} ou −{f.milhoes} milhões de US$ desde que abriu. Mercado parado = vela que dura horas; agressão forte = várias velas em minutos</span>
+              : <span><b>Velas de volume de {f.milhoes} milhões</b>: cada vela fecha quando negociam {f.milhoes} milhões de US$ (compra + venda)</span>}
+            <span><b style={{ color: '#26a69a' }}>volume verde</b> / <b style={{ color: '#ef5350' }}>vermelho</b> embaixo = quem agrediu mais na vela (o delta), não a cor da vela:
+              vela vermelha com volume verde = compraram a mercado e o preço caiu (alguém absorveu)</span>
+            <span className="muted">{FONTES_FLUXO.find(([v]) => v === fx)?.[1]} · somado minuto a minuto (a vela fecha no fim do minuto em que chegou ao valor) ·
+              histórico desde que o coletor de negócios começou (20/10) · leitura, não sinal: não foi medido contra sorteio</span>
+          </div>
+        )
+      })()}
+      {ehBtc && !vistaFp && !emFluxo && CAMADAS.some((c) => camadasOn.has(c.id)) && (
         <div className="glegenda-tpo">
           {camadasOn.has('abs') && <span><b style={{ color: COR_FLUXO.asks }}>Absorção</b>: nuvem quente com contorno onde compra agressiva (top 10% do dia, OI subindo) bateu numa parede e o preço não passou; verde = o espelho no fundo
             {qAbs.data && <span className="muted"> · {qAbs.data.velas_com_livro_e_negocios < 24 ? 'ainda juntando ~2 h de livro e negócios' : `${qAbs.data.eventos.length} no período`}</span>}</span>}
@@ -562,7 +603,7 @@ export default function Grafico() {
               onVelas={setVelasG} onRange={setRange} camadas={camadas} marcadores={marcadores} niveis={niveis}
               desenhos={desenhos} onDesenhos={(l) => des.mudar(l)} desenhoSel={desSel} onDesenhoSel={setDesSel} onDesenhoConfig={abrirConfig}
               ferramenta={ferramenta} onFerramentaPronta={() => { if (!pref.ficar) setFerramenta(null) }} ima={pref.ima}
-              travarTodos={pref.travar} ocultarTodos={pref.ocultar} />
+              travarTodos={pref.travar} ocultarTodos={pref.ocultar} fontesFluxo={fx || FONTES_FLUXO_PADRAO} />
             {selecionado && !ferramenta && !pref.ocultar && (
               <BarraEstilo desenho={selecionado} onMudar={(d) => trocar(d, `estilo:${d.id}`)} onConfig={() => abrirConfig(selecionado.id)}
                 onClonar={() => clonar(selecionado)} onOrdem={(frente) => ordem(selecionado.id, frente)} onApagar={() => apagar(selecionado.id)} />
@@ -574,7 +615,9 @@ export default function Grafico() {
             {des.estado === 'so_aqui' && <div className="gdes-aviso warn-txt">desenhos guardados só neste navegador: o servidor não respondeu (tenta de novo na próxima mudança)</div>}
             {ehBtc && fluxoLigado && (fluxoCabe
               ? tempos.length > 0 && <PaineisFluxo tempos={tempos} range={range} passo={SEGUNDOS[tempo]} />
-              : <div className="muted" style={{ fontSize: 12, padding: '10px 0' }}>os painéis de livro, liquidações e funding vão até velas de 4 h: escolha um tempo menor para vê-los</div>)}
+              : <div className="muted" style={{ fontSize: 12, padding: '10px 0' }}>{emFluxo
+                ? 'os painéis de livro, liquidações e funding são por tempo: escolha um tempo comum (1m a 4h) para vê-los'
+                : 'os painéis de livro, liquidações e funding vão até velas de 4 h: escolha um tempo menor para vê-los'}</div>)}
           </div>
         </div>
         )}

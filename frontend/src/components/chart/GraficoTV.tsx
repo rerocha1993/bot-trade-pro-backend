@@ -4,6 +4,9 @@
  *
  * Os dados ficam num ref (não no estado do React): trocar de moeda zera tudo, arrastar acrescenta velas antigas no
  * começo e o relógio só mexe na última vela (`update`), sem redesenhar o gráfico inteiro.
+ *
+ * Além dos tempos (1m…1d), velas que não são de tempo (`d10` = cada vela fecha a cada 10 milhões de US$ de delta,
+ * `v100` = a cada 100 milhões de volume), montadas no servidor com os negócios do BTC (/api/fluxo/velas).
  */
 import {
   ColorType, CrosshairMode, LineStyle, createChart,
@@ -22,12 +25,21 @@ import { NuvensDesenho } from './nuvensDesenho'
 import { LARGURA_ESCALA } from './SubChart'
 import { TpoDesenho, type Selecao } from './tpoDesenho'
 
-export type Vela = { t: number; o: number; h: number; l: number; c: number; v: number }
+/** `d`, `vu` e `fim` só nas velas de fluxo: delta e volume da vela em US$ e o início do último minuto dela */
+export type Vela = { t: number; o: number; h: number; l: number; c: number; v: number; d?: number; vu?: number; fim?: number }
 
 /** O que a tela de cima precisa saber do gráfico. */
 export type InfoGrafico = { ultimo: Vela | null; anterior: Vela | null; nuvem: boolean; erro: string | null; carregando: boolean }
 
 export const SEGUNDOS: Record<string, number> = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 }
+
+/** Velas de fluxo: `d10` = delta de 10 milhões de US$, `v100` = volume de 100 milhões. null = tempo comum. */
+export function fluxoDe(tempo: string): { modo: 'delta' | 'volume'; milhoes: number } | null {
+  const m = /^([dv])(\d+(?:\.\d+)?)$/.exec(tempo)
+  return m ? { modo: m[1] === 'd' ? 'delta' : 'volume', milhoes: Number(m[2]) } : null
+}
+/** de onde vem o fluxo das velas de delta e de volume (o coletor de negócios do servidor) */
+export const FONTES_FLUXO_PADRAO = 'binance,bybit,coinbase'
 const N_INICIAL = 800
 const N_ANTIGAS = 600
 const VELAS_NA_TELA = 160
@@ -56,12 +68,28 @@ export function volumeCurto(v: number): string {
   return a >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : a >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : a >= 1e3 ? `${(v / 1e3).toFixed(2)}K` : v.toFixed(a >= 10 ? 0 : 2)
 }
 
-const daApi = (r: number[]): Vela => ({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4], v: r[5] })
+const daApi = (r: number[]): Vela => (r.length > 8
+  ? { t: r[0], o: r[1], h: r[2], l: r[3], c: r[4], v: r[5], d: r[6], vu: r[7], fim: r[8] }
+  : { t: r[0], o: r[1], h: r[2], l: r[3], c: r[4], v: r[5] })
 const vela = (k: Vela) => ({ time: k.t as UTCTimestamp, open: k.o, high: k.h, low: k.l, close: k.c })
 const fechamento = (k: Vela) => ({ time: k.t as UTCTimestamp, value: k.c })
-const volume = (k: Vela) => ({ time: k.t as UTCTimestamp, value: k.v, color: k.c >= k.o ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)' })
-const buscar = (simbolo: string, tempo: string, n: number, ate?: number) =>
-  api.get<VelasGrafico>('/api/grafico/velas', { simbolo, tempo, n, ate })
+// nas velas de fluxo a cor do volume é a do DELTA (quem agrediu), não a da vela: vela vermelha com volume verde =
+// compraram a mercado e o preço caiu (alguém absorveu as compras)
+const volume = (k: Vela) => ({ time: k.t as UTCTimestamp, value: k.v,
+  color: (k.d !== undefined ? k.d >= 0 : k.c >= k.o) ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)' })
+const buscar = (simbolo: string, tempo: string, n: number, ate?: number, fontes = FONTES_FLUXO_PADRAO) => {
+  const f = fluxoDe(tempo)
+  if (!f) return api.get<VelasGrafico>('/api/grafico/velas', { simbolo, tempo, n, ate })
+  // o preço das velas vem da corretora do gráfico, se ela estiver entre as fontes
+  return api.get<VelasGrafico>('/api/fluxo/velas', { modo: f.modo, milhoes: f.milhoes, fontes, preco: simbolo.split(':')[0].toLowerCase(), n, ate })
+}
+/** quanto dura uma vela de fluxo, em média (para os desenhos que passam da última vela) */
+function passoMedio(d: Vela[]): number {
+  if (d.length < 2) return 60
+  const k = Math.min(d.length - 1, 200)
+  return Math.max(60, (d[d.length - 1].t - d[d.length - 1 - k].t) / k)
+}
+const duracao = (s: number) => s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${String(Math.round((s % 3600) / 60)).padStart(2, '0')}`
 
 interface Props {
   simbolo: string
@@ -108,6 +136,8 @@ interface Props {
   ocultarTodos?: boolean
   /** preço como linha do fechamento, como no aggr.trade (as velas ficam escondidas, o resto segue igual) */
   emLinha?: boolean
+  /** velas de fluxo: corretoras somadas (binance, bybit, coinbase) */
+  fontesFluxo?: string
 }
 
 /** Índice de vela (fracionário) do instante t: entre duas velas interpola; antes ou depois dos dados, extrapola pelo
@@ -124,7 +154,7 @@ function indiceDe(d: Vela[], t: number, passo: number): number | null {
 
 export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo = null, selecao = null, composto = null, nuvens = null, onDia, onVelas, onRange, camadas = null, marcadores, niveis,
   desenhos, onDesenhos, desenhoSel = null, onDesenhoSel, onDesenhoConfig, ferramenta = null, onFerramentaPronta, ima = 'nao',
-  travarTodos = false, ocultarTodos = false, emLinha = false }: Props) {
+  travarTodos = false, ocultarTodos = false, emLinha = false, fontesFluxo = FONTES_FLUXO_PADRAO }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const chart = useRef<IChartApi | null>(null)
   const velas = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -133,8 +163,9 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
   const dados = useRef<Vela[]>([])
   const desenhoTpo = useRef<TpoDesenho | null>(null)
   const desenhoNuvens = useRef<NuvensDesenho | null>(null)
+  const fluxo = fluxoDe(tempo)
   const passoAtual = useRef(SEGUNDOS[tempo] ?? 60)
-  passoAtual.current = SEGUNDOS[tempo] ?? 60
+  passoAtual.current = SEGUNDOS[tempo] ?? passoMedio(dados.current)
   const estado = useRef({ geracao: 0, buscandoAntigas: false, fimDoHistorico: false, nuvem: false })
   const avisar = useRef(onInfo)
   avisar.current = onInfo
@@ -468,7 +499,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     setErro(null); setCarregando(true); setLegenda(null)
     avisar.current?.({ ultimo: null, anterior: null, nuvem: false, erro: null, carregando: true })
 
-    buscar(simbolo, tempo, N_INICIAL).then((r) => {
+    buscar(simbolo, tempo, N_INICIAL, undefined, fontesFluxo).then((r) => {
       if (geracao !== estado.current.geracao) return
       const d = r.velas.map(daApi)
       dados.current = d
@@ -486,12 +517,12 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       info()
     }).catch((e) => {
       if (geracao !== estado.current.geracao) return
-      const msg = e instanceof ApiError && e.status === 404 ? `${simbolo} não existe nessa corretora` : `não deu para buscar ${simbolo}: ${e.message ?? e}`
+      const msg = e instanceof ApiError && e.status === 404 ? `${simbolo} não existe nessa corretora` : `não deu para buscar ${fluxoDe(tempo) ? 'as velas de fluxo' : simbolo}: ${e.message ?? e}`
       setErro(msg); setCarregando(false)
       avisar.current?.({ ultimo: null, anterior: null, nuvem: false, erro: msg, carregando: false })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simbolo, tempo])
+  }, [simbolo, tempo, fontesFluxo])
 
   // arrastar para a esquerda até perto do começo: busca as velas anteriores e mantém a vista no mesmo lugar
   useEffect(() => {
@@ -503,7 +534,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       st.buscandoAntigas = true
       const geracao = st.geracao
       const primeira = dados.current[0].t
-      buscar(simbolo, tempo, N_ANTIGAS, primeira - SEGUNDOS[tempo]).then((resp) => {
+      buscar(simbolo, tempo, N_ANTIGAS, primeira - (SEGUNDOS[tempo] ?? 1), fontesFluxo).then((resp) => {
         if (geracao !== st.geracao) return
         const antigas = resp.velas.map(daApi).filter((k) => k.t < primeira)
         if (!antigas.length) { st.fimDoHistorico = true; return }
@@ -519,7 +550,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     }
     c.timeScale().subscribeVisibleLogicalRangeChange(aoRolar)
     return () => c.timeScale().unsubscribeVisibleLogicalRangeChange(aoRolar)
-  }, [simbolo, tempo])
+  }, [simbolo, tempo, fontesFluxo])
 
   useEffect(() => { desenhoTpo.current?.set(tpo) }, [tpo])
   useEffect(() => { desenhoNuvens.current?.set(nuvens) }, [nuvens])
@@ -547,8 +578,9 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       const passo = SEGUNDOS[tempo]
       const ultima = dados.current[dados.current.length - 1].t
       // aba escondida, PC dormindo ou rede fora: pede todas as velas desde a última conhecida, senão o vão some
-      const faltam = Math.min(N_MAX_API, Math.ceil((Date.now() / 1000 - ultima) / passo) + 1)
-      buscar(simbolo, tempo, Math.max(2, faltam)).then((r) => {
+      // (velas de fluxo não têm tamanho fixo: pede as últimas 50, o servidor guarda a conta por 10 s)
+      const faltam = passo ? Math.min(N_MAX_API, Math.ceil((Date.now() / 1000 - ultima) / passo) + 1) : 50
+      buscar(simbolo, tempo, Math.max(2, faltam), undefined, fontesFluxo).then((r) => {
         if (geracao !== estado.current.geracao) return
         let novas = false
         for (const k of r.velas.map(daApi)) {
@@ -564,7 +596,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     }, vivoMs)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simbolo, tempo, vivoMs])
+  }, [simbolo, tempo, vivoMs, fontesFluxo])
 
   const mostrada = legenda ?? dados.current[dados.current.length - 1] ?? null
   const dec = mostrada ? casas(mostrada.c) : 2
@@ -578,7 +610,11 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
             <span key={k}><span className="muted">{k.toUpperCase()}</span> <span style={{ color: cor }}>{mostrada[k].toLocaleString('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec })}</span></span>
           ))}
           <span style={{ color: cor }}>{mostrada.o ? `${mostrada.c >= mostrada.o ? '+' : ''}${((mostrada.c / mostrada.o - 1) * 100).toFixed(2)}%` : ''}</span>
-          <span><span className="muted">Vol</span> {volumeCurto(mostrada.v)}</span>
+          <span><span className="muted">Vol</span> {volumeCurto(mostrada.v)}{fluxo && mostrada.vu !== undefined ? ` BTC · US$ ${volumeCurto(mostrada.vu)}` : ''}</span>
+          {fluxo && mostrada.d !== undefined && (
+            <span><span className="muted">Δ</span> <span style={{ color: mostrada.d >= 0 ? ALTA : BAIXA }}>{mostrada.d >= 0 ? '+' : ''}US$ {volumeCurto(mostrada.d)}</span></span>
+          )}
+          {fluxo && mostrada.fim !== undefined && <span><span className="muted">durou</span> {duracao(mostrada.fim - mostrada.t + 60)}</span>}
         </div>
       )}
       {carregando && <div className="gtv-aviso">carregando {simbolo}…</div>}

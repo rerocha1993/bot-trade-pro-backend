@@ -280,6 +280,7 @@ button { cursor: pointer; }
 .gbotao:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.24); }
 .gbotao.on { color: #f5c04a; border-color: rgba(245, 192, 74, 0.55); background: rgba(245, 192, 74, 0.08); }
 .gselect { width: auto; padding: 6px 10px; border-radius: 10px; font-size: 12px; }
+.gselect.on { border-color: var(--accent, #e8b4c4); color: var(--text, #e8ecf2); }
 .glegenda-tpo { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 11.5px; }
 .glegenda-tpo .gjuncao { color: #f5c04a; flex-basis: 100%; }
 /* Fibonacci: janela de configuração no molde da TradingView */

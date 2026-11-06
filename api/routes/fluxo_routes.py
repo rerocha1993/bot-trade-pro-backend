@@ -6,6 +6,8 @@ Leituras de fluxo para o gráfico (conselho/fluxo.py):
     GET /api/fluxo/absorcao?inicio                   a "distorção": parede no livro + agressão alavancada contra ela
                                                      + preço travado; é a nuvem que aparece no gráfico
     GET /api/fluxo/liquidacoes?inicio&passo          liquidações dos perpétuos (Bybit + OKX) por vela: long e short
+    GET /api/fluxo/velas?modo&milhoes&fontes&preco&n&ate velas que não são de tempo: cada uma fecha a cada N milhões de
+                                                     US$ de delta (as "velas de delta" do Shaka) ou de volume
     GET /api/fluxo/posicionamento?inicio&passo       CVD (alavancado e à vista), open interest, contas compradas e a
                                                      distorção (preço para um lado, alavancados apostando no outro)
 
@@ -18,7 +20,7 @@ from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from api import cache_dias
-from conselho import fluxo, livro_historico as lh, mercado, posicionamento as pos
+from conselho import fluxo, livro_historico as lh, mercado, posicionamento as pos, velas_fluxo
 from conselho.coletor_liquidacoes import FONTES as FONTES_LIQ, PASTA_LIQUIDACOES
 from conselho.coletor_negocios import PASSO_USD as FAIXA_COLETOR
 
@@ -82,6 +84,26 @@ def _absorcao_trecho(inicio_s: int, fim_s: int, passo: int) -> Dict:
 
 # abandono exigido para confirmar os presos, por tempo gráfico (velas maiores andam mais)
 ABANDONO_POR_PASSO = {300: 0.002, 900: 0.004, 1800: 0.005, 3600: 0.007, 14400: 0.012}
+
+
+@router.get("/velas")
+def velas_de_fluxo(modo: str = Query("delta", pattern="^(delta|volume)$"),
+                   milhoes: float = Query(10.0, gt=0.0, le=10000.0, description="limiar de cada vela, em milhões de US$"),
+                   fontes: str = Query("binance,bybit,coinbase"),
+                   preco: Optional[str] = Query(None, description="de que corretora vem o preço das velas (a do gráfico)"),
+                   n: int = Query(500, ge=1, le=2000), ate: Optional[int] = Query(None, description="só velas que abriram até aqui (s)")) -> Dict:
+    """
+    As `n` últimas velas de delta ou de volume (conselho/velas_fluxo.py) até `ate`, no formato de /api/grafico/velas
+    mais quatro colunas: [início_s, o, h, l, c, volume_btc, delta_usd, volume_usd, fim_s, aberta].
+    """
+    exs = [e for e in velas_fluxo.FONTES_FLUXO if e in {x.strip() for x in fontes.split(",")}]
+    if not exs:
+        raise HTTPException(status_code=400, detail=f"fontes: {', '.join(velas_fluxo.FONTES_FLUXO)}")
+    todas = velas_fluxo.velas(exs, modo, milhoes * 1e6, preco_de=(preco or "").lower() or None)
+    if ate is not None:
+        todas = [v for v in todas if v["t"] <= ate]
+    return {"simbolo": "BTC", "tempo": f"{modo}:{milhoes:g}", "nuvem": False, "fontes": exs,
+            "velas": [velas_fluxo.linha_api(v) for v in todas[-n:]]}
 
 
 @router.get("/footprint")
