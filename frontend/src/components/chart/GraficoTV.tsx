@@ -95,7 +95,7 @@ interface Props {
   desenhoSel?: string | null
   onDesenhoSel?: (id: string | null) => void
   /** duplo clique num desenho: abre a configuração dele (as de texto abrem na aba Texto logo depois de desenhar) */
-  onDesenhoConfig?: (id: string, aba?: 'texto') => void
+  onDesenhoConfig?: (id: string, aba?: 'texto' | 'estilo') => void
   /** ferramenta ligada (o tipo): o próximo clique marca o ponto 1 e o seguinte (ou soltar depois de arrastar) o 2 */
   ferramenta?: string | null
   /** acabou de desenhar: a tela decide se a ferramenta continua ligada ("ficar no modo desenho") */
@@ -240,6 +240,8 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     let criando: { k: number; x: number; y: number; d: Desenho; arrastando: boolean; ultimo: number } | null = null
     let arrasto: { id: string; parte: ParteDesenho; t0: number; p0: number; orig: Desenho; mexeu: boolean } | null = null
     let ultimoClique = { id: '', em: 0 }
+    /** pincel e marca-texto: o traço sendo feito, ponto a ponto */
+    let rabisco: { d: Desenho; x: number; y: number } | null = null
     const travar = (sim: boolean) => c.applyOptions({ handleScroll: !sim, handleScale: !sim })
     /** instante da vela na coluna x (fora dos dados, conta pelo tamanho da vela) */
     const tempoDoX = (x: number): number | null => {
@@ -262,6 +264,20 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       const dist = (v: number) => Math.abs((s.priceToCoordinate(v) ?? 1e9) - y)
       const perto = [k.o, k.h, k.l, k.c].reduce((a, b) => (dist(b) < dist(a) ? b : a))
       return modo === 'forte' || dist(perto) <= IMA_FRACO_PX ? { t, p: perto } : { t, p: p as number }
+    }
+    /** o instante exato da coluna x (entre duas velas, interpola), para o traço à mão livre */
+    const pontoExato = (e: PointerEvent) => {
+      const r = caixa.getBoundingClientRect()
+      const x = e.clientX - r.left, y = e.clientY - r.top
+      const d = dados.current, p = s.coordinateToPrice(y)
+      const x0 = c.timeScale().logicalToCoordinate(0 as Logical)
+      if (!d.length || x0 === null || p === null) return null
+      const i = (x - x0) / c.timeScale().options().barSpacing
+      const base = Math.max(0, Math.min(d.length - 2, Math.floor(i)))
+      const t = d.length < 2 ? d[0].t + i * passoAtual.current
+        : i < 0 ? d[0].t + i * passoAtual.current : i > d.length - 1 ? d[d.length - 1].t + (i - d.length + 1) * passoAtual.current
+        : d[base].t + (i - base) * (d[base + 1].t - d[base].t)
+      return { t, p: p as number }
     }
     /** o ponto do ponteiro para a ferramenta: preso à tela = frações da largura e da altura do painel */
     const pontoDe = (e: PointerEvent, f: Ferramenta | undefined, comIma: boolean) => {
@@ -286,6 +302,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       D.onDesenhos?.([...D.lista, d])
       D.onDesenhoSel?.(d.id)
       if (f.pedeTexto) D.onDesenhoConfig?.(d.id, 'texto')
+      else if (f.pedeConfig) D.onDesenhoConfig?.(d.id, 'estilo')
     }
     /** um clique (ou o fim de um arrasto) durante o desenho: fixa o ponto k e passa ao próximo */
     const avancar = (pt: { t: number; p: number }, e: PointerEvent) => {
@@ -320,6 +337,14 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       if (x > c.timeScale().width()) return                                            // escala de preço
       const D = des.current
       const f = criando ? FERRAMENTA[criando.d.tipo] : D.ferramenta ? FERRAMENTA[D.ferramenta] : undefined
+      if (f?.arrastar && !criando) {
+        const pt = pontoExato(e)
+        if (!pt) return
+        consumido = true; travar(true)
+        rabisco = { d: { id: novoId(), tipo: f.tipo, pts: [pt], cfg: modeloDe(f.tipo, f.padrao()), vis: copiar(VIS_PADRAO) }, x: e.clientX, y: e.clientY }
+        prim.setRascunho(rabisco.d)
+        return
+      }
       if (f) {
         const pt = pontoDe(e, f, true)
         if (!pt) return
@@ -346,6 +371,12 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       if (pt) arrasto = { ...acerto, t0: pt.t, p0: pt.p, orig, mexeu: false }
     }
     const aoMoverDesenho = (e: PointerEvent) => {
+      if (rabisco) {
+        if (Math.hypot(e.clientX - rabisco.x, e.clientY - rabisco.y) < 3) return
+        const pt = pontoExato(e)
+        if (pt) { rabisco.d = { ...rabisco.d, pts: [...rabisco.d.pts, pt] }; rabisco.x = e.clientX; rabisco.y = e.clientY; prim.setRascunho(rabisco.d) }
+        return
+      }
       if (criando) {
         const pt = pontoDe(e, FERRAMENTA[criando.d.tipo], true)
         if (pt) { const pts = [...criando.d.pts]; pts[criando.k] = pt; criando.d = { ...criando.d, pts }; prim.setRascunho(criando.d) }
@@ -370,6 +401,16 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       caixa.style.cursor = D.ferramenta ? 'crosshair' : acerto ? (travado ? 'pointer' : acerto.parte === 'corpo' ? 'move' : 'pointer') : ''
     }
     const aoSoltarDesenho = (e: PointerEvent) => {
+      if (rabisco) {
+        const d = rabisco.d
+        rabisco = null
+        prim.setRascunho(null)
+        travar(false)
+        const D = des.current
+        D.onFerramentaPronta?.()
+        if (d.pts.length >= 2) { D.onDesenhos?.([...D.lista, d]); D.onDesenhoSel?.(d.id) }
+        return
+      }
       const cr = criando
       if (cr) {
         if (cr.arrastando) {

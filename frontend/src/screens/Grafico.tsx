@@ -249,8 +249,8 @@ export default function Grafico() {
   }, [des, desenhos.length])
   const abrirConfig = useCallback((id: string, aba?: AbaConfig) => {
     if (!des.agora().some((d) => d.id === id)) return
-    // logo depois de desenhar um texto: Cancelar volta para antes do desenho existir
-    setDesSel(id); setConfig({ id, antes: aba === 'texto' ? des.agora().filter((d) => d.id !== id) : des.agora(), aba })
+    // com aba = aberta logo depois de desenhar: Cancelar volta para antes do desenho existir
+    setDesSel(id); setConfig({ id, antes: aba ? des.agora().filter((d) => d.id !== id) : des.agora(), aba })
   }, [des])
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
@@ -468,7 +468,7 @@ export default function Grafico() {
         {!temNuvem && <span className="gnota muted">sem nuvens: só no BTC-USD da Coinbase</span>}
       </div>
       {ferramentaAtual && (
-        <div className="glegenda-tpo"><span className="gjuncao">{ferramentaAtual.nome}: {ferramentaAtual.tela ? 'clique onde o texto fica na tela' : ferramentaAtual.pontos === 1 ? 'clique no lugar' : ferramentaAtual.pontos === 0 ? 'clique em cada ponto; duplo clique ou Enter termina' : ferramentaAtual.pontos === 3 ? 'clique nos três pontos (o 1º e o 2º dão a linha, o 3º a largura)' : 'clique no primeiro ponto e depois no segundo (ou arraste de um ao outro)'} · Esc cancela{ima !== 'nao' ? ` · ímã ${ima}` : ''}{ficar ? ' · fica ligada depois de desenhar' : ''}</span></div>
+        <div className="glegenda-tpo"><span className="gjuncao">{ferramentaAtual.nome}: {ferramentaAtual.arrastar ? 'aperte e arraste para desenhar' : ferramentaAtual.tela ? 'clique onde o texto fica na tela' : ferramentaAtual.pontos === 1 ? 'clique no lugar' : ferramentaAtual.pontos === 0 ? 'clique em cada ponto; duplo clique ou Enter termina' : ferramentaAtual.pontos === 3 ? 'clique nos três pontos (o 1º e o 2º dão a linha, o 3º a largura)' : 'clique no primeiro ponto e depois no segundo (ou arraste de um ao outro)'} · Esc cancela{ima !== 'nao' ? ` · ímã ${ima}` : ''}{ficar ? ' · fica ligada depois de desenhar' : ''}</span></div>
       )}
       <div className="gatalhos">
         {ATALHOS.map((s) => (
@@ -584,8 +584,8 @@ export default function Grafico() {
         <DesenhoConfig desenho={desAberto} casas={dec} aba={config.aba}
           onMudar={(d) => des.previa(des.agora().map((x) => (x.id === d.id ? d : x)))}
           onFechar={(ok) => {
-            // desenho recém-criado (texto): ele já foi gravado, então Cancelar também grava a lista sem ele
-            if (ok) des.mudar(des.agora()); else if (config.aba === 'texto') des.mudar(config.antes); else des.previa(config.antes)
+            // desenho recém-criado (texto, imagem, ícone): ele já foi gravado, então Cancelar também grava a lista sem ele
+            if (ok) des.mudar(des.agora()); else if (config.aba) des.mudar(config.antes); else des.previa(config.antes)
             setConfig(null)
           }} />
       )}

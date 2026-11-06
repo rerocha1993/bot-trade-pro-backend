@@ -100,6 +100,34 @@ function EstiloPorCampos({ campos, cfg, mudar }: { campos: Campo[]; cfg: Desenho
             </div>
           )
         }
+        if (c.tipo === 'imagem') {
+          const src = String(lerCampo(cfg, c.chave) ?? '')
+          // a imagem vai junto com o desenho para o servidor: reduzida a 1000 px no lado maior, em JPEG
+          const escolher = (arq: File | undefined) => {
+            if (!arq) return
+            const leitor = new FileReader()
+            leitor.onload = () => {
+              const im = new Image()
+              im.onload = () => {
+                const k = Math.min(1, 1000 / Math.max(im.naturalWidth, im.naturalHeight))
+                const cv = document.createElement('canvas')
+                cv.width = Math.round(im.naturalWidth * k); cv.height = Math.round(im.naturalHeight * k)
+                cv.getContext('2d')?.drawImage(im, 0, 0, cv.width, cv.height)
+                set(c.chave, cv.toDataURL(arq.type === 'image/png' && cv.width * cv.height < 250_000 ? 'image/png' : 'image/jpeg', 0.85))
+              }
+              im.src = String(leitor.result)
+            }
+            leitor.readAsDataURL(arq)
+          }
+          return (
+            <div key={i} className="fcfg-linha">
+              <span style={{ minWidth: 110 }}>{c.nome}</span>
+              <input type="file" accept="image/*" onChange={(e) => escolher(e.target.files?.[0])} aria-label="Escolher a imagem" />
+              {src && <img src={src} alt="" style={{ maxHeight: 48, maxWidth: 120, borderRadius: 4 }} />}
+              {src && <span className="muted">{Math.round(src.length * 0.75 / 1024)} KB</span>}
+            </div>
+          )
+        }
         if (c.tipo === 'numero') return (
           <div key={i} className="fcfg-linha">
             <span style={{ minWidth: 110 }}>{c.nome}</span>

@@ -21,12 +21,14 @@ export type Geo = {
   selecionado: boolean
   /** as velas carregadas entre dois instantes (inclusive) */
   velas: (t1: number, t2: number) => VelaG[]
+  /** pede um novo desenho (uma imagem que acabou de carregar) */
+  redesenhar: () => void
 }
 
-export type GrupoId = 'linhas' | 'canais' | 'fibonacci' | 'gann' | 'elliott' | 'padroes' | 'medidas' | 'formas' | 'texto' | 'setas'
+export type GrupoId = 'linhas' | 'canais' | 'fibonacci' | 'gann' | 'elliott' | 'padroes' | 'medidas' | 'volume' | 'ciclos' | 'formas' | 'texto' | 'setas'
 export const GRUPOS: { id: GrupoId; nome: string }[] = [
   { id: 'linhas', nome: 'Linhas' }, { id: 'canais', nome: 'Canais' }, { id: 'fibonacci', nome: 'Fibonacci' }, { id: 'gann', nome: 'Pitchfork e Gann' },
-  { id: 'elliott', nome: 'Ondas de Elliott' }, { id: 'padroes', nome: 'Padrões' }, { id: 'medidas', nome: 'Projeção e medidas' }, { id: 'formas', nome: 'Formas' }, { id: 'texto', nome: 'Texto e notas' }, { id: 'setas', nome: 'Setas' },
+  { id: 'elliott', nome: 'Ondas de Elliott' }, { id: 'padroes', nome: 'Padrões' }, { id: 'medidas', nome: 'Projeção e medidas' }, { id: 'volume', nome: 'Volume e VWAP' }, { id: 'ciclos', nome: 'Ciclos' }, { id: 'formas', nome: 'Formas' }, { id: 'texto', nome: 'Texto e notas' }, { id: 'setas', nome: 'Setas' },
 ]
 
 /** um campo da aba Estilo; `chave` aceita caminho com ponto ('stats.preco') */
@@ -40,6 +42,8 @@ export type Campo =
   | { tipo: 'secao'; nome: string }
   /** lista de níveis (valor, cor, ligado), como a da TradingView */
   | { tipo: 'niveis'; chave: string; nome: string }
+  /** escolher uma imagem do computador (vira data URL, reduzida) */
+  | { tipo: 'imagem'; chave: string; nome: string }
 
 type Acesso<T> = { ler: (c: Cfg) => T; gravar: (c: Cfg, v: T) => Cfg }
 
@@ -68,6 +72,10 @@ export interface Ferramenta {
   texto?: boolean
   /** abre a aba Texto logo depois de desenhar */
   pedeTexto?: boolean
+  /** abre a aba Estilo logo depois de desenhar (imagem, ícone) */
+  pedeConfig?: boolean
+  /** desenha arrastando o mouse, à mão livre (pincel, marca-texto) */
+  arrastar?: boolean
   /** só o preço importa (linha horizontal) / só o tempo (linha vertical, regressão) */
   soPreco?: boolean
   soTempo?: boolean

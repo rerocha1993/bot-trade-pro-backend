@@ -198,4 +198,6 @@ const bandeira: Ferramenta = {
   resumo: (d, f) => f(d.pts[0].p),
 }
 
-export const TEXTOS: Ferramenta[] = [texto, textoAncorado, nota, notaPreco, alfinete, balao, comentario, etiquetaPreco, placa, bandeira]
+const notaAncorada: Ferramenta = { ...nota, tipo: 'nota_ancorada', nome: 'Nota ancorada (presa à tela)', tela: true, icone: 'M3 2 H15 V12 L11 16 H3 Z M11 16 V12 H15 M2 17 H16' }
+
+export const TEXTOS: Ferramenta[] = [texto, textoAncorado, nota, notaAncorada, notaPreco, alfinete, balao, comentario, etiquetaPreco, placa, bandeira]

@@ -123,6 +123,7 @@ export class DesenhosPrimitiva implements ISeriesPrimitive<Time> {
         for (let k = i; k < v.length && v[k].t <= t2; k++) out.push(v[k])
         return out
       },
+      redesenhar: () => this.pedirDesenho?.(),
     }
   }
   /** onde ficam as alças do desenho (a ferramenta pode pôr fora dos pontos, como o canal de regressão) */
