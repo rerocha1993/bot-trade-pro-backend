@@ -29,7 +29,7 @@ import type { NakedLongo, NuvensOverlay, SimbolosGrafico, TpoComposto, TpoDia, T
 import ArvoreObjetos from '../components/chart/ArvoreObjetos'
 import BarraEstilo from '../components/chart/BarraEstilo'
 import BarraFerramentas from '../components/chart/BarraFerramentas'
-import DesenhoConfig from '../components/chart/DesenhoConfig'
+import DesenhoConfig, { type AbaConfig } from '../components/chart/DesenhoConfig'
 import { FERRAMENTAS } from '../components/chart/ferramentas'
 import FootprintChart from '../components/chart/FootprintChart'
 import GraficoTV, { casas, SEGUNDOS, type Ima, type InfoGrafico, type Vela } from '../components/chart/GraficoTV'
@@ -219,7 +219,7 @@ export default function Grafico() {
     return n
   }), [])
   const [arvore, setArvore] = useState(false)
-  const [config, setConfig] = useState<{ id: string; antes: Desenho[] } | null>(null)
+  const [config, setConfig] = useState<{ id: string; antes: Desenho[]; aba?: AbaConfig } | null>(null)
   const copiado = useRef<Desenho | null>(null)
   useEffect(() => { setDesSel(null); setFerramenta(null); setConfig(null) }, [simbolo])
   const ferramentaAtual = ferramenta ? FERRAMENTAS.find((f) => f.tipo === ferramenta) ?? null : null
@@ -247,9 +247,10 @@ export default function Grafico() {
     if (!desenhos.length || !window.confirm(`Remover os ${desenhos.length} desenhos desta moeda? (Ctrl+Z desfaz)`)) return
     des.mudar([]); setDesSel(null)
   }, [des, desenhos.length])
-  const abrirConfig = useCallback((id: string) => {
+  const abrirConfig = useCallback((id: string, aba?: AbaConfig) => {
     if (!des.agora().some((d) => d.id === id)) return
-    setDesSel(id); setConfig({ id, antes: des.agora() })
+    // logo depois de desenhar um texto: Cancelar volta para antes do desenho existir
+    setDesSel(id); setConfig({ id, antes: aba === 'texto' ? des.agora().filter((d) => d.id !== id) : des.agora(), aba })
   }, [des])
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
@@ -264,7 +265,7 @@ export default function Grafico() {
       else if (ctrl && k === 'c' && desSel) { copiado.current = des.agora().find((d) => d.id === desSel) ?? null }
       else if (ctrl && k === 'v' && copiado.current) { e.preventDefault(); clonar(copiado.current) }
       else if (e.altKey && !ctrl) {
-        const f = FERRAMENTAS.find((x) => x.atalho?.toLowerCase() === k)
+        const f = FERRAMENTAS.find((x) => x.atalho && x.atalho.toLowerCase() === (e.shiftKey ? `shift+${k}` : k))
         if (f) { e.preventDefault(); setFerramenta(f.tipo); setDesSel(null) }
       }
     }
@@ -467,7 +468,7 @@ export default function Grafico() {
         {!temNuvem && <span className="gnota muted">sem nuvens: só no BTC-USD da Coinbase</span>}
       </div>
       {ferramentaAtual && (
-        <div className="glegenda-tpo"><span className="gjuncao">{ferramentaAtual.nome}: {ferramentaAtual.pontos === 1 ? 'clique no preço' : 'clique no primeiro ponto e depois no segundo (ou arraste de um ao outro)'} · Esc cancela{ima !== 'nao' ? ` · ímã ${ima}` : ''}{ficar ? ' · fica ligada depois de desenhar' : ''}</span></div>
+        <div className="glegenda-tpo"><span className="gjuncao">{ferramentaAtual.nome}: {ferramentaAtual.tela ? 'clique onde o texto fica na tela' : ferramentaAtual.pontos === 1 ? 'clique no lugar' : ferramentaAtual.pontos === 0 ? 'clique em cada ponto; duplo clique ou Enter termina' : ferramentaAtual.pontos === 3 ? 'clique nos três pontos (o 1º e o 2º dão a linha, o 3º a largura)' : 'clique no primeiro ponto e depois no segundo (ou arraste de um ao outro)'} · Esc cancela{ima !== 'nao' ? ` · ímã ${ima}` : ''}{ficar ? ' · fica ligada depois de desenhar' : ''}</span></div>
       )}
       <div className="gatalhos">
         {ATALHOS.map((s) => (
@@ -580,9 +581,13 @@ export default function Grafico() {
       </div>
       {ehBtc && fluxoLigado && <ParedesAgora preco={ult?.c ?? null} />}
       {config && desAberto && (
-        <DesenhoConfig desenho={desAberto} casas={dec}
+        <DesenhoConfig desenho={desAberto} casas={dec} aba={config.aba}
           onMudar={(d) => des.previa(des.agora().map((x) => (x.id === d.id ? d : x)))}
-          onFechar={(ok) => { if (ok) des.mudar(des.agora()); else des.previa(config.antes); setConfig(null) }} />
+          onFechar={(ok) => {
+            // desenho recém-criado (texto): ele já foi gravado, então Cancelar também grava a lista sem ele
+            if (ok) des.mudar(des.agora()); else if (config.aba === 'texto') des.mudar(config.antes); else des.previa(config.antes)
+            setConfig(null)
+          }} />
       )}
       {escolhendo && <Seletor atual={simbolo} onFechar={() => setEscolhendo(false)} onEscolher={(s) => { setEscolhendo(false); ir(s, tempo) }} />}
     </div>

@@ -13,6 +13,7 @@ import type {
 import { visivelNoTempo, type Desenho } from '../../lib/desenhos'
 import { xDoIndice } from './coordenada'
 import { FERRAMENTA, type Geo, type Px } from './ferramentas'
+import type { VelaG } from './ferramentasBase'
 
 type Alvo = Parameters<ISeriesPrimitivePaneRenderer['draw']>[0]
 export type ParteDesenho = number | 'corpo'
@@ -58,11 +59,13 @@ export class DesenhosPrimitiva implements ISeriesPrimitive<Time> {
   private logico: (t: number) => number | null
   private formatar: (p: number) => string
   private passo: () => number
+  private dados: () => VelaG[]
 
-  constructor(logico: (t: number) => number | null, formatar: (p: number) => string, passo: () => number) {
+  constructor(logico: (t: number) => number | null, formatar: (p: number) => string, passo: () => number, dados: () => VelaG[]) {
     this.logico = logico
     this.formatar = formatar
     this.passo = passo
+    this.dados = dados
   }
 
   attached(p: SeriesAttachedParameter<Time>) {
@@ -96,6 +99,10 @@ export class DesenhosPrimitiva implements ISeriesPrimitive<Time> {
     return c === null || c === undefined ? null : c
   }
   private px(d: Desenho): Px[] | null {
+    if (FERRAMENTA[d.tipo]?.tela) {                // preso à tela: frações da largura e da altura
+      const W = this.largura || (this.chart?.timeScale().width() ?? 0), H = this.altura || 600
+      return d.pts.map((p) => ({ x: p.t * W, y: p.p * H }))
+    }
     const out: Px[] = []
     for (const p of d.pts) {
       const x = this.x(p.t), y = this.y(p.p)
@@ -106,7 +113,22 @@ export class DesenhosPrimitiva implements ISeriesPrimitive<Time> {
   }
   private geo(selecionado: boolean): Geo {
     const W = this.largura || (this.chart?.timeScale().width() ?? 0)
-    return { W, H: this.altura || 600, formatar: this.formatar, y: (p) => this.y(p), passo: this.passo(), selecionado }
+    return {
+      W, H: this.altura || 600, formatar: this.formatar, y: (p) => this.y(p), x: (t) => this.x(t), passo: this.passo(), selecionado,
+      velas: (t1, t2) => {
+        const v = this.dados()
+        let i = 0, j = v.length
+        while (i < j) { const m = (i + j) >> 1; if (v[m].t < t1) i = m + 1; else j = m }
+        const out: VelaG[] = []
+        for (let k = i; k < v.length && v[k].t <= t2; k++) out.push(v[k])
+        return out
+      },
+    }
+  }
+  /** onde ficam as alças do desenho (a ferramenta pode pôr fora dos pontos, como o canal de regressão) */
+  private alcasDe(d: Desenho, px: Px[], selecionado: boolean): Px[] {
+    const f = FERRAMENTA[d.tipo]
+    return f?.alcas ? f.alcas(d, px, this.geo(selecionado)) : px
   }
 
   acertar(x: number, y: number): Acerto | null {
@@ -114,7 +136,8 @@ export class DesenhosPrimitiva implements ISeriesPrimitive<Time> {
     const sel = vis.find((d) => d.id === this.sel)
     if (sel) {
       const px = this.px(sel)
-      if (px) for (let i = 0; i < px.length; i++) if (Math.hypot(x - px[i].x, y - px[i].y) <= RAIO_ALCA + 3) return { id: sel.id, parte: i }
+      const al = px ? this.alcasDe(sel, px, true) : []
+      for (let i = 0; i < al.length; i++) if (Math.hypot(x - al[i].x, y - al[i].y) <= RAIO_ALCA + 3) return { id: sel.id, parte: i }
     }
     const ordem = sel ? [sel, ...vis.filter((d) => d !== sel).reverse()] : [...vis].reverse()
     for (const d of ordem) {
@@ -140,7 +163,7 @@ export class DesenhosPrimitiva implements ISeriesPrimitive<Time> {
         ctx.save()
         FERRAMENTA[d.tipo].desenhar(ctx, d, px, this.geo(comAlcas))
         ctx.restore()
-        if (comAlcas) this.alcas(ctx, px, !!d.travado)
+        if (comAlcas) this.alcas(ctx, this.alcasDe(d, px, true), !!d.travado)
       }
       ctx.restore()
     })
@@ -171,15 +194,24 @@ export class DesenhosPrimitiva implements ISeriesPrimitive<Time> {
     }
     const s = this.selecionadoOuRascunho()
     // a linha horizontal já tem o rótulo dela na escala: não repete o do selecionado
-    if (s && !FERRAMENTA[s.tipo]?.rotulosPreco?.(s).length) for (const p of s.pts) {
+    if (s && !FERRAMENTA[s.tipo]?.tela && !FERRAMENTA[s.tipo]?.soTempo && !FERRAMENTA[s.tipo]?.rotulosPreco?.(s).length) for (const p of s.pts) {
       views.push({ coordinate: () => this.y(p.p) ?? -100, text: () => this.formatar(p.p), textColor: () => '#ffffff', backColor: () => COR_ROTULO_SEL })
     }
     return views
   }
 
   timeAxisViews(): readonly ISeriesPrimitiveAxisView[] {
+    const views: ISeriesPrimitiveAxisView[] = []
+    for (const d of this.visiveis()) {
+      for (const r of FERRAMENTA[d.tipo].rotulosTempo?.(d) ?? []) {
+        views.push({ coordinate: () => this.x(r.t) ?? -100, text: () => rotuloTempo(r.t), textColor: () => corDoTexto(r.cor), backColor: () => r.cor })
+      }
+    }
     const s = this.selecionadoOuRascunho()
-    if (!s || FERRAMENTA[s.tipo]?.soPreco) return []
-    return s.pts.map((p) => ({ coordinate: () => this.x(p.t) ?? -100, text: () => rotuloTempo(p.t), textColor: () => '#ffffff', backColor: () => COR_ROTULO_SEL }))
+    const f = s ? FERRAMENTA[s.tipo] : null
+    if (s && f && !f.soPreco && !f.tela && !f.rotulosTempo?.(s).length) {
+      for (const p of s.pts) views.push({ coordinate: () => this.x(p.t) ?? -100, text: () => rotuloTempo(p.t), textColor: () => '#ffffff', backColor: () => COR_ROTULO_SEL })
+    }
+    return views
   }
 }

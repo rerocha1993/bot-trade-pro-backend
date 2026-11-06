@@ -356,3 +356,4 @@ button { cursor: pointer; }
   .gbe-nome { display: none; }
   .garvore { right: 6px; }
 }
+.gbarra-estilo input.gbe-fundo { border-radius: 50%; }

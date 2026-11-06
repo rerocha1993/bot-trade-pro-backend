@@ -17,7 +17,7 @@ import { copiar } from '../../lib/fibo'
 import { modeloDe, novoId, VIS_PADRAO, type Desenho } from '../../lib/desenhos'
 import { CamadasDesenho, type Camadas } from './camadasDesenho'
 import { DesenhosPrimitiva, type ParteDesenho } from './desenhosPrimitiva'
-import { FERRAMENTA } from './ferramentas'
+import { FERRAMENTA, type Ferramenta } from './ferramentas'
 import { NuvensDesenho } from './nuvensDesenho'
 import { LARGURA_ESCALA } from './SubChart'
 import { TpoDesenho, type Selecao } from './tpoDesenho'
@@ -94,8 +94,8 @@ interface Props {
   onDesenhos?: (l: Desenho[]) => void
   desenhoSel?: string | null
   onDesenhoSel?: (id: string | null) => void
-  /** duplo clique num desenho: abre a configuração dele */
-  onDesenhoConfig?: (id: string) => void
+  /** duplo clique num desenho: abre a configuração dele (as de texto abrem na aba Texto logo depois de desenhar) */
+  onDesenhoConfig?: (id: string, aba?: 'texto') => void
   /** ferramenta ligada (o tipo): o próximo clique marca o ponto 1 e o seguinte (ou soltar depois de arrastar) o 2 */
   ferramenta?: string | null
   /** acabou de desenhar: a tela decide se a ferramenta continua ligada ("ficar no modo desenho") */
@@ -200,7 +200,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     const tpoDesenho = new TpoDesenho(logico, formatar)
     s.attachPrimitive(tpoDesenho)
     desenhoTpo.current = tpoDesenho
-    const prim = new DesenhosPrimitiva(logico, formatar, () => passoAtual.current)
+    const prim = new DesenhosPrimitiva(logico, formatar, () => passoAtual.current, () => dados.current)
     s.attachPrimitive(prim)
     primDesenhos.current = prim
     if (import.meta.env.DEV) (window as unknown as { __desenhos: DesenhosPrimitiva }).__desenhos = prim   // para testar no navegador
@@ -235,7 +235,9 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     }
 
     // ---------------------------------------------------------------- desenhos com o mouse
-    let criando: { fase: 1 | 2; x: number; y: number; d: Desenho } | null = null
+    // criando: o ponto `k` segue o ponteiro e cada clique o fixa; as ferramentas de `pontos: 0` (caminho, polilinha)
+    // terminam com duplo clique ou Enter. Apertar e arrastar desde o 1º ponto também vale como clique ao soltar.
+    let criando: { k: number; x: number; y: number; d: Desenho; arrastando: boolean; ultimo: number } | null = null
     let arrasto: { id: string; parte: ParteDesenho; t0: number; p0: number; orig: Desenho; mexeu: boolean } | null = null
     let ultimoClique = { id: '', em: 0 }
     const travar = (sim: boolean) => c.applyOptions({ handleScroll: !sim, handleScale: !sim })
@@ -261,40 +263,73 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       const perto = [k.o, k.h, k.l, k.c].reduce((a, b) => (dist(b) < dist(a) ? b : a))
       return modo === 'forte' || dist(perto) <= IMA_FRACO_PX ? { t, p: perto } : { t, p: p as number }
     }
+    /** o ponto do ponteiro para a ferramenta: preso à tela = frações da largura e da altura do painel */
+    const pontoDe = (e: PointerEvent, f: Ferramenta | undefined, comIma: boolean) => {
+      if (!f?.tela) return ponto(e, comIma)
+      const r = caixa.getBoundingClientRect()
+      const W = c.timeScale().width() || 1, H = (caixa.clientHeight - c.timeScale().height()) || 1
+      return { t: Math.max(0, Math.min(1, (e.clientX - r.left) / W)), p: Math.max(0, Math.min(1, (e.clientY - r.top) / H)) }
+    }
     const terminar = () => {
-      const d = criando?.d
+      const cr = criando
       criando = null
       prim.setRascunho(null)
       travar(false)
       const D = des.current
       D.onFerramentaPronta?.()
-      if (!d) return
-      const [a, b] = d.pts
-      if (b && a.t === b.t && a.p === b.p) return                                          // nem saiu do lugar
+      if (!cr) return
+      const f = FERRAMENTA[cr.d.tipo]
+      const pts = f.pontos === 0 ? cr.d.pts.slice(0, cr.k) : cr.d.pts                    // tira o ponto que seguia o mouse
+      if (f.pontos === 0 && pts.length < 2) return
+      if (pts.length >= 2 && pts.every((p) => p.t === pts[0].t && p.p === pts[0].p)) return   // nem saiu do lugar
+      const d = { ...cr.d, pts }
       D.onDesenhos?.([...D.lista, d])
       D.onDesenhoSel?.(d.id)
+      if (f.pedeTexto) D.onDesenhoConfig?.(d.id, 'texto')
+    }
+    /** um clique (ou o fim de um arrasto) durante o desenho: fixa o ponto k e passa ao próximo */
+    const avancar = (pt: { t: number; p: number }, e: PointerEvent) => {
+      const cr = criando
+      if (!cr) return
+      const f = FERRAMENTA[cr.d.tipo]
+      const agora = Date.now()
+      const pts = [...cr.d.pts]
+      pts[cr.k] = pt
+      if (f.pontos === 0) {
+        const duplo = agora - cr.ultimo < DUPLO_MS && Math.hypot(e.clientX - cr.x, e.clientY - cr.y) < 8
+        if (duplo) { cr.d = { ...cr.d, pts }; terminar(); return }
+        pts.push({ ...pt })
+        cr.k++
+      } else {
+        cr.k++
+        if (cr.k >= f.pontos) { cr.d = { ...cr.d, pts }; terminar(); return }
+        pts[cr.k] = { ...pt }
+      }
+      cr.d = { ...cr.d, pts }
+      cr.x = e.clientX; cr.y = e.clientY; cr.ultimo = agora
+      prim.setRascunho(cr.d)
     }
     cancelarDesenho.current = () => { if (criando) { criando = null; prim.setRascunho(null); travar(false) } }
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && criando && FERRAMENTA[criando.d.tipo].pontos === 0) { e.preventDefault(); terminar() }
+    }
     const aoApertarDesenho = (e: PointerEvent) => {
       if (e.button !== 0) return
       const r = caixa.getBoundingClientRect()
       const x = e.clientX - r.left, y = e.clientY - r.top
       if (x > c.timeScale().width()) return                                            // escala de preço
       const D = des.current
-      const f = D.ferramenta ? FERRAMENTA[D.ferramenta] : null
-      if (f || criando) {
-        const pt = ponto(e, true)
+      const f = criando ? FERRAMENTA[criando.d.tipo] : D.ferramenta ? FERRAMENTA[D.ferramenta] : undefined
+      if (f) {
+        const pt = pontoDe(e, f, true)
         if (!pt) return
         consumido = true; travar(true)
-        if (!criando && f) {
-          const d: Desenho = { id: novoId(), tipo: f.tipo, pts: Array.from({ length: f.pontos }, () => ({ ...pt })), cfg: modeloDe(f.tipo, f.padrao()), vis: copiar(VIS_PADRAO) }
-          criando = { fase: 1, x: e.clientX, y: e.clientY, d }
-          if (f.pontos === 1) { terminar(); return }                                    // um clique só (linha horizontal)
-          prim.setRascunho(d)
-        } else if (criando) {
-          const pts = [...criando.d.pts]; pts[pts.length - 1] = pt
-          criando.d = { ...criando.d, pts }; terminar()
-        }
+        if (criando) { criando.arrastando = false; avancar(pt, e); return }
+        const n = f.pontos || 2                                                         // livre: o fixo e o que segue o mouse
+        const d: Desenho = { id: novoId(), tipo: f.tipo, pts: Array.from({ length: n }, () => ({ ...pt })), cfg: modeloDe(f.tipo, f.padrao()), vis: copiar(VIS_PADRAO) }
+        criando = { k: 1, x: e.clientX, y: e.clientY, d, arrastando: true, ultimo: Date.now() }
+        if (f.pontos === 1) { terminar(); return }                                    // um clique só (linha horizontal, texto)
+        prim.setRascunho(d)
         return
       }
       const acerto = prim.acertar(x, y)
@@ -306,18 +341,18 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       if (D.sel !== acerto.id) D.onDesenhoSel?.(acerto.id)
       const orig = D.lista.find((d) => d.id === acerto.id)
       if (!orig || orig.travado || D.travarTodos) return                                // travado: seleciona, não arrasta
-      const pt = ponto(e, acerto.parte !== 'corpo')
+      const pt = pontoDe(e, FERRAMENTA[orig.tipo], acerto.parte !== 'corpo')
       if (pt) arrasto = { ...acerto, t0: pt.t, p0: pt.p, orig, mexeu: false }
     }
     const aoMoverDesenho = (e: PointerEvent) => {
       if (criando) {
-        const pt = ponto(e, true)
-        if (pt) { const pts = [...criando.d.pts]; pts[pts.length - 1] = pt; criando.d = { ...criando.d, pts }; prim.setRascunho(criando.d) }
+        const pt = pontoDe(e, FERRAMENTA[criando.d.tipo], true)
+        if (pt) { const pts = [...criando.d.pts]; pts[criando.k] = pt; criando.d = { ...criando.d, pts }; prim.setRascunho(criando.d) }
         return
       }
       if (arrasto) {
         const a = arrasto, o = a.orig
-        const pt = ponto(e, a.parte !== 'corpo')
+        const pt = pontoDe(e, FERRAMENTA[o.tipo], a.parte !== 'corpo')
         if (!pt) return
         a.mexeu = true
         const pts = typeof a.parte === 'number' ? o.pts.map((p, i) => (i === a.parte ? pt : p))
@@ -334,11 +369,17 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
       caixa.style.cursor = D.ferramenta ? 'crosshair' : acerto ? (travado ? 'pointer' : acerto.parte === 'corpo' ? 'move' : 'pointer') : ''
     }
     const aoSoltarDesenho = (e: PointerEvent) => {
-      if (criando) {
-        if (criando.fase === 1) {
-          if (Math.hypot(e.clientX - criando.x, e.clientY - criando.y) > ARRASTO_PX) terminar()   // arrastou: o 2º ponto é aqui
-          else { criando.fase = 2; travar(false) }                                                // clicou: espera o 2º clique
+      const cr = criando
+      if (cr) {
+        if (cr.arrastando) {
+          cr.arrastando = false
+          if (Math.hypot(e.clientX - cr.x, e.clientY - cr.y) > ARRASTO_PX) {            // arrastou: o ponto 2 é aqui
+            const pt = pontoDe(e, FERRAMENTA[cr.d.tipo], true)
+            if (pt) { avancar(pt, e); if (criando) travar(false) }
+            return
+          }
         }
+        travar(false)                                                                   // entre um clique e outro, o gráfico mexe
         return
       }
       if (!arrasto) return
@@ -353,6 +394,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     caixa.addEventListener('touchstart', segurar, true)
     window.addEventListener('pointermove', aoMoverDesenho)
     window.addEventListener('pointerup', aoSoltarDesenho)
+    window.addEventListener('keydown', aoTeclar)
     caixa.addEventListener('pointerdown', aoApertar)
     caixa.addEventListener('pointerup', aoSoltar)
     const ro = new ResizeObserver(() => { if (el.current) c.applyOptions({ width: el.current.clientWidth, height: el.current.clientHeight }) })
@@ -360,7 +402,7 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
     return () => {
       ro.disconnect(); c.unsubscribeCrosshairMove(aoMover); caixa.removeEventListener('pointerdown', aoApertar); caixa.removeEventListener('pointerup', aoSoltar)
       caixa.removeEventListener('pointerdown', aoApertarDesenho, true); caixa.removeEventListener('mousedown', segurar, true); caixa.removeEventListener('touchstart', segurar, true)
-      window.removeEventListener('pointermove', aoMoverDesenho); window.removeEventListener('pointerup', aoSoltarDesenho)
+      window.removeEventListener('pointermove', aoMoverDesenho); window.removeEventListener('pointerup', aoSoltarDesenho); window.removeEventListener('keydown', aoTeclar)
       c.remove(); chart.current = null; velas.current = null; vols.current = null; linhas.current = []; desenhoCamadas.current = null; primDesenhos.current = null
     }
   }, [])

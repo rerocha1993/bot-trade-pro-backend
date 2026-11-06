@@ -30,8 +30,8 @@ export default function BarraEstilo({ desenho: d, onMudar, onConfig, onClonar, o
   const [pos, setPos] = useState<Pos>(lerPos)
   const caixa = useRef<HTMLDivElement>(null)
   if (!f) return null
-  const l = f.linha.ler(d.cfg)
-  const linha = (parcial: Partial<typeof l>) => onMudar({ ...d, cfg: f.linha.gravar(d.cfg, { ...l, ...parcial }) })
+  const l = f.linha?.ler(d.cfg)
+  const linha = (parcial: Partial<NonNullable<typeof l>>) => { if (f.linha && l) onMudar({ ...d, cfg: f.linha.gravar(d.cfg, { ...l, ...parcial }) }) }
 
   const arrastar = (e: React.PointerEvent) => {
     e.preventDefault()
@@ -57,13 +57,21 @@ export default function BarraEstilo({ desenho: d, onMudar, onConfig, onClonar, o
     <div ref={caixa} className="gbarra-estilo" style={{ left: pos.x, top: pos.y }} role="toolbar" aria-label={`Estilo: ${f.nome}`}>
       <span className="gbe-alca" onPointerDown={arrastar} title="Arrastar a barra">⋮⋮</span>
       <span className="gbe-nome">{f.nome}</span>
-      <input type="color" value={l.cor} onChange={(e) => linha({ cor: e.target.value })} title="Cor da linha" aria-label="Cor da linha" />
-      <select className="gselect" value={l.largura} onChange={(e) => linha({ largura: Number(e.target.value) })} aria-label="Espessura" title="Espessura">
-        {LARGURAS.map((n) => <option key={n} value={n}>{n}px</option>)}
-      </select>
-      <select className="gselect" value={l.estilo} onChange={(e) => linha({ estilo: e.target.value as typeof l.estilo })} aria-label="Estilo da linha" title="Estilo da linha">
-        {ESTILOS.map(([v, n]) => <option key={v} value={v}>{n}</option>)}
-      </select>
+      {l && <>
+        <input type="color" value={l.cor} onChange={(e) => linha({ cor: e.target.value })} title="Cor da linha" aria-label="Cor da linha" />
+        <select className="gselect" value={l.largura} onChange={(e) => linha({ largura: Number(e.target.value) })} aria-label="Espessura" title="Espessura">
+          {LARGURAS.map((n) => <option key={n} value={n}>{n}px</option>)}
+        </select>
+        <select className="gselect" value={l.estilo} onChange={(e) => linha({ estilo: e.target.value as typeof l.estilo })} aria-label="Estilo da linha" title="Estilo da linha">
+          {ESTILOS.map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+        </select>
+      </>}
+      {!l && f.cor && (
+        <input type="color" value={f.cor.ler(d.cfg)} onChange={(e) => onMudar({ ...d, cfg: f.cor!.gravar(d.cfg, e.target.value) })} title="Cor" aria-label="Cor" />
+      )}
+      {f.fundo && (
+        <input type="color" className="gbe-fundo" value={f.fundo.ler(d.cfg)} onChange={(e) => onMudar({ ...d, cfg: f.fundo!.gravar(d.cfg, e.target.value) })} title="Cor do fundo" aria-label="Cor do fundo" />
+      )}
       <button type="button" className="gbe-botao" onClick={onConfig} title="Configurações (duplo clique no desenho)"><Icone d={ICONES.engrenagem} /></button>
       <button type="button" className={'gbe-botao' + (d.travado ? ' on' : '')} onClick={() => onMudar({ ...d, travado: !d.travado })} title={d.travado ? 'Destravar' : 'Travar (não arrasta)'}>
         <Icone d={d.travado ? ICONES.cadeado : ICONES.cadeadoAberto} />

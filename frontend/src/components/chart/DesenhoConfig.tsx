@@ -1,85 +1,96 @@
 /**
- * Janela de configuração de um desenho, a mesma da TradingView para todas as ferramentas: abas Estilo (a de cada
- * ferramenta), Texto (quando tem), Coordenadas (preço e barra de cada ponto) e Visibilidade (em que tempos gráficos
- * aparece). Cada mudança aparece no gráfico na hora; Cancelar volta como estava; "Modelo" guarda ou recupera o padrão
- * da ferramenta (fica no servidor, vale para o PC e o celular).
+ * Janela de configuração de um desenho, a mesma da TradingView para todas as ferramentas: abas Estilo (montada pelos
+ * `campos` de cada ferramenta; o Fibonacci tem a dele), Texto (quando tem), Coordenadas (preço e barra de cada ponto)
+ * e Visibilidade (em que tempos gráficos aparece). Cada mudança aparece no gráfico na hora; Cancelar volta como estava;
+ * "Modelo" guarda ou recupera o padrão da ferramenta (fica no servidor, vale para o PC e o celular).
  */
 import { useEffect, useState } from 'react'
-import { guardarModelo, modeloDe, temModelo, type Desenho, type Faixa, type Texto, type Visibilidade } from '../../lib/desenhos'
+import { guardarModelo, modeloDe, temModelo, type Desenho, type Faixa, type Linha, type Texto, type Visibilidade } from '../../lib/desenhos'
 import type { ConfigFibo } from '../../lib/fibo'
 import FiboEstilo, { FONTES, SeletorLinha } from './FiboConfig'
-import { FERRAMENTA, type CfgHorizontal, type CfgTendencia } from './ferramentas'
+import { FERRAMENTA, type Campo } from './ferramentas'
+import { gravarCampo, lerCampo, type Fundo } from './ferramentasBase'
+
+export type AbaConfig = 'estilo' | 'texto' | 'coord' | 'vis'
 
 interface Props {
   desenho: Desenho
   casas: number
+  aba?: AbaConfig
   onMudar: (d: Desenho) => void
   onFechar: (ok: boolean) => void
 }
-
-type Aba = 'estilo' | 'texto' | 'coord' | 'vis'
 
 /** data e hora (UTC) no formato do <input type="datetime-local"> */
 const paraCampo = (t: number) => new Date(t * 1000).toISOString().slice(0, 16)
 const doCampo = (s: string) => { const t = Date.parse(s + ':00Z'); return Number.isFinite(t) ? Math.floor(t / 1000) : null }
 
-function EstiloTendencia({ c, mudar }: { c: CfgTendencia; mudar: (p: Partial<CfgTendencia>) => void }) {
-  const st = (k: keyof CfgTendencia['stats'], nome: string) => (
-    <label><input type="checkbox" checked={c.stats[k]} onChange={(e) => mudar({ stats: { ...c.stats, [k]: e.target.checked } })} /> {nome}</label>
-  )
+/** a aba Estilo de qualquer ferramenta, pelos campos que ela declara; checkboxes seguidos ficam na mesma linha */
+function EstiloPorCampos({ campos, cfg, mudar }: { campos: Campo[]; cfg: Desenho['cfg']; mudar: (cfg: Desenho['cfg']) => void }) {
+  const set = (chave: string, v: unknown) => mudar(gravarCampo(cfg, chave, v))
+  const blocos: (Campo | Campo[])[] = []
+  for (const c of campos) {
+    const ult = blocos[blocos.length - 1]
+    if (c.tipo === 'bool' && Array.isArray(ult)) ult.push(c)
+    else blocos.push(c.tipo === 'bool' ? [c] : c)
+  }
   return (
     <>
-      <div className="fcfg-linha">
-        <span>Linha</span>
-        <input type="color" value={c.linha.cor} onChange={(e) => mudar({ linha: { ...c.linha, cor: e.target.value } })} aria-label="Cor da linha" />
-        <SeletorLinha estilo={c.linha.estilo} largura={c.linha.largura}
-          onEstilo={(estilo) => mudar({ linha: { ...c.linha, estilo } })} onLargura={(largura) => mudar({ linha: { ...c.linha, largura } })} />
-      </div>
-      <div className="fcfg-linha">
-        <label><input type="checkbox" checked={c.estEsq} onChange={(e) => mudar({ estEsq: e.target.checked })} /> Estender antes do ponto 1</label>
-        <label><input type="checkbox" checked={c.estDir} onChange={(e) => mudar({ estDir: e.target.checked })} /> Estender depois do ponto 2</label>
-      </div>
-      <div className="fcfg-linha">
-        <span>Ponta 1</span>
-        <select className="gselect" value={c.pontaEsq} onChange={(e) => mudar({ pontaEsq: e.target.value as CfgTendencia['pontaEsq'] })} aria-label="Ponta do ponto 1">
-          <option value="normal">Normal</option><option value="seta">Seta</option>
-        </select>
-        <span>Ponta 2</span>
-        <select className="gselect" value={c.pontaDir} onChange={(e) => mudar({ pontaDir: e.target.value as CfgTendencia['pontaDir'] })} aria-label="Ponta do ponto 2">
-          <option value="normal">Normal</option><option value="seta">Seta</option>
-        </select>
-      </div>
-      <div className="fcfg-linha">
-        <label><input type="checkbox" checked={c.meio} onChange={(e) => mudar({ meio: e.target.checked })} /> Ponto do meio</label>
-        <label><input type="checkbox" checked={c.precos} onChange={(e) => mudar({ precos: e.target.checked })} /> Rótulos de preço</label>
-      </div>
-      <div className="fcfg-secao">Estatísticas</div>
-      <div className="fcfg-linha">
-        {st('preco', 'Variação do preço')}{st('pct', 'Variação %')}{st('barras', 'Barras')}{st('tempo', 'Tempo')}{st('distancia', 'Distância')}{st('angulo', 'Ângulo')}
-      </div>
-      <div className="fcfg-linha">
-        <span>Posição</span>
-        <select className="gselect" value={c.statsPos} onChange={(e) => mudar({ statsPos: e.target.value as CfgTendencia['statsPos'] })} aria-label="Posição das estatísticas">
-          <option value="esquerda">Esquerda</option><option value="centro">Centro</option><option value="direita">Direita</option>
-        </select>
-        <label><input type="checkbox" checked={c.statsSempre} onChange={(e) => mudar({ statsSempre: e.target.checked })} /> Sempre mostrar (não só selecionada)</label>
-      </div>
-    </>
-  )
-}
-
-function EstiloHorizontal({ c, mudar }: { c: CfgHorizontal; mudar: (p: Partial<CfgHorizontal>) => void }) {
-  return (
-    <>
-      <div className="fcfg-linha">
-        <span>Linha</span>
-        <input type="color" value={c.linha.cor} onChange={(e) => mudar({ linha: { ...c.linha, cor: e.target.value } })} aria-label="Cor da linha" />
-        <SeletorLinha estilo={c.linha.estilo} largura={c.linha.largura}
-          onEstilo={(estilo) => mudar({ linha: { ...c.linha, estilo } })} onLargura={(largura) => mudar({ linha: { ...c.linha, largura } })} />
-      </div>
-      <div className="fcfg-linha">
-        <label><input type="checkbox" checked={c.rotuloPreco} onChange={(e) => mudar({ rotuloPreco: e.target.checked })} /> Rótulo do preço na escala</label>
-      </div>
+      {blocos.map((b, i) => {
+        if (Array.isArray(b)) return (
+          <div key={i} className="fcfg-linha">
+            {b.map((c) => c.tipo === 'bool' && (
+              <label key={c.chave}><input type="checkbox" checked={!!lerCampo(cfg, c.chave)} onChange={(e) => set(c.chave, e.target.checked)} /> {c.nome}</label>
+            ))}
+          </div>
+        )
+        const c = b
+        if (c.tipo === 'secao') return <div key={i} className="fcfg-secao">{c.nome}</div>
+        if (c.tipo === 'linha') {
+          const l = lerCampo(cfg, c.chave) as Linha
+          return (
+            <div key={i} className="fcfg-linha">
+              <span style={{ minWidth: 110 }}>{c.nome}</span>
+              <input type="color" value={l.cor} onChange={(e) => set(c.chave, { ...l, cor: e.target.value })} aria-label={`Cor: ${c.nome}`} />
+              <SeletorLinha estilo={l.estilo} largura={l.largura} onEstilo={(estilo) => set(c.chave, { ...l, estilo })} onLargura={(largura) => set(c.chave, { ...l, largura })} />
+            </div>
+          )
+        }
+        if (c.tipo === 'cor') return (
+          <div key={i} className="fcfg-linha">
+            <span style={{ minWidth: 110 }}>{c.nome}</span>
+            <input type="color" value={String(lerCampo(cfg, c.chave) ?? '#2962ff')} onChange={(e) => set(c.chave, e.target.value)} aria-label={c.nome} />
+          </div>
+        )
+        if (c.tipo === 'fundo') {
+          const f = lerCampo(cfg, c.chave) as Fundo
+          return (
+            <div key={i} className="fcfg-linha">
+              <label style={{ minWidth: 110 }}><input type="checkbox" checked={f.ligado} onChange={(e) => set(c.chave, { ...f, ligado: e.target.checked })} /> {c.nome}</label>
+              <input type="color" value={f.cor} disabled={!f.ligado} onChange={(e) => set(c.chave, { ...f, cor: e.target.value })} aria-label={`Cor: ${c.nome}`} />
+              <span className="muted">transparência</span>
+              <input type="range" min={0} max={100} value={f.transparencia} disabled={!f.ligado} onChange={(e) => set(c.chave, { ...f, transparencia: Number(e.target.value) })} aria-label={`Transparência: ${c.nome}`} />
+              <span className="mono">{f.transparencia}%</span>
+            </div>
+          )
+        }
+        if (c.tipo === 'escolha') return (
+          <div key={i} className="fcfg-linha">
+            <span style={{ minWidth: 110 }}>{c.nome}</span>
+            <select className="gselect" value={String(lerCampo(cfg, c.chave))} onChange={(e) => set(c.chave, e.target.value)} aria-label={c.nome}>
+              {c.opcoes.map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+            </select>
+          </div>
+        )
+        if (c.tipo === 'numero') return (
+          <div key={i} className="fcfg-linha">
+            <span style={{ minWidth: 110 }}>{c.nome}</span>
+            <input type="number" min={c.min} max={c.max} step={c.passo ?? 1} value={Number(lerCampo(cfg, c.chave))} style={{ width: 90 }}
+              onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) set(c.chave, Math.max(c.min ?? -Infinity, Math.min(c.max ?? Infinity, v))) }} aria-label={c.nome} />
+          </div>
+        )
+        return null
+      })}
     </>
   )
 }
@@ -95,7 +106,8 @@ function AbaTexto({ t, mudar }: { t: Texto; mudar: (t: Texto) => void }) {
         <button type="button" className={'gbotao' + (t.negrito ? ' on' : '')} onClick={() => mudar({ ...t, negrito: !t.negrito })} aria-label="Negrito"><b>B</b></button>
         <button type="button" className={'gbotao' + (t.italico ? ' on' : '')} onClick={() => mudar({ ...t, italico: !t.italico })} aria-label="Itálico"><i>I</i></button>
       </div>
-      <textarea className="fcfg-texto" rows={4} value={t.texto} placeholder="Adicionar texto" onChange={(e) => mudar({ ...t, texto: e.target.value })} aria-label="Texto" />
+      <textarea className="fcfg-texto" rows={4} value={t.texto} placeholder="Adicionar texto" autoFocus onChange={(e) => mudar({ ...t, texto: e.target.value })} aria-label="Texto"
+        onFocus={(e) => e.target.select()} />
       <div className="fcfg-linha">
         <span>Alinhamento</span>
         <select className="gselect" value={t.v} onChange={(e) => mudar({ ...t, v: e.target.value as Texto['v'] })} aria-label="Alinhamento vertical">
@@ -136,11 +148,10 @@ function AbaVisibilidade({ v, mudar }: { v: Visibilidade; mudar: (v: Visibilidad
   )
 }
 
-export default function DesenhoConfig({ desenho: d, casas, onMudar, onFechar }: Props) {
+export default function DesenhoConfig({ desenho: d, casas, aba: abaInicial = 'estilo', onMudar, onFechar }: Props) {
   const f = FERRAMENTA[d.tipo]
-  const [aba, setAba] = useState<Aba>('estilo')
+  const [aba, setAba] = useState<AbaConfig>(abaInicial)
   const [aviso, setAviso] = useState<string | null>(null)
-  const mudarCfg = (parcial: object) => onMudar({ ...d, cfg: { ...d.cfg, ...parcial } })
 
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
@@ -159,7 +170,13 @@ export default function DesenhoConfig({ desenho: d, casas, onMudar, onFechar }: 
     if (acao === 'esquecer') { await guardarModelo(d.tipo, null); setAviso('padrão apagado: as próximas nascem com o da TradingView') }
   }
   const passo = 10 ** -casas
-  const abas: [Aba, string][] = [['estilo', 'Estilo'], ...(f.texto ? [['texto', 'Texto'] as [Aba, string]] : []), ['coord', 'Coordenadas'], ['vis', 'Visibilidade']]
+  const temEstilo = d.tipo === 'fibo_retracao' || (f.campos?.length ?? 0) > 0
+  const abas: [AbaConfig, string][] = [
+    ...(temEstilo ? [['estilo', 'Estilo'] as [AbaConfig, string]] : []), ...(f.texto ? [['texto', 'Texto'] as [AbaConfig, string]] : []),
+    ['coord', 'Coordenadas'], ['vis', 'Visibilidade'],
+  ]
+  const abaVista = abas.some(([id]) => id === aba) ? aba : abas[0][0]
+  const mudarPonto = (i: number, parcial: Partial<{ t: number; p: number }>) => onMudar({ ...d, pts: d.pts.map((q, k) => (k === i ? { ...q, ...parcial } : q)) })
 
   return (
     <div className="gsel-fundo" onClick={() => onFechar(false)}>
@@ -169,33 +186,41 @@ export default function DesenhoConfig({ desenho: d, casas, onMudar, onFechar }: 
           <button type="button" className="btn ghost" onClick={() => onFechar(false)} aria-label="Fechar">✕</button>
         </div>
         <div className="tabs fcfg-abas">
-          {abas.map(([id, nome]) => <button key={id} type="button" className={aba === id ? 'on' : ''} onClick={() => setAba(id)}>{nome}</button>)}
+          {abas.map(([id, nome]) => <button key={id} type="button" className={abaVista === id ? 'on' : ''} onClick={() => setAba(id)}>{nome}</button>)}
         </div>
         <div className="fcfg-corpo">
-          {aba === 'estilo' && (
-            d.tipo === 'fibo_retracao' ? <FiboEstilo cfg={d.cfg as ConfigFibo} mudar={mudarCfg} />
-              : d.tipo === 'linha_tendencia' ? <EstiloTendencia c={d.cfg as CfgTendencia} mudar={mudarCfg} />
-              : d.tipo === 'linha_horizontal' ? <EstiloHorizontal c={d.cfg as CfgHorizontal} mudar={mudarCfg} />
-              : null
-          )}
-          {aba === 'texto' && <AbaTexto t={d.cfg.texto as Texto} mudar={(texto) => mudarCfg({ texto })} />}
-          {aba === 'coord' && (
+          {abaVista === 'estilo' && (d.tipo === 'fibo_retracao'
+            ? <FiboEstilo cfg={d.cfg as ConfigFibo} mudar={(parcial) => onMudar({ ...d, cfg: { ...d.cfg, ...parcial } })} />
+            : <EstiloPorCampos campos={f.campos ?? []} cfg={d.cfg} mudar={(cfg) => onMudar({ ...d, cfg })} />)}
+          {abaVista === 'texto' && <AbaTexto t={d.cfg.texto as Texto} mudar={(texto) => onMudar({ ...d, cfg: { ...d.cfg, texto } })} />}
+          {abaVista === 'coord' && (
             <>
               {d.pts.map((p, i) => (
                 <div key={i} className="fcfg-linha">
-                  <span>#{i + 1} {f.soPreco ? '(preço)' : '(preço, barra UTC)'}</span>
-                  <input type="number" step={passo} value={+p.p.toFixed(casas)} style={{ width: 150 }}
-                    onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) onMudar({ ...d, pts: d.pts.map((q, k) => (k === i ? { ...q, p: v } : q)) }) }} aria-label={`Preço do ponto ${i + 1}`} />
-                  {!f.soPreco && (
-                    <input type="datetime-local" value={paraCampo(p.t)} style={{ width: 210 }}
-                      onChange={(e) => { const v = doCampo(e.target.value); if (v !== null) onMudar({ ...d, pts: d.pts.map((q, k) => (k === i ? { ...q, t: v } : q)) }) }} aria-label={`Barra do ponto ${i + 1}`} />
+                  <span>#{i + 1} {f.tela ? '(posição na tela, %)' : f.soPreco ? '(preço)' : f.soTempo ? '(barra UTC)' : '(preço, barra UTC)'}</span>
+                  {f.tela ? (
+                    <>
+                      <input type="number" min={0} max={100} step={1} value={Math.round(p.t * 100)} style={{ width: 80 }} onChange={(e) => mudarPonto(i, { t: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })} aria-label="Da esquerda (%)" />
+                      <input type="number" min={0} max={100} step={1} value={Math.round(p.p * 100)} style={{ width: 80 }} onChange={(e) => mudarPonto(i, { p: Math.max(0, Math.min(100, Number(e.target.value))) / 100 })} aria-label="De cima (%)" />
+                    </>
+                  ) : (
+                    <>
+                      {!f.soTempo && (
+                        <input type="number" step={passo} value={+p.p.toFixed(casas)} style={{ width: 150 }}
+                          onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) mudarPonto(i, { p: v }) }} aria-label={`Preço do ponto ${i + 1}`} />
+                      )}
+                      {!f.soPreco && (
+                        <input type="datetime-local" value={paraCampo(p.t)} style={{ width: 210 }}
+                          onChange={(e) => { const v = doCampo(e.target.value); if (v !== null) mudarPonto(i, { t: v }) }} aria-label={`Barra do ponto ${i + 1}`} />
+                      )}
+                    </>
                   )}
                 </div>
               ))}
               {d.tipo === 'fibo_retracao' && <div className="muted" style={{ fontSize: 12 }}>O ponto 1 é onde o movimento começou e o 2 onde terminou: o nível 0 fica no ponto 2 e o 1 no ponto 1.</div>}
             </>
           )}
-          {aba === 'vis' && <AbaVisibilidade v={d.vis} mudar={(vis) => onMudar({ ...d, vis })} />}
+          {abaVista === 'vis' && <AbaVisibilidade v={d.vis} mudar={(vis) => onMudar({ ...d, vis })} />}
         </div>
         <div className="fcfg-pe">
           <select className="gselect" value="" onChange={(e) => { void modelo(e.target.value); e.target.value = '' }} aria-label="Modelo">
