@@ -326,7 +326,8 @@ export default function GraficoTV({ simbolo, tempo, onInfo, vivoMs = 4000, tpo =
         consumido = true; travar(true)
         if (criando) { criando.arrastando = false; avancar(pt, e); return }
         const n = f.pontos || 2                                                         // livre: o fixo e o que segue o mouse
-        const d: Desenho = { id: novoId(), tipo: f.tipo, pts: Array.from({ length: n }, () => ({ ...pt })), cfg: modeloDe(f.tipo, f.padrao()), vis: copiar(VIS_PADRAO) }
+        const pts = f.criar ? f.criar(pt, passoAtual.current) : Array.from({ length: n }, () => ({ ...pt }))
+        const d: Desenho = { id: novoId(), tipo: f.tipo, pts, cfg: modeloDe(f.tipo, f.padrao()), vis: copiar(VIS_PADRAO) }
         criando = { k: 1, x: e.clientX, y: e.clientY, d, arrastando: true, ultimo: Date.now() }
         if (f.pontos === 1) { terminar(); return }                                    // um clique só (linha horizontal, texto)
         prim.setRascunho(d)

@@ -23,10 +23,10 @@ export type Geo = {
   velas: (t1: number, t2: number) => VelaG[]
 }
 
-export type GrupoId = 'linhas' | 'canais' | 'fibonacci' | 'gann' | 'medidas' | 'formas' | 'texto' | 'setas'
+export type GrupoId = 'linhas' | 'canais' | 'fibonacci' | 'gann' | 'elliott' | 'padroes' | 'medidas' | 'formas' | 'texto' | 'setas'
 export const GRUPOS: { id: GrupoId; nome: string }[] = [
   { id: 'linhas', nome: 'Linhas' }, { id: 'canais', nome: 'Canais' }, { id: 'fibonacci', nome: 'Fibonacci' }, { id: 'gann', nome: 'Pitchfork e Gann' },
-  { id: 'medidas', nome: 'Medidas' }, { id: 'formas', nome: 'Formas' }, { id: 'texto', nome: 'Texto e notas' }, { id: 'setas', nome: 'Setas' },
+  { id: 'elliott', nome: 'Ondas de Elliott' }, { id: 'padroes', nome: 'Padrões' }, { id: 'medidas', nome: 'Projeção e medidas' }, { id: 'formas', nome: 'Formas' }, { id: 'texto', nome: 'Texto e notas' }, { id: 'setas', nome: 'Setas' },
 ]
 
 /** um campo da aba Estilo; `chave` aceita caminho com ponto ('stats.preco') */
@@ -53,6 +53,8 @@ export interface Ferramenta {
   icone: string
   /** quantos cliques para desenhar; 0 = quantos quiser (termina com duplo clique ou Enter) */
   pontos: number
+  /** ferramenta de um clique que nasce com vários pontos (posição comprada: entrada, alvo e stop) */
+  criar?: (pt: { t: number; p: number }, passo: number) => { t: number; p: number }[]
   padrao: () => Cfg
   /** a cor, a espessura e o estilo que a barra flutuante muda */
   linha?: Acesso<Linha>
